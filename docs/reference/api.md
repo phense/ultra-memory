@@ -147,5 +147,9 @@ Shared, fail-open, no-LLM, no-write helpers for the session hooks.
   live mode returns `{"hookSpecificOutput": {"hookEventName": "SessionStart",
   "additionalContext": gist}}`. No-ops on role opt-out / DB not ready / empty
   gist. Fail-open: any error → `{}`.
+- `_budget_from_env() -> int` — resolve the gist char budget from
+  `ULTRA_MEMORY_REHYDRATE_BUDGET` (consumer-tunable); default `2000`. Empty,
+  non-numeric, or non-positive values fail-soft back to `2000`.
 - `main(stdin, stdout) -> int` — CLI shell; `ULTRA_MEMORY_DB`,
-  `ULTRA_MEMORY_SHADOW` (default `"1"`), `ULTRA_MEMORY_SHADOW_OUT` from env.
+  `ULTRA_MEMORY_SHADOW` (default `"1"`), `ULTRA_MEMORY_SHADOW_OUT`, and
+  `ULTRA_MEMORY_REHYDRATE_BUDGET` (default `2000`) from env.

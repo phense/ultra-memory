@@ -94,6 +94,22 @@ def run(payload, *, db_path, shadow, ts, shadow_out=None, budget_chars=2000):
         return {}
 
 
+def _budget_from_env():
+    """Resolve the gist char budget from env (consumer-tunable); default 2000.
+
+    Invalid / non-numeric values fail-soft back to the default so a bad config
+    can never break rehydration."""
+    import os
+    raw = os.environ.get("ULTRA_MEMORY_REHYDRATE_BUDGET", "").strip()
+    if not raw:
+        return 2000
+    try:
+        val = int(raw)
+    except ValueError:
+        return 2000
+    return val if val > 0 else 2000
+
+
 def main(stdin, stdout):
     import datetime
     import os
@@ -102,7 +118,8 @@ def main(stdin, stdout):
     shadow = os.environ.get("ULTRA_MEMORY_SHADOW", "1") == "1"
     shadow_out = os.environ.get("ULTRA_MEMORY_SHADOW_OUT") or None
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    out = run(payload, db_path=db_path, shadow=shadow, ts=ts, shadow_out=shadow_out)
+    out = run(payload, db_path=db_path, shadow=shadow, ts=ts, shadow_out=shadow_out,
+              budget_chars=_budget_from_env())
     if out:
         json.dump(out, stdout)
     return 0

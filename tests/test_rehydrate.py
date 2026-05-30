@@ -92,3 +92,18 @@ def test_run_noops_when_db_not_ready(tmp_path):
     out = rehydrate.run({"source": "startup"}, db_path=tmp_path / "absent.db",
                         shadow=False, ts="2026-05-30T16:00:00Z")
     assert out == {}
+
+
+def test_budget_from_env_default(monkeypatch):
+    monkeypatch.delenv("ULTRA_MEMORY_REHYDRATE_BUDGET", raising=False)
+    assert rehydrate._budget_from_env() == 2000
+
+
+def test_budget_from_env_override(monkeypatch):
+    monkeypatch.setenv("ULTRA_MEMORY_REHYDRATE_BUDGET", "4000")
+    assert rehydrate._budget_from_env() == 4000
+
+
+def test_budget_from_env_invalid_falls_back(monkeypatch):
+    monkeypatch.setenv("ULTRA_MEMORY_REHYDRATE_BUDGET", "not-a-number")
+    assert rehydrate._budget_from_env() == 2000
