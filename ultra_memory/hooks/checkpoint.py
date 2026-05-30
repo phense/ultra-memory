@@ -2,15 +2,28 @@
 
 Pure replay functions (no I/O beyond reading the transcript file) live here and
 are unit-tested. `run()` wires them to memory_lib. NEVER blocks the session.
+
+Real transcript shapes (verified against live transcripts, not assumed):
+- TaskCreate `tool_use.input` = {"subject", "description", "activeForm"} — ONE
+  task per call, with NO task id. The assigned id only appears in the matching
+  `tool_result` content: "Task #<N> created successfully: <subject>".
+- TaskUpdate `tool_use.input` = {"taskId": "<N>", "status"?, "addBlockedBy"?, ...}
+  — camelCase `taskId`; `status` is optional (a blockedBy-only update has none).
+So we recover id→subject from tool_result text and fold status from TaskUpdate.
 """
 import json
+import re
 from pathlib import Path
 
+from ultra_memory import memory_lib
+from ultra_memory.hooks import common
+
 _EDIT_TOOLS = {"Edit", "Write", "NotebookEdit"}
+_CREATE_RE = re.compile(r"^Task #(\d+) created successfully:\s*(.+)$")
 
 
-def _tool_uses(transcript_path):
-    """Yield (name, input) for every tool_use block, tolerant of bad lines."""
+def _blocks(transcript_path):
+    """Yield every content block dict, tolerant of bad/non-list lines."""
     p = Path(transcript_path)
     try:
         with p.open("r", encoding="utf-8") as fh:
@@ -23,49 +36,59 @@ def _tool_uses(transcript_path):
                 if not isinstance(content, list):
                     continue
                 for block in content:
-                    if isinstance(block, dict) and block.get("type") == "tool_use":
-                        yield block.get("name", ""), (block.get("input") or {})
+                    if isinstance(block, dict):
+                        yield block
     except OSError:
         return
 
 
-def completed_tasks(transcript_path):
-    """Replay TaskCreate/TaskUpdate → list of (task_id, subject) finally completed.
+def _result_text(block):
+    """tool_result content is either a string or a list of {type:text,text:..}."""
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(c.get("text", "") for c in content if isinstance(c, dict))
+    return ""
 
-    Preserves first-seen order of task_ids (spec §9.1).
+
+def completed_tasks(transcript_path):
+    """Replay the transcript → list of (task_id, subject) finally completed.
+
+    id→subject comes from TaskCreate tool_result text; status from TaskUpdate
+    (only when an explicit `status` is present, so a blockedBy-only update never
+    clears a prior completed status). Insertion order = creation order.
     """
-    subjects = {}      # task_id -> subject
-    order = []         # task_id creation order
-    final_status = {}  # task_id -> last status seen
-    for name, inp in _tool_uses(transcript_path):
-        if name == "TaskCreate":
-            for task in inp.get("tasks", []) or []:
-                tid = str(task.get("id", ""))
-                if not tid:
-                    continue
-                if tid not in subjects:
-                    order.append(tid)
-                subjects[tid] = str(task.get("subject", task.get("description", "")))
-        elif name == "TaskUpdate":
-            tid = str(inp.get("task_id", ""))
-            if tid:
+    subjects = {}      # task_id(str) -> subject, insertion-ordered
+    final_status = {}  # task_id -> last explicit status
+    for block in _blocks(transcript_path):
+        btype = block.get("type")
+        if btype == "tool_result":
+            m = _CREATE_RE.match(_result_text(block).strip())
+            if m:
+                tid, subject = m.group(1), m.group(2).strip()
+                subjects.setdefault(tid, subject)
+        elif btype == "tool_use" and block.get("name") == "TaskUpdate":
+            inp = block.get("input") or {}
+            tid = str(inp.get("taskId", ""))
+            if tid and "status" in inp:
                 final_status[tid] = str(inp.get("status", ""))
-    return [(tid, subjects[tid]) for tid in order
-            if final_status.get(tid) == "completed" and tid in subjects]
+    return [(tid, subjects[tid]) for tid in subjects
+            if final_status.get(tid) == "completed"]
 
 
 def has_material_work(transcript_path):
     """True if the session edited files or committed — i.e. worth checkpointing."""
-    for name, inp in _tool_uses(transcript_path):
+    for block in _blocks(transcript_path):
+        if block.get("type") != "tool_use":
+            continue
+        name = block.get("name", "")
+        inp = block.get("input") or {}
         if name in _EDIT_TOOLS:
             return True
         if name == "Bash" and "git commit" in str(inp.get("command", "")):
             return True
     return False
-
-
-from ultra_memory import memory_lib
-from ultra_memory.hooks import common
 
 
 def run(payload, *, db_path, ts):

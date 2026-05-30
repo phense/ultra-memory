@@ -1,5 +1,6 @@
 import json
 from ultra_memory.hooks import checkpoint
+from ultra_memory import memory_lib
 
 
 def _write_transcript(tmp_path, events):
@@ -14,23 +15,55 @@ def _tool_use(name, inp):
     return {"message": {"content": [{"type": "tool_use", "name": name, "input": inp}]}}
 
 
+def _create_result(task_id, subject):
+    # Mirrors the real TaskCreate tool_result content string.
+    return {"message": {"content": [{
+        "type": "tool_result", "tool_use_id": f"toolu_{task_id}",
+        "content": f"Task #{task_id} created successfully: {subject}"}]}}
+
+
+def _task_update(task_id, **inp):
+    inp = {"taskId": str(task_id), **inp}
+    return _tool_use("TaskUpdate", inp)
+
+
 def test_completed_tasks_basic(tmp_path):
     t = _write_transcript(tmp_path, [
-        _tool_use("TaskCreate", {"tasks": [{"id": "t1", "subject": "Build hook"},
-                                            {"id": "t2", "subject": "Wire it"}]}),
-        _tool_use("TaskUpdate", {"task_id": "t1", "status": "in_progress"}),
-        _tool_use("TaskUpdate", {"task_id": "t1", "status": "completed"}),
+        _create_result(1, "Build hook"),
+        _create_result(2, "Wire it"),
+        _task_update(1, status="in_progress"),
+        _task_update(1, status="completed"),
     ])
-    assert checkpoint.completed_tasks(t) == [("t1", "Build hook")]
+    assert checkpoint.completed_tasks(t) == [("1", "Build hook")]
 
 
 def test_completed_tasks_reopened_task_uses_final_status(tmp_path):
     t = _write_transcript(tmp_path, [
-        _tool_use("TaskCreate", {"tasks": [{"id": "t1", "subject": "Flaky"}]}),
-        _tool_use("TaskUpdate", {"task_id": "t1", "status": "completed"}),
-        _tool_use("TaskUpdate", {"task_id": "t1", "status": "in_progress"}),  # re-opened
+        _create_result(1, "Flaky"),
+        _task_update(1, status="completed"),
+        _task_update(1, status="in_progress"),  # re-opened
     ])
     assert checkpoint.completed_tasks(t) == []  # final status not completed
+
+
+def test_status_absent_update_does_not_clear_completed(tmp_path):
+    # A blockedBy-only TaskUpdate (no status) must NOT wipe a prior completion.
+    t = _write_transcript(tmp_path, [
+        _create_result(1, "Done thing"),
+        _task_update(1, status="completed"),
+        _task_update(1, addBlockedBy=["2"]),  # no status key
+    ])
+    assert checkpoint.completed_tasks(t) == [("1", "Done thing")]
+
+
+def test_completed_tasks_preserves_creation_order(tmp_path):
+    t = _write_transcript(tmp_path, [
+        _create_result(1, "First"),
+        _create_result(2, "Second"),
+        _task_update(2, status="completed"),
+        _task_update(1, status="completed"),
+    ])
+    assert checkpoint.completed_tasks(t) == [("1", "First"), ("2", "Second")]
 
 
 def test_completed_tasks_ignores_non_tool_lines(tmp_path):
@@ -55,9 +88,6 @@ def test_has_material_work_false_on_reads_only(tmp_path):
     assert checkpoint.has_material_work(t) is False
 
 
-from ultra_memory import memory_lib
-
-
 def _ready_db(tmp_path):
     p = tmp_path / "memory.db"
     conn = memory_lib.open_memory_db(str(p))
@@ -69,8 +99,8 @@ def _ready_db(tmp_path):
 
 def test_run_records_completed_tasks(tmp_path):
     t = _write_transcript(tmp_path, [
-        _tool_use("TaskCreate", {"tasks": [{"id": "t1", "subject": "Build hook"}]}),
-        _tool_use("TaskUpdate", {"task_id": "t1", "status": "completed"}),
+        _create_result(1, "Build hook"),
+        _task_update(1, status="completed"),
     ])
     db_path = _ready_db(tmp_path)
     out = checkpoint.run({"session_id": "sess-1", "transcript_path": str(t)},
@@ -86,8 +116,8 @@ def test_run_records_completed_tasks(tmp_path):
 
 def test_run_is_idempotent(tmp_path):
     t = _write_transcript(tmp_path, [
-        _tool_use("TaskCreate", {"tasks": [{"id": "t1", "subject": "Build hook"}]}),
-        _tool_use("TaskUpdate", {"task_id": "t1", "status": "completed"}),
+        _create_result(1, "Build hook"),
+        _task_update(1, status="completed"),
     ])
     db_path = _ready_db(tmp_path)
     args = ({"session_id": "sess-1", "transcript_path": str(t)},)
@@ -103,8 +133,8 @@ def test_run_is_idempotent(tmp_path):
 
 def test_run_noops_when_db_not_ready(tmp_path):
     t = _write_transcript(tmp_path, [
-        _tool_use("TaskCreate", {"tasks": [{"id": "t1", "subject": "X"}]}),
-        _tool_use("TaskUpdate", {"task_id": "t1", "status": "completed"}),
+        _create_result(1, "X"),
+        _task_update(1, status="completed"),
     ])
     out = checkpoint.run({"session_id": "s", "transcript_path": str(t)},
                          db_path=tmp_path / "absent.db", ts="2026-05-30T16:00:00Z")
