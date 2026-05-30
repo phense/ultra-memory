@@ -1,0 +1,51 @@
+from ultra_memory import memory_lib
+from ultra_memory.hooks import rehydrate
+
+
+def _db(tmp_path):
+    p = tmp_path / "memory.db"
+    conn = memory_lib.open_memory_db(str(p))
+    return p, conn
+
+
+def test_gist_includes_pinned_rules(tmp_path):
+    p, conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="r6", type="feedback", title="Year-End Tax Fence",
+                           body="Close all US options Dec 30.", ts="2026-05-01T00:00:00Z")
+    conn.execute("UPDATE memories SET pinned=1 WHERE id='r6'")
+    conn.commit()
+    g = rehydrate.build_gist(conn)
+    assert "Year-End Tax Fence" in g
+
+
+def test_gist_includes_last_session_summary(tmp_path):
+    p, conn = _db(tmp_path)
+    conn.execute("INSERT INTO sessions (id, started_at, summary) VALUES (?,?,?)",
+                 ("s-old", "2026-05-29T10:00:00Z", "Built the engine; 102 tests green."))
+    conn.commit()
+    g = rehydrate.build_gist(conn)
+    assert "102 tests green" in g
+
+
+def test_gist_lists_open_followups(tmp_path):
+    p, conn = _db(tmp_path)
+    memory_lib.record_session_event(conn, session_id="s1", kind="followup",
+                                    title="Wire the MCP", ts="2026-05-29T10:00:00Z")
+    g = rehydrate.build_gist(conn)
+    assert "Wire the MCP" in g
+
+
+def test_gist_respects_budget(tmp_path):
+    p, conn = _db(tmp_path)
+    for i in range(200):
+        memory_lib.save_memory(conn, id=f"m{i}", type="project",
+                               title=f"Memory title number {i} with padding text",
+                               body="x" * 200, ts="2026-05-01T00:00:00Z")
+    g = rehydrate.build_gist(conn, budget_chars=2000)
+    assert len(g) <= 2200  # budget + small header slack
+
+
+def test_gist_empty_db_is_safe(tmp_path):
+    p, conn = _db(tmp_path)
+    g = rehydrate.build_gist(conn)
+    assert isinstance(g, str)
