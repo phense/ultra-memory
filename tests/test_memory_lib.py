@@ -155,6 +155,37 @@ def test_delete_unknown_tier_raises(tmp_path):
     conn.close()
 
 
+def test_resave_preserves_deleted_tombstone(tmp_path):
+    """M7: a re-save (e.g. a re-import while the file still exists on disk) must NOT
+    resurrect a deliberately-deleted memory — content updates, tombstone stays."""
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00")
+    memory_lib.delete(conn, id="m1", reason="x", tier="volatile",
+                      ts="2026-05-30T11:00:00")
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b2",
+                           ts="2026-05-30T12:00:00")
+    row = conn.execute("SELECT status, body FROM memories WHERE id='m1'").fetchone()
+    assert row["status"] == "deleted"  # tombstone preserved
+    assert row["body"] == "b2"          # content still updated
+    conn.close()
+
+
+def test_resave_preserves_redirect_status(tmp_path):
+    """M7: re-saving a consolidated (redirected) memory keeps the redirect, so a
+    re-import can't silently un-merge it."""
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="dup", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00")
+    memory_lib.consolidate(conn, loser_id="dup", canonical_id="canon",
+                           reason="d", ts="2026-05-30T11:00:00")
+    memory_lib.save_memory(conn, id="dup", type="reference", title="t", body="b2",
+                           ts="2026-05-30T12:00:00")
+    row = conn.execute("SELECT status, supersedes FROM memories WHERE id='dup'").fetchone()
+    assert row["status"] == "redirect" and row["supersedes"] == "canon"
+    conn.close()
+
+
 def test_save_memory_persists_fidelity_fields(tmp_path):
     conn = _db(tmp_path)
     memory_lib.save_memory(conn, id="m1", type="reference", title="Human Title",

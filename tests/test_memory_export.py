@@ -1,9 +1,12 @@
 import sqlite3
 
+import pytest
+
 from ultra_memory import db
 from ultra_memory import memory_export as mx
 from ultra_memory import memory_import as mi
 from ultra_memory import memory_lib
+from ultra_memory import retrieval_core as rc
 
 
 def _db(tmp_path):
@@ -127,6 +130,35 @@ def test_export_dump_redacts_non_chokepointed_columns(tmp_path):
     assert "sk-ant-api03" not in dump
     assert "[REDACTED]" in dump
     conn.close()
+
+
+def test_dump_actually_restores_with_tombstone_and_embedding(tmp_path):
+    """M6: prove the dump is genuinely restorable (not just .exists()). The
+    embedding BLOB + audit_log hang solely on this artifact (snapshot.db is
+    gitignored), and the dump is now redacted (M3) — verify nothing is corrupted."""
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="live", type="reference", title="Live", body="b",
+                           ts="2026-05-30T10:00:00")
+    memory_lib.save_memory(conn, id="gone", type="reference", title="Gone", body="g",
+                           ts="2026-05-30T10:00:00")
+    memory_lib.delete(conn, id="gone", reason="x", tier="volatile",
+                      ts="2026-05-30T11:00:00")
+    rc.get_or_embed(conn, target_kind="memory", target_id="live", text="b",
+                    embedder=lambda ts: [[0.5, -1.25, 3.0] for _ in ts], dim=3)
+    out = tmp_path / "exp"
+    mx.export_memory(conn, out, ts="2026-05-30T12:00:00")
+    conn.close()
+
+    restored = sqlite3.connect(tmp_path / "restored.db")
+    restored.executescript((out / "memory.dump.sql").read_text())
+    assert restored.execute(
+        "SELECT status FROM memories WHERE id='gone'").fetchone()[0] == "deleted"
+    blob = restored.execute(
+        "SELECT vector FROM embeddings WHERE target_id='live'").fetchone()[0]
+    assert rc.unpack_vector(blob, dim=3) == pytest.approx([0.5, -1.25, 3.0])
+    assert restored.execute(
+        "SELECT COUNT(*) FROM audit_log WHERE target_id='gone'").fetchone()[0] >= 1
+    restored.close()
 
 
 def test_export_skips_when_unchanged(tmp_path):
