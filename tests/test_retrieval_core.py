@@ -105,6 +105,34 @@ def test_get_or_embed_dim_invariant_raises(tmp_path):
     conn.close()
 
 
+def test_embed_model_id_single_source(tmp_path):
+    """L3: the cache-key model name and the fastembed model id must be ONE canonical
+    string, else a vector cached under one is re-embedded when the other is passed."""
+    import inspect
+    assert inspect.signature(rc.default_embedder).parameters["model_name"].default == rc.EMBED_MODEL
+    assert rc.EMBED_MODEL.startswith("BAAI/")  # the real fastembed namespace
+
+
+def test_get_or_embed_batch_one_call_and_txn(tmp_path):
+    """L7: a batch must embed all misses in a single embedder call (and persist in
+    one write txn), not one call + one write txn per item."""
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    calls = []
+
+    def emb(texts):
+        calls.append(list(texts))
+        return [[float(len(t)), 1.0, 0.0] for t in texts]
+
+    items = [("memory", f"m{i}", f"text {i}") for i in range(3)]
+    out = rc.get_or_embed_batch(conn, items, embedder=emb, dim=3)
+    assert set(out) == {"m0", "m1", "m2"}
+    assert len(calls) == 1 and len(calls[0]) == 3  # one batched call of 3
+    # second run is fully cached → embedder not called again
+    rc.get_or_embed_batch(conn, items, embedder=emb, dim=3)
+    assert len(calls) == 1
+    conn.close()
+
+
 def test_default_embedder_without_fastembed_raises_clear(monkeypatch):
     import builtins
     real_import = builtins.__import__

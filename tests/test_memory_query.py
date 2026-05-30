@@ -92,6 +92,26 @@ def test_title_injection_surfaces_weak_embedding(tmp_path):
     conn.close()
 
 
+def test_query_batches_cache_misses(tmp_path):
+    """L7: a query over N uncached memories must embed them in one batched call,
+    not one embedder call + write txn per memory."""
+    conn = _db(tmp_path)
+    for i in range(3):
+        _save(conn, id=f"m{i}", title=f"t{i}", body=f"body {i}")
+    calls = []
+
+    def emb(texts):
+        calls.append(list(texts))
+        return [[1.0, 0.0, 0.0] for _ in texts]
+
+    memory_query.query_memories(conn, "q", embedder=emb, dim=3,
+                                now_ts="2026-05-02T00:00:00")
+    # one batched embed of the 3 misses + one embed of the query = 2 calls (not 4)
+    assert len(calls) == 2
+    assert any(len(c) == 3 for c in calls)
+    conn.close()
+
+
 def test_query_empty_corpus_returns_empty(tmp_path):
     conn = _db(tmp_path)
     emb = _fake_embedder({})

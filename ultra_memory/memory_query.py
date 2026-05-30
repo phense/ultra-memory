@@ -70,16 +70,14 @@ def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
     if not rows:
         return []
 
-    items = []
-    by_id = {}
-    for r in rows:
-        vec = rc.get_or_embed(conn, target_kind="memory", target_id=r["id"],
-                              text=_doc_text(r), embedder=embedder, dim=dim)
-        items.append((r["id"], vec))
-        by_id[r["id"]] = r
+    by_id = {r["id"]: r for r in rows}
+    # Embed all cache-misses in one batched call + one write txn (audit L7).
+    vecs = rc.get_or_embed_batch(
+        conn, [("memory", r["id"], _doc_text(r)) for r in rows],
+        embedder=embedder, dim=dim)
 
     q_vec = embedder([query])[0]
-    relevance = dict(rc.cosine_search(q_vec, items))
+    relevance = dict(rc.cosine_search(q_vec, list(vecs.items())))
 
     results = []
     for mid, r in by_id.items():

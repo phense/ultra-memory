@@ -54,6 +54,17 @@ def test_memories_pk_is_slug_and_pinned_defaults_zero(tmp_path):
     conn.close()
 
 
+def test_migrate_mirrors_schema_version_in_meta(tmp_path):
+    """L8 (§7.3): user_version must be mirrored into meta.schema_version, which
+    DOES survive iterdump (unlike PRAGMA user_version), giving the dump + bootstrap
+    a queryable version."""
+    conn = db.connect(tmp_path / "m.db")
+    v = db.migrate(conn, MIG)
+    row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    assert row is not None and int(row[0]) == v
+    conn.close()
+
+
 def test_migrate_recovers_from_half_applied_migration(tmp_path):
     """C3: a migration whose columns exist but whose version never got bumped
     (crash between apply and version-bump) must re-run cleanly, not crash with

@@ -59,6 +59,20 @@ def migrate(conn, migrations_dir):
             for stmt in statements:
                 _apply_statement(conn, stmt)
             conn.execute(f"PRAGMA user_version={version}")
+            # Mirror into meta.schema_version (§7.3): PRAGMA user_version is NOT
+            # serialised by iterdump, but meta rows are — so the committed dump and
+            # the bootstrap state machine get a queryable version. In the same txn,
+            # so the mirror can never drift from user_version. Guarded on the meta
+            # table existing (it may not, in a migration set that doesn't define it).
+            has_meta = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'"
+            ).fetchone()
+            if has_meta:
+                conn.execute(
+                    "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (str(version),),
+                )
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")

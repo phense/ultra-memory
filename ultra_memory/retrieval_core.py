@@ -9,7 +9,10 @@ import hashlib
 import math
 import struct
 
-EMBED_MODEL = "bge-small-en-v1.5"
+# One canonical model id used BOTH as the embedding-cache key (model_name) and as
+# the fastembed model id, so a vector cached under one form is never re-embedded
+# because the other form was passed through (audit L3).
+EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 EMBED_DIM = 384
 
 
@@ -98,7 +101,56 @@ def get_or_embed(conn, *, target_kind, target_id, text, embedder,
     return [float(x) for x in vec]
 
 
-def default_embedder(model_name="BAAI/bge-small-en-v1.5"):
+def get_or_embed_batch(conn, items, *, embedder, model_name=EMBED_MODEL, dim=EMBED_DIM):
+    """Batched get_or_embed: read the cache for every item, embed ALL misses in a
+    single embedder() call, and persist them in ONE write txn — so a read-side query
+    over N uncached items costs one embed + one txn, not N of each (audit L7).
+
+    items = iterable of (target_kind, target_id, text). Returns {target_id: vector}.
+    """
+    result = {}
+    misses = []  # (target_kind, target_id, text, sha)
+    for target_kind, target_id, text in items:
+        sha = content_sha256(text)
+        row = conn.execute(
+            "SELECT dim, vector, content_sha256 FROM embeddings "
+            "WHERE target_kind=? AND target_id=? AND model_name=?",
+            (target_kind, target_id, model_name),
+        ).fetchone()
+        if row is not None:
+            if row["dim"] != dim:
+                raise ValueError(
+                    f"(model,dim) invariant broken for {target_kind}:{target_id} "
+                    f"— cached dim {row['dim']} != requested {dim}")
+            if row["content_sha256"] == sha:
+                result[target_id] = unpack_vector(row["vector"], dim)
+                continue
+        misses.append((target_kind, target_id, text, sha))
+    if not misses:
+        return result
+    vecs = embedder([m[2] for m in misses])
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        for (target_kind, target_id, _text, sha), vec in zip(misses, vecs):
+            if len(vec) != dim:
+                raise ValueError(f"embedder returned dim {len(vec)} != expected {dim}")
+            conn.execute(
+                "INSERT INTO embeddings "
+                "(target_kind, target_id, model_name, dim, vector, content_sha256) "
+                "VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(target_kind, target_id, model_name) DO UPDATE SET "
+                "dim=excluded.dim, vector=excluded.vector, content_sha256=excluded.content_sha256",
+                (target_kind, target_id, model_name, dim, pack_vector(vec), sha),
+            )
+            result[target_id] = [float(x) for x in vec]
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    return result
+
+
+def default_embedder(model_name=EMBED_MODEL):
     """Lazy fastembed embedder. Optional extra: install ultra-memory[retrieval].
 
     Returns list[str] -> list[list[float]]. Not exercised by unit tests (they inject
