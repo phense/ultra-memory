@@ -81,3 +81,53 @@ def test_query_empty_corpus_returns_empty(tmp_path):
     assert memory_query.query_memories(conn, "x", embedder=emb, dim=3,
                                        now_ts="2026-05-02T00:00:00") == []
     conn.close()
+
+
+def test_access_and_strength_boost_changes_order(tmp_path):
+    conn = _db(tmp_path)
+    _save(conn, id="a", title="a", body="a doc")
+    _save(conn, id="b", title="b", body="b doc")
+    # Identical embeddings → tie broken by access boost (b accessed more).
+    emb = _fake_embedder({"a doc": [1.0, 0.0, 0.0], "b doc": [1.0, 0.0, 0.0],
+                          "q": [1.0, 0.0, 0.0]})
+    for _ in range(5):
+        memory_lib.record_access(conn, target_kind="memory", target_id="b",
+                                 ts="2026-05-02T00:00:00")
+    out = memory_query.query_memories(conn, "q", embedder=emb, dim=3,
+                                      now_ts="2026-05-02T00:00:00")
+    assert out[0]["id"] == "b"
+    conn.close()
+
+
+def test_staleness_flag_and_penalty(tmp_path):
+    conn = _db(tmp_path)
+    _save(conn, id="old", title="old", body="old doc", ts="2026-01-01T00:00:00")
+    emb = _fake_embedder({"old doc": [1.0, 0.0, 0.0], "q": [1.0, 0.0, 0.0]})
+    out = memory_query.query_memories(conn, "q", embedder=emb, dim=3,
+                                      now_ts="2026-05-02T00:00:00", staleness_days=90)
+    assert out[0]["stale"] is True
+    conn.close()
+
+
+def test_not_stale_when_recent(tmp_path):
+    conn = _db(tmp_path)
+    _save(conn, id="fresh", title="fresh", body="fresh doc", ts="2026-04-20T00:00:00")
+    emb = _fake_embedder({"fresh doc": [1.0, 0.0, 0.0], "q": [1.0, 0.0, 0.0]})
+    out = memory_query.query_memories(conn, "q", embedder=emb, dim=3,
+                                      now_ts="2026-05-02T00:00:00", staleness_days=90)
+    assert out[0]["stale"] is False
+    conn.close()
+
+
+def test_one_hop_links_attached(tmp_path):
+    conn = _db(tmp_path)
+    _save(conn, id="m", title="m", body="m doc")
+    conn.execute(
+        "INSERT INTO links (src_kind, src_id, predicate, dst_kind, dst_id) "
+        "VALUES ('memory','m','grounded_in','wiki','some-slug')")
+    emb = _fake_embedder({"m doc": [1.0, 0.0, 0.0], "q": [1.0, 0.0, 0.0]})
+    out = memory_query.query_memories(conn, "q", embedder=emb, dim=3,
+                                      now_ts="2026-05-02T00:00:00")
+    links = out[0]["links"]
+    assert links == [{"predicate": "grounded_in", "dst_kind": "wiki", "dst_id": "some-slug"}]
+    conn.close()
