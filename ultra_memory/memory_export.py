@@ -5,6 +5,7 @@ Skip-if-unchanged on a content hash that EXCLUDES access telemetry, so
 reinforcement churn never drives a commit. Never git-adds the live .db.
 """
 import hashlib
+import os
 from pathlib import Path
 
 from .redact_secrets import strip_secrets
@@ -41,52 +42,72 @@ def _frontmatter(row):
 
 def export_memory(conn, out_dir, *, ts, snapshot=True):
     """Write the consistent dump + snapshot + views. Returns True if written,
-    False if skipped (content unchanged)."""
+    False if skipped (content unchanged).
+
+    Robustness (L5/L6): hash + dump + view contents are read inside ONE explicit
+    read transaction (consistent snapshot); the VACUUM snapshot runs first, then
+    views, then the dump is swapped into place atomically (tmp → os.replace), and
+    the content hash is written LAST. So a failure partway never corrupts the prior
+    good dump, and an interrupted run re-runs (no stale hash) instead of skipping."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     hash_path = out_dir / "content.hash"
-    new_hash = _content_hash(conn)
-    if hash_path.exists() and hash_path.read_text().strip() == new_hash:
-        return False
 
+    # Consistent read snapshot for hash + dump + view rows. wal_checkpoint and
+    # VACUUM cannot run inside a transaction, so they sit outside this block.
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    # iterdump() does NOT serialize PRAGMA user_version; append it so the dump —
-    # the sole git-committed rollback artifact — round-trips the schema version.
-    # Without this, a restore comes back at version 0 and reopen re-runs migrations.
-    schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
-    # Redact the whole dump (§7.5): the write-path chokepoint only covers
-    # memories/session_events text; columns like links.evidence, meta.value or
-    # sessions.summary could carry a secret that iterdump would emit verbatim into
-    # the git-committed artifact. [REDACTED] inside a SQL string literal stays valid.
-    dump = strip_secrets("\n".join(conn.iterdump()))
-    dump += f"\nPRAGMA user_version={schema_version};\n"
-    (out_dir / "memory.dump.sql").write_text(dump)
+    conn.execute("BEGIN")
+    try:
+        new_hash = _content_hash(conn)
+        if hash_path.exists() and hash_path.read_text().strip() == new_hash:
+            return False
+        # iterdump() does NOT serialize PRAGMA user_version; append it so the dump —
+        # the sole git-committed rollback artifact — round-trips the schema version.
+        # Redact the whole dump (§7.5): columns like links.evidence / meta.value /
+        # sessions.summary aren't on the write-path chokepoint; [REDACTED] inside a
+        # SQL string literal stays valid.
+        schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
+        dump = strip_secrets("\n".join(conn.iterdump()))
+        dump += f"\nPRAGMA user_version={schema_version};\n"
+        # Preserve the harness FILENAME (file_slug, underscore) and the curated
+        # MEMORY.md order (sort_order) — the hyphenated DB id must not drive the
+        # filename/link or a roundtrip renames files. NULL sort_order sorts last.
+        rows = conn.execute(
+            "SELECT * FROM memories WHERE status='active' "
+            "ORDER BY sort_order IS NULL, sort_order, id").fetchall()
+    finally:
+        conn.execute("COMMIT")
 
+    # Build view contents from the snapshot rows (no writes yet).
+    view_files = {}
+    index_lines = []
+    for row in rows:
+        slug = row["file_slug"] or row["id"]
+        view_files[f"{slug}.md"] = _frontmatter(row) + (row["body"] or "")
+        hook = f" — {row['index_hook']}" if row["index_hook"] else ""
+        index_lines.append(f"- [{row['title']}]({slug}.md){hook}")
+    view_files["MEMORY.md"] = "\n".join(index_lines) + "\n"
+
+    # Snapshot FIRST: a failure here must not touch the prior dump/views.
     if snapshot:
         snap = out_dir / "memory.snapshot.db"
         if snap.exists():
             snap.unlink()
-        # VACUUM INTO does not accept a bound parameter in sqlite3 — use an
-        # escaped string literal (tmp paths are quote-free, but be safe).
+        # VACUUM INTO does not accept a bound parameter in sqlite3 — escaped literal.
         safe = str(snap).replace("'", "''")
         conn.execute(f"VACUUM INTO '{safe}'")
 
     views = out_dir / "views"
     views.mkdir(exist_ok=True)
-    index_lines = []
-    # Preserve the harness FILENAME (file_slug, underscore) and the curated MEMORY.md
-    # order (sort_order). The DB id is the hyphenated name: and must NOT drive the
-    # filename or the index link, or a roundtrip renames the files. NULL sort_order
-    # (orphans / post-import rows) sort last, then by id.
-    rows = conn.execute(
-        "SELECT * FROM memories WHERE status='active' "
-        "ORDER BY sort_order IS NULL, sort_order, id").fetchall()
-    for row in rows:
-        slug = row["file_slug"] or row["id"]
-        (views / f"{slug}.md").write_text(_frontmatter(row) + (row["body"] or ""))
-        hook = f" — {row['index_hook']}" if row["index_hook"] else ""
-        index_lines.append(f"- [{row['title']}]({slug}.md){hook}")
-    (views / "MEMORY.md").write_text("\n".join(index_lines) + "\n")
+    for name, content in view_files.items():
+        (views / name).write_text(content)
 
+    # Swap the dump into place atomically — the rollback artifact is never torn,
+    # and the prior dump survives any failure before this point.
+    tmp = out_dir / "memory.dump.sql.tmp"
+    tmp.write_text(dump)
+    os.replace(tmp, out_dir / "memory.dump.sql")
+
+    # Hash LAST → an interrupted export re-runs rather than skipping.
     hash_path.write_text(new_hash)
     return True

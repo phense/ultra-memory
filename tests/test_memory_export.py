@@ -161,6 +161,32 @@ def test_dump_actually_restores_with_tombstone_and_embedding(tmp_path):
     restored.close()
 
 
+def test_failed_export_preserves_prior_dump(tmp_path):
+    """L5+L6: an export that fails partway must NOT corrupt the previous good dump —
+    artifacts are produced from a read snapshot and the live dump is only replaced
+    after the snapshot/views succeed (atomic, all-or-nothing)."""
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="v1",
+                           ts="2026-05-30T10:00:00")
+    out = tmp_path / "exp"
+    assert mx.export_memory(conn, out, ts="2026-05-30T12:00:00") is True
+    first_dump = (out / "memory.dump.sql").read_text()
+    assert "v1" in first_dump
+
+    # change data, then force export #2's snapshot step to fail
+    memory_lib.save_memory(conn, id="m2", type="reference", title="t2", body="v2",
+                           ts="2026-05-30T13:00:00")
+    snap = out / "memory.snapshot.db"
+    snap.unlink()
+    snap.mkdir()  # a directory → the snapshot's unlink() will raise before any rewrite
+    with pytest.raises(Exception):
+        mx.export_memory(conn, out, ts="2026-05-30T14:00:00")
+
+    assert (out / "memory.dump.sql").read_text() == first_dump  # prior dump intact
+    assert list(out.glob("*.tmp")) == []                        # no torn temp file
+    conn.close()
+
+
 def test_export_skips_when_unchanged(tmp_path):
     conn = _db(tmp_path)
     memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
