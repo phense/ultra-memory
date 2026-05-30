@@ -1,3 +1,5 @@
+import pytest
+
 from ultra_memory import memory_lib
 
 
@@ -91,4 +93,47 @@ def test_record_access_nonmemory_only_logs(tmp_path):
                              ts="2026-05-30T10:00:00")
     n = conn.execute("SELECT COUNT(*) FROM access_log WHERE target_id='slug-x'").fetchone()[0]
     assert n == 1
+    conn.close()
+
+
+def test_consolidate_redirects_without_deleting(tmp_path):
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="dup", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00")
+    memory_lib.consolidate(conn, loser_id="dup", canonical_id="canon",
+                           reason="duplicate", ts="2026-05-30T11:00:00")
+    row = conn.execute("SELECT status, supersedes FROM memories WHERE id='dup'").fetchone()
+    assert row["status"] == "redirect" and row["supersedes"] == "canon"
+    assert conn.execute("SELECT op FROM audit_log WHERE target_id='dup'").fetchall()[-1][0] == "redirect"
+    conn.close()
+
+
+def test_consolidate_missing_raises(tmp_path):
+    conn = _db(tmp_path)
+    with pytest.raises(KeyError):
+        memory_lib.consolidate(conn, loser_id="nope", canonical_id="c",
+                               reason="x", ts="2026-05-30T10:00:00")
+    conn.close()
+
+
+def test_delete_soft_tombstones(tmp_path):
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00")
+    memory_lib.delete(conn, id="m1", reason="garbage", tier="volatile",
+                      ts="2026-05-30T11:00:00")
+    row = conn.execute("SELECT status FROM memories WHERE id='m1'").fetchone()
+    assert row["status"] == "deleted"  # row still present (tombstone)
+    audit = conn.execute("SELECT op, reason FROM audit_log WHERE target_id='m1'").fetchall()[-1]
+    assert audit[0] == "soft_delete" and "volatile" in audit[1]
+    conn.close()
+
+
+def test_delete_unknown_tier_raises(tmp_path):
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00")
+    with pytest.raises(ValueError):
+        memory_lib.delete(conn, id="m1", reason="x", tier="bogus",
+                          ts="2026-05-30T11:00:00")
     conn.close()

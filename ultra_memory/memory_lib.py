@@ -112,3 +112,44 @@ def record_access(conn, *, target_kind, target_id, ts, context=None):
     except Exception:
         conn.execute("ROLLBACK")
         raise
+
+
+def consolidate(conn, *, loser_id, canonical_id, reason, ts):
+    """Redirect-stub: mark loser status='redirect' + supersedes=canonical. Never deletes."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        prior = conn.execute("SELECT * FROM memories WHERE id=?", (loser_id,)).fetchone()
+        if prior is None:
+            raise KeyError(loser_id)
+        conn.execute(
+            "UPDATE memories SET status='redirect', supersedes=?, updated_at=? WHERE id=?",
+            (canonical_id, ts, loser_id),
+        )
+        _audit(conn, op="redirect", target_kind="memory", target_id=loser_id,
+               reason=reason, prior=dict(prior), ts=ts)
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
+_DELETE_TIERS = ("durable", "volatile")
+
+
+def delete(conn, *, id, reason, tier, ts):
+    """Soft-delete tombstone (status='deleted') + audit. Single-id only; no fuzzy batch.
+    Hard purge is a separate, later step."""
+    if tier not in _DELETE_TIERS:
+        raise ValueError(f"unknown tier: {tier!r} (expected one of {_DELETE_TIERS})")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
+        if prior is None:
+            raise KeyError(id)
+        conn.execute("UPDATE memories SET status='deleted', updated_at=? WHERE id=?", (ts, id))
+        _audit(conn, op="soft_delete", target_kind="memory", target_id=id,
+               reason=f"[{tier}] {reason}", prior=dict(prior), ts=ts)
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
