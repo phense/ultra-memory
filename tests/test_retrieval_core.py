@@ -50,3 +50,70 @@ def test_content_sha256_stable_and_none_safe():
     assert rc.content_sha256("abc") == rc.content_sha256("abc")
     assert rc.content_sha256("abc") != rc.content_sha256("abd")
     assert isinstance(rc.content_sha256(None), str)  # None-safe
+
+
+from ultra_memory import memory_lib
+
+
+def _db(tmp_path):
+    return memory_lib.open_memory_db(tmp_path / "m.db")
+
+
+def _embedder(calls):
+    # Records call count so we can assert cache hits skip recompute.
+    def _embed(texts):
+        calls.append(list(texts))
+        return [[float(len(t)), 1.0, 0.0] for t in texts]
+    return _embed
+
+
+def test_get_or_embed_caches_and_reuses(tmp_path):
+    conn = _db(tmp_path)
+    calls = []
+    emb = _embedder(calls)
+    v1 = rc.get_or_embed(conn, target_kind="memory", target_id="m1",
+                         text="hello", embedder=emb, dim=3)
+    v2 = rc.get_or_embed(conn, target_kind="memory", target_id="m1",
+                         text="hello", embedder=emb, dim=3)
+    assert v1 == pytest.approx(v2)
+    assert len(calls) == 1  # second call served from cache
+    conn.close()
+
+
+def test_get_or_embed_recomputes_on_text_change(tmp_path):
+    conn = _db(tmp_path)
+    calls = []
+    emb = _embedder(calls)
+    rc.get_or_embed(conn, target_kind="memory", target_id="m1",
+                    text="hello", embedder=emb, dim=3)
+    rc.get_or_embed(conn, target_kind="memory", target_id="m1",
+                    text="hello world", embedder=emb, dim=3)
+    assert len(calls) == 2  # content hash changed → recompute
+    row = conn.execute("SELECT COUNT(*) FROM embeddings WHERE target_id='m1'").fetchone()[0]
+    assert row == 1  # upsert, not a second row
+    conn.close()
+
+
+def test_get_or_embed_dim_invariant_raises(tmp_path):
+    conn = _db(tmp_path)
+    emb = _embedder([])
+    rc.get_or_embed(conn, target_kind="memory", target_id="m1",
+                    text="hello", embedder=emb, dim=3)
+    with pytest.raises(ValueError):
+        rc.get_or_embed(conn, target_kind="memory", target_id="m1",
+                        text="hello", embedder=emb, dim=4)  # cached dim is 3
+    conn.close()
+
+
+def test_default_embedder_without_fastembed_raises_clear(monkeypatch):
+    import builtins
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **k):
+        if name == "fastembed":
+            raise ImportError("no fastembed")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(RuntimeError, match="fastembed"):
+        rc.default_embedder()

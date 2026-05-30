@@ -5,6 +5,9 @@ description = "Project-agnostic agent memory engine + knowledge MCP (Claude plug
 requires-python = ">=3.13"
 dependencies = []
 
+[project.optional-dependencies]
+retrieval = ["fastembed>=0.3"]
+
 [dependency-groups]
 dev = ["pytest>=8"]
 
