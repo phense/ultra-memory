@@ -30,3 +30,30 @@ def cosine_search(query_vec, items, *, top_k=None):
     scored = [(item_id, cosine(query_vec, vec)) for item_id, vec in items]
     scored.sort(key=lambda t: t[1], reverse=True)
     return scored if top_k is None else scored[:top_k]
+
+
+def rrf_fuse(rankings, *, k=60):
+    """Reciprocal-rank fusion of multiple ranked id-lists. Returns [(id, score)] desc.
+
+    Built here for the wiki side; Phase-1 memory retrieval is cosine-only (D11).
+    """
+    scores = {}
+    for ranking in rankings:
+        for rank, item_id in enumerate(ranking):
+            scores[item_id] = scores.get(item_id, 0.0) + 1.0 / (k + rank + 1)
+    return sorted(scores.items(), key=lambda t: t[1], reverse=True)
+
+
+def pack_vector(vec):
+    """Serialise a float vector to a compact float32 blob."""
+    return struct.pack(f"{len(vec)}f", *vec)
+
+
+def unpack_vector(blob, dim=EMBED_DIM):
+    """Inverse of pack_vector for a known dim."""
+    return list(struct.unpack(f"{dim}f", blob))
+
+
+def content_sha256(text):
+    """Stable content hash for embedding-cache invalidation. None/'' → hash of ''."""
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
