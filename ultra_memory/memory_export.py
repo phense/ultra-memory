@@ -7,6 +7,8 @@ reinforcement churn never drives a commit. Never git-adds the live .db.
 import hashlib
 from pathlib import Path
 
+from .redact_secrets import strip_secrets
+
 _STABLE_COLS = ("id", "type", "title", "description", "index_hook", "node_type",
                 "file_slug", "sort_order", "body", "status", "supersedes",
                 "origin_session_id")
@@ -52,7 +54,12 @@ def export_memory(conn, out_dir, *, ts, snapshot=True):
     # the sole git-committed rollback artifact — round-trips the schema version.
     # Without this, a restore comes back at version 0 and reopen re-runs migrations.
     schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
-    dump = "\n".join(conn.iterdump()) + f"\nPRAGMA user_version={schema_version};\n"
+    # Redact the whole dump (§7.5): the write-path chokepoint only covers
+    # memories/session_events text; columns like links.evidence, meta.value or
+    # sessions.summary could carry a secret that iterdump would emit verbatim into
+    # the git-committed artifact. [REDACTED] inside a SQL string literal stays valid.
+    dump = strip_secrets("\n".join(conn.iterdump()))
+    dump += f"\nPRAGMA user_version={schema_version};\n"
     (out_dir / "memory.dump.sql").write_text(dump)
 
     if snapshot:

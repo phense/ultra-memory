@@ -113,6 +113,22 @@ def test_export_writes_dump_snapshot_and_views(tmp_path):
     conn.close()
 
 
+def test_export_dump_redacts_non_chokepointed_columns(tmp_path):
+    """M3 (§7.5): the committed dump must be clean even for columns NOT covered by
+    the write-path redaction (links.evidence, meta.value, sessions.summary …). A
+    future writer of those could otherwise leak a secret into git via iterdump."""
+    conn = _db(tmp_path)
+    # Simulate such a writer persisting a secret straight into meta.value.
+    conn.execute("INSERT INTO meta (key, value) VALUES ('note', ?)",
+                 ("token sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF tail",))
+    out = tmp_path / "exp"
+    mx.export_memory(conn, out, ts="2026-05-30T12:00:00")
+    dump = (out / "memory.dump.sql").read_text()
+    assert "sk-ant-api03" not in dump
+    assert "[REDACTED]" in dump
+    conn.close()
+
+
 def test_export_skips_when_unchanged(tmp_path):
     conn = _db(tmp_path)
     memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
