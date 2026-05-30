@@ -48,3 +48,23 @@ def test_save_memory_update_captures_prior(tmp_path):
         "SELECT reason FROM audit_log WHERE target_id='m1' ORDER BY id")]
     assert reasons == ["create", "update"]
     conn.close()
+
+
+def test_record_session_event_creates_session_and_event(tmp_path):
+    conn = _db(tmp_path)
+    memory_lib.record_session_event(conn, session_id="s1", kind="task_done",
+                                    title="did x", ts="2026-05-30T10:00:00")
+    assert conn.execute("SELECT 1 FROM sessions WHERE id='s1'").fetchone() is not None
+    ev = conn.execute("SELECT kind, title FROM session_events WHERE session_id='s1'").fetchone()
+    assert ev["kind"] == "task_done" and ev["title"] == "did x"
+    conn.close()
+
+
+def test_record_session_event_is_idempotent(tmp_path):
+    conn = _db(tmp_path)
+    for _ in range(2):
+        memory_lib.record_session_event(conn, session_id="s1", kind="task_done",
+                                        title="did x", ts="2026-05-30T10:00:00")
+    n = conn.execute("SELECT COUNT(*) FROM session_events WHERE session_id='s1'").fetchone()[0]
+    assert n == 1
+    conn.close()

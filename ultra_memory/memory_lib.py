@@ -59,3 +59,36 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None):
         conn.execute("ROLLBACK")
         raise
     return id
+
+
+def _event_key(session_id, ts, kind, title):
+    return hashlib.sha256(f"{session_id}|{ts}|{kind}|{title}".encode("utf-8")).hexdigest()
+
+
+def record_session_event(conn, *, session_id, kind, title, ts,
+                         detail=None, files=None, refs=None, session_fields=None):
+    """Append a typed session event idempotently (UNIQUE event_key). Ensures the
+    session row exists first (FK). Returns the event_key."""
+    title = strip_secrets(title)
+    detail = strip_secrets(detail)
+    key = _event_key(session_id, ts, kind, title)
+    sf = session_fields or {}
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO sessions (id, started_at, status) VALUES (?,?,?)",
+            (session_id, sf.get("started_at", ts), sf.get("status", "active")),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO session_events "
+            "(session_id, ts, kind, title, detail, files, refs, event_key) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (session_id, ts, kind, title, detail,
+             json.dumps(files) if files is not None else None,
+             json.dumps(refs) if refs is not None else None, key),
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    return key
