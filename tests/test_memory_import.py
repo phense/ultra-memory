@@ -128,10 +128,55 @@ def test_import_today_file_is_idempotent(tmp_path):
     conn.close()
 
 
-def test_import_today_file_never_crashes_on_junk(tmp_path):
+def test_import_today_file_captures_malformed_header_with_warning(tmp_path):
     conn = memory_lib.open_memory_db(tmp_path / "m.db")
     n, warnings = mi.import_today_file(conn, "garbage\n## not a time | x\nmore", day="2026-05-27")
-    assert n == 0  # '## not a time' is not a valid HH:MM header
+    # A '## ' line that is not HH:MM is captured as its own (midnight) block with a
+    # warning — NOT silently dropped or folded. The leading 'garbage' prose warns too.
+    assert n == 1
+    assert any("non-time" in w.lower() for w in warnings)
+    conn.close()
+
+
+# Mirrors the real .remember anomalies the audit reproduced: EN-DASH range, a date
+# header, and a timeless '## Active:' header — all previously folded silently.
+_TODAY_REAL = """## 21:24-22:15 | main
+ascii range block.
+
+## 22:32–23:03 | main
+en-dash range block, a distinct work session.
+
+## 2026-05-24 evening | main — pivot done
+date-header block.
+
+## Active: IBKR integration setup
+timeless header block.
+"""
+
+
+def test_import_today_endash_range_is_its_own_block(tmp_path):
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    n, warnings = mi.import_today_file(conn, _TODAY_REAL, day="2026-05-29")
+    assert n == 4  # all four headers are distinct blocks, none folded
+    rows = {r["ts"]: r["detail"] for r in conn.execute(
+        "SELECT ts, detail FROM session_events WHERE session_id='legacy-2026-05-29'")}
+    assert "2026-05-29T22:32:00" in rows  # EN-DASH range parsed → own block at start time
+    assert "en-dash range block" in rows["2026-05-29T22:32:00"]
+    # the en-dash block is NOT swallowed into the 21:24 block
+    assert "en-dash range block" not in rows["2026-05-29T21:24:00"]
+    conn.close()
+
+
+def test_import_today_non_time_headers_warn_and_capture(tmp_path):
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    n, warnings = mi.import_today_file(conn, _TODAY_REAL, day="2026-05-29")
+    # date-header + timeless header → 2 distinct midnight blocks, both warned.
+    midnight = conn.execute(
+        "SELECT detail FROM session_events "
+        "WHERE session_id='legacy-2026-05-29' AND ts='2026-05-29T00:00:00'").fetchall()
+    details = " ".join(r["detail"] or "" for r in midnight)
+    assert "date-header block" in details and "timeless header block" in details
+    assert sum("non-time" in w.lower() for w in warnings) == 2
     conn.close()
 
 

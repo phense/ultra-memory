@@ -96,13 +96,21 @@ def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
     return count
 
 
-_TODAY_HEADER = re.compile(r"^##\s+(?P<start>\d{2}:\d{2})(?:-(?P<end>\d{2}:\d{2}))?"
+# Range separator accepts ASCII hyphen AND en-dash (U+2013) / em-dash (U+2014),
+# all of which appear in the real .remember files.
+_TODAY_HEADER = re.compile(r"^##\s+(?P<start>\d{2}:\d{2})(?:[-–—](?P<end>\d{2}:\d{2}))?"
                            r"\s*\|\s*(?P<ctx>.*)$")
+_ANY_HEADER = re.compile(r"^##\s+(?P<text>.*\S)\s*$")
 
 
 def import_today_file(conn, text, *, day):
     """Import a .remember/today-<day>.md into session_events under a synthetic
-    'legacy-<day>' session. Returns (count, warnings). Idempotent; never crashes."""
+    'legacy-<day>' session. Returns (count, warnings). Idempotent; never crashes.
+
+    Every '## ' line starts a new block. HH:MM[-HH:MM] headers get the start time;
+    any other '## ' header (date header, '## Active: …') is captured as its own
+    block at day-midnight WITH a warning — never silently folded into the prior
+    block (which would collapse distinct work sessions and lose timestamps)."""
     session_id = f"legacy-{day}"
     lines = text.splitlines()
     blocks = []          # (ts, ctx, [body lines])
@@ -114,7 +122,16 @@ def import_today_file(conn, text, *, day):
             ts = f"{day}T{m.group('start')}:00"
             current = (ts, m.group("ctx").strip(), [])
             blocks.append(current)
-        elif current is not None:
+            continue
+        h = _ANY_HEADER.match(line)
+        if h:
+            ts = f"{day}T00:00:00"
+            header_text = h.group("text").strip()
+            current = (ts, header_text, [])
+            blocks.append(current)
+            warnings.append(f"non-time header captured at {ts}: {header_text!r}")
+            continue
+        if current is not None:
             current[2].append(line)
         elif line.strip():
             warnings.append(f"skip non-conforming prose: {line.strip()[:40]!r}")
