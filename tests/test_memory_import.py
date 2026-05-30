@@ -195,6 +195,32 @@ def test_import_today_non_time_headers_warn_and_capture(tmp_path):
     conn.close()
 
 
+def test_import_uses_file_mtime_for_timestamps(tmp_path):
+    """M2: an imported memory's created_at/updated_at must reflect the FILE's age
+    (mtime), not the import moment — otherwise the §8 staleness signal treats every
+    memory as freshly written for 90 days after a bootstrap import."""
+    import datetime as _dt
+    import os
+
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    f = mem / "old_note.md"
+    _write(f, "old-note", "reference", "d", "Body.")
+    old = _dt.datetime(2026, 1, 1, 12, 0, 0).timestamp()
+    os.utime(f, (old, old))
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    mi.import_memory_dir(conn, mem, index_path=None, ts="2026-05-30T10:00:00")
+    row = conn.execute(
+        "SELECT created_at, updated_at FROM memories WHERE id='old-note'").fetchone()
+    assert row["updated_at"].startswith("2026-01-01")  # file age drives staleness
+    assert row["created_at"].startswith("2026-01-01")
+    # the audit row still records the import action time, not the file mtime
+    audit_ts = conn.execute(
+        "SELECT ts FROM audit_log WHERE target_id='old-note'").fetchone()[0]
+    assert audit_ts == "2026-05-30T10:00:00"
+    conn.close()
+
+
 def test_import_persists_file_slug_and_sort_order(tmp_path):
     """C1: the underscore filename slug is NOT derivable from name: (which drops
     prefixes, e.g. feedback_email_routing.md → name: email-routing). It must be

@@ -102,12 +102,19 @@ def _audit(conn, *, op, target_kind, target_id, reason, prior, ts):
 
 def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
                 description=None, index_hook=None, node_type="memory",
-                file_slug=None, sort_order=None):
-    """Upsert a memory through the redact chokepoint + audit. Returns id."""
+                file_slug=None, sort_order=None, created_at=None, updated_at=None):
+    """Upsert a memory through the redact chokepoint + audit. Returns id.
+
+    `ts` is the action time (always the audit-row timestamp). `created_at`/
+    `updated_at` default to `ts` but can be overridden so a bootstrap import can
+    stamp the file's real age (mtime) — otherwise every imported memory looks
+    freshly written and the §8 staleness signal never fires."""
     title = strip_secrets(title)
     body = strip_secrets(body)
     description = strip_secrets(description)
     index_hook = strip_secrets(index_hook)
+    created = created_at or ts
+    updated = updated_at or ts
 
     def work():
         prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
@@ -117,7 +124,7 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
                 "node_type, file_slug, sort_order, created_at, updated_at, "
                 "origin_session_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (id, type, title, body, description, index_hook, node_type,
-                 file_slug, sort_order, ts, ts, origin_session_id),
+                 file_slug, sort_order, created, updated, origin_session_id),
             )
             _audit(conn, op="save", target_kind="memory", target_id=id,
                    reason="create", prior=None, ts=ts)
@@ -127,7 +134,7 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
                 "index_hook=?, node_type=?, file_slug=?, sort_order=?, updated_at=? "
                 "WHERE id=?",
                 (type, title, body, description, index_hook, node_type,
-                 file_slug, sort_order, ts, id),
+                 file_slug, sort_order, updated, id),
             )
             _audit(conn, op="save", target_kind="memory", target_id=id,
                    reason="update", prior=dict(prior), ts=ts)
@@ -136,7 +143,7 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
         "op": "save_memory", "id": id, "type": type, "title": title, "body": body,
         "ts": ts, "origin_session_id": origin_session_id, "description": description,
         "index_hook": index_hook, "node_type": node_type, "file_slug": file_slug,
-        "sort_order": sort_order})
+        "sort_order": sort_order, "created_at": created, "updated_at": updated})
     return id
 
 

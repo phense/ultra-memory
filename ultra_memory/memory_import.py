@@ -5,6 +5,7 @@ memory_lib single-writer path (spec §6). Real-data import runs at bootstrap
 (§7.4) behind meta.import_complete; this module is unit-tested on fixtures.
 """
 import re
+from datetime import datetime
 from pathlib import Path
 
 from . import memory_lib
@@ -83,6 +84,9 @@ def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
         meta = fm.get("metadata", {})
         slug = path.stem  # underscore filename stem = how the harness addresses the file
         idx = index.get(slug, {})
+        # The file's real age (mtime) drives the §8 staleness signal; without it a
+        # bootstrap import stamps every memory with the import moment.
+        mtime = datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
         memory_lib.save_memory(
             conn, id=name, type=meta.get("type", "reference"),
             title=idx.get("title") or name, body=body, ts=ts,
@@ -92,6 +96,7 @@ def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
             node_type=meta.get("node_type", "memory"),
             file_slug=slug,
             sort_order=order_map.get(slug),
+            created_at=mtime, updated_at=mtime,
         )
         count += 1
     return count
