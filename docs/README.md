@@ -1,0 +1,28 @@
+# ultra-memory documentation
+
+A project-agnostic agent-memory engine + knowledge MCP for Claude Code, delivered
+as a local plugin. This `docs/` tree is split by reading intent:
+
+- **[user/](user/)** — for *consumers*: what ultra-memory is, how to install it, and
+  how to use the engine from a consuming project.
+  - [overview.md](user/overview.md) — what/why, the public/private boundary, status
+  - [usage.md](user/usage.md) — opening a DB, saving, querying, importing, exporting
+- **[developer/](developer/)** — for *contributors*: how the engine is built and how
+  to change it safely.
+  - [architecture.md](developer/architecture.md) — canonical model, modules, data flow
+  - [contributing.md](developer/contributing.md) — TDD, tests, the doc-discipline rule
+- **[reference/](reference/)** — *look-up*: schema, per-function API, operations.
+  - [schema.md](reference/schema.md) — tables, columns, migrations
+  - [api.md](reference/api.md) — every public function + behaviour
+  - [operations.md](reference/operations.md) — export/dump format, spool, rollback, redaction
+
+## Status (2026-05-30)
+
+The **memory engine + import/export are built and tested** (Plans 1–4; the test
+suite is green). The **MCP server, session hooks/rehydration, slash-command verbs,
+the wiki write-gateway, and the live one-time bootstrap import are future work**
+(Plans 5–8). Treat anything described here as "future" until its plan lands.
+
+A full adversarial audit of the engine ran on 2026-05-30 (verdict
+`go-after-fixes`); all findings — 4 critical, 1 high, 7 medium, 11 low + 1 nit —
+have been fixed with regression tests.

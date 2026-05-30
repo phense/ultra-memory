@@ -8,5 +8,14 @@ configuration (paths, the knowledge base it indexes, secrets) live in the *consu
 are injected via config — never committed here. No hardcoded user paths. One plugin, many
 possible consumers.
 
-Built with `uv`; run tests with `uv run pytest`. A genericized design doc is added under `docs/`
-during packaging.
+Built with `uv`; run tests with `uv run pytest`.
+
+**Documentation:** [`docs/`](docs/) — split by reading intent into
+[`user/`](docs/user/) (overview + usage), [`developer/`](docs/developer/)
+(architecture + contributing), and [`reference/`](docs/reference/) (schema, API,
+operations). Start at [`docs/README.md`](docs/README.md).
+
+**Contributing:** TDD is mandatory and `docs/` are kept in lockstep with the code.
+A warn-only doc-discipline hook ships under `.githooks/`; enable it once per clone
+with `git config core.hooksPath .githooks`. See
+[`docs/developer/contributing.md`](docs/developer/contributing.md).

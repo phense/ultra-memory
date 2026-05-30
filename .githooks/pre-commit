@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# ultra-memory doc-discipline (WARN-ONLY, never blocks).
+#
+# If a commit stages changes under ultra_memory/ (the library) but nothing under
+# docs/, print a reminder listing the changed modules so the docs are kept in
+# lockstep. This enforces the HABIT, not a gate — there is deliberately no
+# escape-hatch env var to abuse. See docs/developer/contributing.md.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+set -u
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+code_changed=$(printf '%s\n' "$staged" | grep -E '^ultra_memory/.*\.(py|sql)$' || true)
+docs_changed=$(printf '%s\n' "$staged" | grep -E '^docs/' || true)
+
+if [ -n "$code_changed" ] && [ -z "$docs_changed" ]; then
+  echo ""
+  echo "⚠  ultra-memory doc-discipline reminder"
+  echo "   Code changed under ultra_memory/, but docs/ was NOT touched in this commit:"
+  printf '%s\n' "$code_changed" | sed 's/^/     - /'
+  echo "   Consider updating:  docs/reference/api.md · docs/reference/schema.md ·"
+  echo "                       docs/developer/architecture.md · docs/user/usage.md ·"
+  echo "                       docs/reference/operations.md"
+  echo "   (warning only — the commit proceeds)"
+  echo ""
+fi
+
+exit 0
