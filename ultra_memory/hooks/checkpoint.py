@@ -62,3 +62,58 @@ def has_material_work(transcript_path):
         if name == "Bash" and "git commit" in str(inp.get("command", "")):
             return True
     return False
+
+
+from ultra_memory import memory_lib
+from ultra_memory.hooks import common
+
+
+def run(payload, *, db_path, ts):
+    """Record completed tasks as session_events. Returns {} (never blocks).
+
+    Fail-open at every gate: recursion guard, role, db-readiness, missing
+    transcript, and any unexpected error are all swallowed → {} (allow stop).
+    """
+    try:
+        if payload.get("stop_hook_active"):
+            return {}
+        if common.agent_role_optout(payload):
+            return {}
+        if not common.db_ready(db_path):
+            return {}
+        transcript = payload.get("transcript_path")
+        if not transcript or not Path(transcript).is_file():
+            return {}
+        tasks = completed_tasks(transcript)
+        if not tasks and not has_material_work(transcript):
+            return {}
+        session_id = common.session_id_of(payload, transcript)
+        conn = memory_lib.open_memory_db(str(db_path))
+        try:
+            for tid, subject in tasks:
+                memory_lib.record_session_event(
+                    conn, session_id=session_id, kind="task_done",
+                    title=subject or tid, ts=ts, detail=None,
+                )
+        finally:
+            conn.close()
+    except Exception:
+        # Hooks must never block the session on error.
+        return {}
+    return {}
+
+
+def _db_path_from_env():
+    import os
+    return os.environ.get("ULTRA_MEMORY_DB", "")
+
+
+def main(stdin, stdout):
+    import datetime
+    payload = common.read_payload(stdin)
+    db_path = _db_path_from_env()
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out = run(payload, db_path=db_path, ts=ts)
+    if out:
+        json.dump(out, stdout)
+    return 0
