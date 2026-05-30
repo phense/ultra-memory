@@ -93,3 +93,43 @@ def test_import_memory_dir_title_falls_back_to_slug(tmp_path):
     title = conn.execute("SELECT title FROM memories WHERE id='orphan'").fetchone()[0]
     assert title == "orphan"  # no index → slug fallback
     conn.close()
+
+
+_TODAY = """preamble prose before any header should be skipped
+## 23:11 | main
+Extracted 8 claims from a video; rejected 127 segments.
+
+## 19:36-20:21 | main
+Designed the trade DB schema and the weekly review.
+"""
+
+
+def test_import_today_file_parses_headers_and_ranges(tmp_path):
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    n, warnings = mi.import_today_file(conn, _TODAY, day="2026-05-27")
+    assert n == 2
+    rows = conn.execute(
+        "SELECT ts, title, detail FROM session_events "
+        "WHERE session_id='legacy-2026-05-27' ORDER BY ts").fetchall()
+    assert rows[0]["ts"] == "2026-05-27T19:36:00"   # range → start time
+    assert rows[1]["ts"] == "2026-05-27T23:11:00"
+    assert "Extracted 8 claims" in rows[1]["detail"]
+    assert any("prose" in w or "skip" in w.lower() for w in warnings)
+    conn.close()
+
+
+def test_import_today_file_is_idempotent(tmp_path):
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    for _ in range(2):
+        mi.import_today_file(conn, _TODAY, day="2026-05-27")
+    n = conn.execute("SELECT COUNT(*) FROM session_events "
+                     "WHERE session_id='legacy-2026-05-27'").fetchone()[0]
+    assert n == 2
+    conn.close()
+
+
+def test_import_today_file_never_crashes_on_junk(tmp_path):
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    n, warnings = mi.import_today_file(conn, "garbage\n## not a time | x\nmore", day="2026-05-27")
+    assert n == 0  # '## not a time' is not a valid HH:MM header
+    conn.close()

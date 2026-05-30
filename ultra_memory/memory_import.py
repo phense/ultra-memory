@@ -90,3 +90,36 @@ def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
         )
         count += 1
     return count
+
+
+_TODAY_HEADER = re.compile(r"^##\s+(?P<start>\d{2}:\d{2})(?:-(?P<end>\d{2}:\d{2}))?"
+                           r"\s*\|\s*(?P<ctx>.*)$")
+
+
+def import_today_file(conn, text, *, day):
+    """Import a .remember/today-<day>.md into session_events under a synthetic
+    'legacy-<day>' session. Returns (count, warnings). Idempotent; never crashes."""
+    session_id = f"legacy-{day}"
+    lines = text.splitlines()
+    blocks = []          # (ts, ctx, [body lines])
+    warnings = []
+    current = None
+    for line in lines:
+        m = _TODAY_HEADER.match(line)
+        if m:
+            ts = f"{day}T{m.group('start')}:00"
+            current = (ts, m.group("ctx").strip(), [])
+            blocks.append(current)
+        elif current is not None:
+            current[2].append(line)
+        elif line.strip():
+            warnings.append(f"skip non-conforming prose: {line.strip()[:40]!r}")
+    count = 0
+    for ts, ctx, body_lines in blocks:
+        detail = "\n".join(body_lines).strip()
+        title = (detail.splitlines()[0] if detail else ctx)[:120]
+        memory_lib.record_session_event(
+            conn, session_id=session_id, kind="legacy_note", title=title, ts=ts,
+            detail=detail, session_fields={"started_at": f"{day}T00:00:00"})
+        count += 1
+    return count, warnings
