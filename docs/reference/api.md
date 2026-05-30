@@ -96,3 +96,56 @@ Every public function. The caller owns connections and supplies timestamps.
   runner=subprocess.run, env=None) -> str` — OAuth-sanitised CLI call. Raises
   `OAuthViolation` (API key present / OAuth token missing) or `ClaudeCliError`
   (nonzero exit). Inject `runner` in tests.
+
+## `retention`
+
+- `prune_session_events(conn, *, keep_days, ts) -> int` — roll `session_events`
+  older than `keep_days` (relative to `ts`) into the owning `sessions.summary`
+  (one digest line per event), then delete the rows in one `BEGIN IMMEDIATE`
+  transaction. Returns the count deleted; 0 (no-op) when nothing is old enough.
+  Bounds the table where the real growth is (spec §8 D11).
+
+## `hooks.common`
+
+Shared, fail-open, no-LLM, no-write helpers for the session hooks.
+
+- `agent_role_optout(payload=None) -> bool` — True when the hook must no-op:
+  env `ULTRA_MEMORY_AGENT_ROLE` is non-empty (cron/subagent wrappers set it), or
+  a SessionStart `payload["source"]` is not in `INTERACTIVE_SOURCES`
+  (`{startup, resume, clear, compact}`).
+- `db_ready(db_path) -> bool` — True only when the schema is present AND
+  `meta.import_complete == '1'`. Any error / missing file → False (fail-open to
+  the legacy path, spec §7.4).
+- `read_payload(stream) -> dict` — parse a hook stdin payload; `{}` on any error.
+- `session_id_of(payload, transcript_path=None) -> str` — prefer
+  `payload["session_id"]`, else the transcript filename stem, else
+  `"unknown-session"`.
+
+## `hooks.checkpoint` (Stop hook)
+
+- `completed_tasks(transcript_path) -> [(task_id, subject)]` — replay
+  `TaskCreate`/`TaskUpdate` blocks from the raw transcript JSONL; emit subjects
+  whose final folded status is `completed`, in first-seen order (spec §9.1).
+- `has_material_work(transcript_path) -> bool` — True if the session ran an
+  `Edit`/`Write`/`NotebookEdit` or a `git commit` Bash call.
+- `run(payload, *, db_path, ts) -> dict` — record each completed task as a
+  `kind='task_done'` session event via `memory_lib.record_session_event`
+  (idempotent on `event_key`). Always returns `{}` (NEVER blocks). No-ops on:
+  `stop_hook_active`, role opt-out, DB not ready, missing transcript, or no
+  material work.
+- `main(stdin, stdout) -> int` — CLI shell: read payload, `ULTRA_MEMORY_DB` from
+  env, stamp `ts`, run, write any output. Exit 0.
+
+## `hooks.rehydrate` (SessionStart hook)
+
+- `build_gist(conn, *, budget_chars=2000) -> str` — pure-SQL, no-LLM gist:
+  pinned rules + "where we left off" (last `sessions.summary`, else recent
+  events) + open follow-ups + hot memories + a pull-on-demand pointer; truncated
+  to `budget_chars` (spec §9.2).
+- `run(payload, *, db_path, shadow, ts, shadow_out=None, budget_chars=2000) -> dict`
+  — shadow mode writes the gist to `shadow_out` and returns `{}` (no injection);
+  live mode returns `{"hookSpecificOutput": {"hookEventName": "SessionStart",
+  "additionalContext": gist}}`. No-ops on role opt-out / DB not ready / empty
+  gist. Fail-open: any error → `{}`.
+- `main(stdin, stdout) -> int` — CLI shell; `ULTRA_MEMORY_DB`,
+  `ULTRA_MEMORY_SHADOW` (default `"1"`), `ULTRA_MEMORY_SHADOW_OUT` from env.

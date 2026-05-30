@@ -32,6 +32,31 @@ not a rollback source for those.
 | `memory_import.py` | Parse the legacy markdown tree + `.remember/today-*.md` → writes via `memory_lib`. |
 | `memory_export.py` | The rollback artifact: redacted dump + snapshot + views, atomic + skip-if-unchanged. |
 | `claude_cli.py` | The single OAuth-sanitised LLM chokepoint (engine uses no LLM; this is for future agents). |
+| `retention.py` | Bound `session_events`: roll rows older than `keep_days` into `sessions.summary`, then delete (spec §8 D11). |
+| `hooks/common.py` | Fail-open, no-LLM hook helpers: role-guard, `db_ready` bootstrap probe, payload parse, session-id. |
+| `hooks/checkpoint.py` | Stop hook: replay the raw transcript JSONL → record completed tasks as `task_done` events. Never blocks. |
+| `hooks/rehydrate.py` | SessionStart hook: budgeted pure-SQL gist; shadow mode logs it, live mode injects `additionalContext`. |
+
+## Session hooks (spec §9, §10) — the capture/replay edge
+
+Two hooks bracket each interactive session, both **fail-open** (a hook error or a
+not-yet-bootstrapped DB never blocks Peter) and **role-scoped** (no-op for
+cron/subagent runs via `ULTRA_MEMORY_AGENT_ROLE` or a non-interactive SessionStart
+`source`):
+
+- **Stop → `checkpoint.run`**: derives `tasks_done` from the raw transcript JSONL
+  on disk (not the compacted in-context view, so mid-session compaction can't
+  truncate it) and records each as an idempotent `task_done` session event.
+- **SessionStart → `rehydrate.run`**: composes a ≤2k-char gist from the DB
+  (pinned rules, where-we-left-off, open follow-ups, hot memories) with no LLM and
+  no embedder — `memory_lib` imports in ~15ms and pulls in no fastembed, so the
+  hot path stays fast.
+
+Both gate on `common.db_ready` (`meta.import_complete == '1'`): until the one-time
+import is done they fail-open to the legacy `remember`/`MEMORY.md` path (spec §7.4).
+The **shadow→cutover** rollout (spec §11) runs them against a throwaway
+`memory_shadow.db` with injection suppressed until shadow-validated, then flips to
+the canonical DB and retires the `remember` plugin.
 
 ## Write-ownership & concurrency (spec §6)
 
@@ -85,7 +110,9 @@ to the `claude` CLI. Never the `anthropic` SDK / `api.anthropic.com` /
 ## What's built vs future
 
 Built + tested: `db`, `migrations`, `memory_lib`, `redact_secrets`,
-`retrieval_core`, `memory_query`, `memory_import`, `memory_export`, `claude_cli`.
-Future (Plans 5–8): session hooks + rehydration, the live bootstrap import behind
-`meta.import_complete`, the `knowledge` MCP server (read-only, writes proxied to a
+`retrieval_core`, `memory_query`, `memory_import`, `memory_export`, `claude_cli`,
+`retention`, and the session `hooks` (`common`, `checkpoint`, `rehydrate`).
+Future (Plans 5 cutover onward): the **live** bootstrap import + shadow→cutover
+wiring behind `meta.import_complete` (consumer-side; the hook logic is built and
+unit-tested here), the `knowledge` MCP server (read-only, writes proxied to a
 short-lived `memory_lib`), the wiki write-gateway, and plugin packaging/publish.
