@@ -61,3 +61,48 @@ def build_gist(conn, *, budget_chars=2000):
     if len(gist) > budget_chars:
         gist = gist[:budget_chars].rsplit("\n", 1)[0] + "\n…(truncated)"
     return gist
+
+
+from ultra_memory import memory_lib
+
+
+def run(payload, *, db_path, shadow, ts, shadow_out=None, budget_chars=2000):
+    """Build + inject the gist (live) or log it (shadow). Returns {} when no
+    injection. Fail-open: any error → {} (SessionStart proceeds without us)."""
+    try:
+        if common.agent_role_optout(payload):
+            return {}
+        if not common.db_ready(db_path):
+            return {}
+        conn = memory_lib.open_memory_db(str(db_path))
+        try:
+            gist = build_gist(conn, budget_chars=budget_chars)
+        finally:
+            conn.close()
+        if not gist.strip():
+            return {}
+        if shadow:
+            if shadow_out is not None:
+                out_path = Path(shadow_out)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(f"<!-- shadow rehydration {ts} -->\n{gist}\n",
+                                    encoding="utf-8")
+            return {}
+        return {"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                       "additionalContext": gist}}
+    except Exception:
+        return {}
+
+
+def main(stdin, stdout):
+    import datetime
+    import os
+    payload = common.read_payload(stdin)
+    db_path = os.environ.get("ULTRA_MEMORY_DB", "")
+    shadow = os.environ.get("ULTRA_MEMORY_SHADOW", "1") == "1"
+    shadow_out = os.environ.get("ULTRA_MEMORY_SHADOW_OUT") or None
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out = run(payload, db_path=db_path, shadow=shadow, ts=ts, shadow_out=shadow_out)
+    if out:
+        json.dump(out, stdout)
+    return 0

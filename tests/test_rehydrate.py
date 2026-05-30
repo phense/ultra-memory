@@ -49,3 +49,46 @@ def test_gist_empty_db_is_safe(tmp_path):
     p, conn = _db(tmp_path)
     g = rehydrate.build_gist(conn)
     assert isinstance(g, str)
+
+
+def _ready_db(tmp_path):
+    p = tmp_path / "memory.db"
+    conn = memory_lib.open_memory_db(str(p))
+    memory_lib.save_memory(conn, id="r6", type="feedback", title="Tax Fence",
+                           body="Close Dec 30", ts="2026-05-01T00:00:00Z")
+    conn.execute("UPDATE memories SET pinned=1 WHERE id='r6'")
+    conn.execute("INSERT OR REPLACE INTO meta (key,value) VALUES ('import_complete','1')")
+    conn.commit()
+    conn.close()
+    return p
+
+
+def test_run_injects_when_live(tmp_path):
+    p = _ready_db(tmp_path)
+    out = rehydrate.run({"source": "startup"}, db_path=p, shadow=False,
+                        ts="2026-05-30T16:00:00Z")
+    assert out["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert "Tax Fence" in out["hookSpecificOutput"]["additionalContext"]
+
+
+def test_run_shadow_writes_file_and_injects_nothing(tmp_path):
+    p = _ready_db(tmp_path)
+    shadow_out = tmp_path / "shadow" / "rehydration.md"
+    out = rehydrate.run({"source": "startup"}, db_path=p, shadow=True,
+                        ts="2026-05-30T16:00:00Z", shadow_out=shadow_out)
+    assert out == {}  # no injection in shadow
+    assert "Tax Fence" in shadow_out.read_text()
+
+
+def test_run_noops_for_cron(tmp_path, monkeypatch):
+    p = _ready_db(tmp_path)
+    monkeypatch.setenv("ULTRA_MEMORY_AGENT_ROLE", "cron")
+    out = rehydrate.run({"source": "startup"}, db_path=p, shadow=False,
+                        ts="2026-05-30T16:00:00Z")
+    assert out == {}
+
+
+def test_run_noops_when_db_not_ready(tmp_path):
+    out = rehydrate.run({"source": "startup"}, db_path=tmp_path / "absent.db",
+                        shadow=False, ts="2026-05-30T16:00:00Z")
+    assert out == {}
