@@ -3,6 +3,7 @@
 BM25/RRF/reranker for memory are deferred behind the eval harness (D11). No LLM.
 Every entry point takes an injected `embedder` (list[str] -> list[list[float]]).
 """
+import re
 from datetime import datetime
 
 from . import retrieval_core as rc
@@ -24,9 +25,11 @@ def _days_between(later_ts, earlier_ts):
     try:
         a = datetime.fromisoformat(later_ts)
         b = datetime.fromisoformat(earlier_ts)
-    except ValueError:
+        return (a - b).days
+    except (ValueError, TypeError):
+        # Unparseable, or a tz-aware vs naive mismatch (subtraction raises
+        # TypeError) — treat as 0 days rather than crashing the whole query.
         return 0
-    return (a - b).days
 
 
 def _links_for(conn, mid):
@@ -38,11 +41,20 @@ def _links_for(conn, mid):
 
 
 def _title_hit(title, query):
+    """True iff the title appears as a whole token in the query (or vice-versa).
+    Word-bounded so short titles like 'car'/'new'/'test' don't spuriously match
+    inside 'oscar'/'newsletter'/'backtest'."""
     if not title:
         return False
-    t = title.lower()
-    q = query.lower()
-    return t in q or q in t
+    t = title.lower().strip()
+    q = query.lower().strip()
+    if not t or not q:
+        return False
+
+    def _whole(needle, hay):
+        return re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", hay) is not None
+
+    return _whole(t, q) or _whole(q, t)
 
 
 def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,

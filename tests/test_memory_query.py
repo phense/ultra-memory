@@ -28,6 +28,23 @@ def _save(conn, **kw):
     memory_lib.save_memory(conn, **kw)
 
 
+def test_title_hit_is_word_bounded(tmp_path):
+    """L1: title-injection must match whole tokens, not substrings — 'car' inside
+    'oscar', 'new' inside 'newsletter', 'test' inside 'backtest' are NOT hits."""
+    assert memory_query._title_hit("oauth", "the oauth rule") is True
+    assert memory_query._title_hit("new", "new ideas today") is True
+    assert memory_query._title_hit("new", "the newsletter shipped") is False
+    assert memory_query._title_hit("test", "the backtest passed") is False
+    assert memory_query._title_hit("car", "oscar predictions") is False
+
+
+def test_days_between_survives_tz_mismatch():
+    """L2: a tz-aware vs naive timestamp subtraction raises TypeError; it must be
+    swallowed (treated as 0 days) rather than crashing the whole query."""
+    assert memory_query._days_between(
+        "2026-05-30T10:00:00+00:00", "2026-01-01T00:00:00") == 0
+
+
 def test_query_ranks_by_cosine(tmp_path):
     conn = _db(tmp_path)
     _save(conn, id="apple", title="apple", body="apple fruit")
