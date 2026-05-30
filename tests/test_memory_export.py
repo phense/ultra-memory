@@ -2,11 +2,62 @@ import sqlite3
 
 from ultra_memory import db
 from ultra_memory import memory_export as mx
+from ultra_memory import memory_import as mi
 from ultra_memory import memory_lib
 
 
 def _db(tmp_path):
     return memory_lib.open_memory_db(tmp_path / "m.db")
+
+
+def _write(p, name, typ, desc, body, sid="s-1"):
+    p.write_text(
+        f"---\nname: {name}\ndescription: \"{desc}\"\nmetadata: \n"
+        f"  node_type: memory\n  type: {typ}\n  originSessionId: {sid}\n---\n\n{body}\n")
+
+
+def test_export_filenames_match_source_filenames(tmp_path):
+    """C1: a roundtrip must NOT rename files. The export filename + MEMORY.md link
+    must use the underscore filename slug, not the hyphenated name: (which is the
+    DB id)."""
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    _write(mem / "feedback_email_routing.md", "email-routing", "feedback", "d", "B.")
+    _write(mem / "user_language.md", "user-language", "user", "d", "B.")
+    (mem / "MEMORY.md").write_text(
+        "- [Email routing](feedback_email_routing.md) — hook\n"
+        "- [Lang](user_language.md) — hook\n")
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    mi.import_memory_dir(conn, mem, index_path=mem / "MEMORY.md", ts="2026-05-30T10:00:00")
+    out = tmp_path / "exp"
+    mx.export_memory(conn, out, ts="2026-05-30T12:00:00")
+    exported = {p.name for p in (out / "views").glob("*.md") if p.name != "MEMORY.md"}
+    assert exported == {"feedback_email_routing.md", "user_language.md"}
+    # MEMORY.md links use the underscore filenames, not the hyphenated ids
+    index = (out / "views" / "MEMORY.md").read_text()
+    assert "(feedback_email_routing.md)" in index
+    assert "(email-routing.md)" not in index
+    conn.close()
+
+
+def test_export_memory_index_preserves_source_order(tmp_path):
+    """C1: MEMORY.md curated order must survive (sort_order), not be re-sorted
+    alphabetically by id (which would move the pinned top line)."""
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    _write(mem / "zzz_pinned.md", "zzz-pinned", "project", "d", "B.")
+    _write(mem / "aaa_other.md", "aaa-other", "reference", "d", "B.")
+    (mem / "MEMORY.md").write_text(
+        "- [Pinned](zzz_pinned.md) — top\n"     # curated FIRST despite 'zzz'
+        "- [Other](aaa_other.md) — below\n")
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    mi.import_memory_dir(conn, mem, index_path=mem / "MEMORY.md", ts="2026-05-30T10:00:00")
+    out = tmp_path / "exp"
+    mx.export_memory(conn, out, ts="2026-05-30T12:00:00")
+    lines = [l for l in (out / "views" / "MEMORY.md").read_text().splitlines() if l.strip()]
+    assert lines[0].startswith("- [Pinned](zzz_pinned.md)")  # source order, not alphabetical
+    assert lines[1].startswith("- [Other](aaa_other.md)")
+    conn.close()
 
 
 def test_dump_restore_reopen_roundtrips_without_crash(tmp_path):

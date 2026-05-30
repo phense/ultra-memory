@@ -8,7 +8,8 @@ import hashlib
 from pathlib import Path
 
 _STABLE_COLS = ("id", "type", "title", "description", "index_hook", "node_type",
-                "body", "status", "supersedes", "origin_session_id")
+                "file_slug", "sort_order", "body", "status", "supersedes",
+                "origin_session_id")
 
 
 def _content_hash(conn):
@@ -66,12 +67,18 @@ def export_memory(conn, out_dir, *, ts, snapshot=True):
     views = out_dir / "views"
     views.mkdir(exist_ok=True)
     index_lines = []
+    # Preserve the harness FILENAME (file_slug, underscore) and the curated MEMORY.md
+    # order (sort_order). The DB id is the hyphenated name: and must NOT drive the
+    # filename or the index link, or a roundtrip renames the files. NULL sort_order
+    # (orphans / post-import rows) sort last, then by id.
     rows = conn.execute(
-        "SELECT * FROM memories WHERE status='active' ORDER BY id").fetchall()
+        "SELECT * FROM memories WHERE status='active' "
+        "ORDER BY sort_order IS NULL, sort_order, id").fetchall()
     for row in rows:
-        (views / f"{row['id']}.md").write_text(_frontmatter(row) + (row["body"] or ""))
+        slug = row["file_slug"] or row["id"]
+        (views / f"{slug}.md").write_text(_frontmatter(row) + (row["body"] or ""))
         hook = f" — {row['index_hook']}" if row["index_hook"] else ""
-        index_lines.append(f"- [{row['title']}]({row['id']}.md){hook}")
+        index_lines.append(f"- [{row['title']}]({slug}.md){hook}")
     (views / "MEMORY.md").write_text("\n".join(index_lines) + "\n")
 
     hash_path.write_text(new_hash)

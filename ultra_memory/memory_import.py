@@ -71,6 +71,8 @@ def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
     index = {}
     if index_path is not None and Path(index_path).exists():
         index = parse_memory_index(Path(index_path).read_text())
+    # MEMORY.md line order → sort_order (keyed by filename slug, the index's link target).
+    order_map = {slug: i for i, slug in enumerate(index)}
     count = 0
     for path in sorted(memory_dir.glob("*.md")):
         if path.name == "MEMORY.md":
@@ -78,7 +80,7 @@ def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
         fm, body = split_frontmatter(path.read_text())
         name = fm.get("name") or path.stem
         meta = fm.get("metadata", {})
-        slug = path.stem
+        slug = path.stem  # underscore filename stem = how the harness addresses the file
         idx = index.get(slug, {})
         memory_lib.save_memory(
             conn, id=name, type=meta.get("type", "reference"),
@@ -87,6 +89,8 @@ def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
             description=fm.get("description"),
             index_hook=idx.get("hook"),
             node_type=meta.get("node_type", "memory"),
+            file_slug=slug,
+            sort_order=order_map.get(slug),
         )
         count += 1
     return count

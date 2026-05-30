@@ -32,9 +32,10 @@ def test_import_export_reimport_roundtrip(tmp_path):
 
     def snap(conn):
         return {r["id"]: (r["type"], r["title"], r["description"], r["index_hook"],
-                          (r["body"] or "").strip())
+                          r["file_slug"], r["sort_order"], (r["body"] or "").strip())
                 for r in conn.execute(
-                    "SELECT id, type, title, description, index_hook, body FROM memories")}
+                    "SELECT id, type, title, description, index_hook, file_slug, "
+                    "sort_order, body FROM memories")}
 
     db1b = memory_lib.open_memory_db(tmp_path / "a.db")
     assert snap(db1b) == snap(db2)

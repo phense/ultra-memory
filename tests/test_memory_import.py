@@ -133,3 +133,26 @@ def test_import_today_file_never_crashes_on_junk(tmp_path):
     n, warnings = mi.import_today_file(conn, "garbage\n## not a time | x\nmore", day="2026-05-27")
     assert n == 0  # '## not a time' is not a valid HH:MM header
     conn.close()
+
+
+def test_import_persists_file_slug_and_sort_order(tmp_path):
+    """C1: the underscore filename slug is NOT derivable from name: (which drops
+    prefixes, e.g. feedback_email_routing.md → name: email-routing). It must be
+    persisted as its own column, plus the MEMORY.md line order."""
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    _write(mem / "feedback_email_routing.md", "email-routing", "feedback", "d", "B.")
+    _write(mem / "user_language.md", "user-language", "user", "d", "B.")
+    (mem / "MEMORY.md").write_text(
+        "- [Lang](user_language.md) — hook L\n"             # FIRST in the index
+        "- [Email](feedback_email_routing.md) — hook E\n")  # SECOND in the index
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    mi.import_memory_dir(conn, mem, index_path=mem / "MEMORY.md", ts="2026-05-30T10:00:00")
+    row = conn.execute(
+        "SELECT file_slug, sort_order FROM memories WHERE id='email-routing'").fetchone()
+    assert row["file_slug"] == "feedback_email_routing"  # underscore filename, not id
+    assert row["sort_order"] == 1                          # second line in MEMORY.md
+    first = conn.execute(
+        "SELECT sort_order FROM memories WHERE id='user-language'").fetchone()
+    assert first["sort_order"] == 0                        # first line
+    conn.close()
