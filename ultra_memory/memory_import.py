@@ -62,3 +62,31 @@ def parse_memory_index(text):
             out[m.group("slug")] = {"title": m.group("title"),
                                     "hook": m.group("hook")}
     return out
+
+
+def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
+    """Import every memory/*.md (excluding MEMORY.md) → save_memory upserts.
+    Returns the count imported. Idempotent (per-id upsert)."""
+    memory_dir = Path(memory_dir)
+    index = {}
+    if index_path is not None and Path(index_path).exists():
+        index = parse_memory_index(Path(index_path).read_text())
+    count = 0
+    for path in sorted(memory_dir.glob("*.md")):
+        if path.name == "MEMORY.md":
+            continue
+        fm, body = split_frontmatter(path.read_text())
+        name = fm.get("name") or path.stem
+        meta = fm.get("metadata", {})
+        slug = path.stem
+        idx = index.get(slug, {})
+        memory_lib.save_memory(
+            conn, id=name, type=meta.get("type", "reference"),
+            title=idx.get("title") or name, body=body, ts=ts,
+            origin_session_id=meta.get("originSessionId"),
+            description=fm.get("description"),
+            index_hook=idx.get("hook"),
+            node_type=meta.get("node_type", "memory"),
+        )
+        count += 1
+    return count
