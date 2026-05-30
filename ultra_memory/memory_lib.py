@@ -92,3 +92,23 @@ def record_session_event(conn, *, session_id, kind, title, ts,
         conn.execute("ROLLBACK")
         raise
     return key
+
+
+def record_access(conn, *, target_kind, target_id, ts, context=None):
+    """Append-only access log + atomic access_count increment (memory targets only)."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(
+            "INSERT INTO access_log (target_kind, target_id, ts, context) VALUES (?,?,?,?)",
+            (target_kind, target_id, ts, context),
+        )
+        if target_kind == "memory":
+            conn.execute(
+                "UPDATE memories SET access_count = access_count + 1, last_accessed=? "
+                "WHERE id=?",
+                (ts, target_id),
+            )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise

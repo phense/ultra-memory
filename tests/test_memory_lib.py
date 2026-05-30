@@ -68,3 +68,27 @@ def test_record_session_event_is_idempotent(tmp_path):
     n = conn.execute("SELECT COUNT(*) FROM session_events WHERE session_id='s1'").fetchone()[0]
     assert n == 1
     conn.close()
+
+
+def test_record_access_increments_atomically(tmp_path):
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00")
+    memory_lib.record_access(conn, target_kind="memory", target_id="m1",
+                             ts="2026-05-30T10:05:00")
+    memory_lib.record_access(conn, target_kind="memory", target_id="m1",
+                             ts="2026-05-30T10:06:00")
+    row = conn.execute("SELECT access_count, last_accessed FROM memories WHERE id='m1'").fetchone()
+    assert row["access_count"] == 2 and row["last_accessed"] == "2026-05-30T10:06:00"
+    n = conn.execute("SELECT COUNT(*) FROM access_log WHERE target_id='m1'").fetchone()[0]
+    assert n == 2
+    conn.close()
+
+
+def test_record_access_nonmemory_only_logs(tmp_path):
+    conn = _db(tmp_path)
+    memory_lib.record_access(conn, target_kind="wiki", target_id="slug-x",
+                             ts="2026-05-30T10:00:00")
+    n = conn.execute("SELECT COUNT(*) FROM access_log WHERE target_id='slug-x'").fetchone()[0]
+    assert n == 1
+    conn.close()
