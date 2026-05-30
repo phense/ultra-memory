@@ -1,3 +1,6 @@
+import json
+import sqlite3
+
 import pytest
 
 from ultra_memory import memory_lib
@@ -150,4 +153,79 @@ def test_save_memory_persists_fidelity_fields(tmp_path):
     assert row["description"] == "one-liner"
     assert row["index_hook"] == "the hook"
     assert row["node_type"] == "memory"
+    conn.close()
+
+
+def test_write_txn_retries_busy_then_succeeds(tmp_path):
+    """H1: a transient 'database is locked' must be retried with backoff, not
+    dropped."""
+    conn = _db(tmp_path)
+    calls = {"n": 0}
+    sleeps = []
+
+    def work():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise sqlite3.OperationalError("database is locked")
+        conn.execute("INSERT INTO meta (key, value) VALUES ('k','v')")
+
+    memory_lib._write_txn(conn, work, retries=5, sleep=lambda s: sleeps.append(s))
+    assert calls["n"] == 3
+    assert len(sleeps) == 2  # two backoff sleeps before the 3rd attempt succeeds
+    assert conn.execute("SELECT value FROM meta WHERE key='k'").fetchone()[0] == "v"
+    conn.close()
+
+
+def test_write_txn_spools_and_raises_on_exhaustion(tmp_path):
+    """H1: a write that never gets the lock must be spooled to a durable file AND
+    fail loudly — never silently dropped (§6 + §15)."""
+    conn = _db(tmp_path)
+
+    def work():
+        raise sqlite3.OperationalError("database is locked")
+
+    with pytest.raises(memory_lib.WriteSpooled):
+        memory_lib._write_txn(conn, work, spool={"op": "save_memory", "id": "x"},
+                              retries=3, sleep=lambda s: None)
+    spooled = list((tmp_path / "memory_spool").glob("*.json"))
+    assert len(spooled) == 1
+    rec = json.loads(spooled[0].read_text())
+    assert rec["op"] == "save_memory" and rec["id"] == "x"
+    conn.close()
+
+
+def test_write_txn_non_busy_error_raises_immediately(tmp_path):
+    """H1: a real bug (not a lock) must surface at once, not be retried/spooled."""
+    conn = _db(tmp_path)
+    calls = {"n": 0}
+
+    def work():
+        calls["n"] += 1
+        raise ValueError("boom")
+
+    with pytest.raises(ValueError):
+        memory_lib._write_txn(conn, work, retries=5, sleep=lambda s: None)
+    assert calls["n"] == 1  # no retry on a non-busy error
+    assert not (tmp_path / "memory_spool").exists()
+    conn.close()
+
+
+def test_save_memory_routes_through_retry(tmp_path):
+    """H1: the public writers must use the retry/spool path, not a bare BEGIN."""
+    conn = _db(tmp_path)
+    seen = {}
+    real = memory_lib._write_txn
+
+    def spy(c, work, **kw):
+        seen["spool"] = kw.get("spool")
+        return real(c, work, **kw)
+
+    memory_lib._write_txn = spy
+    try:
+        memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
+                               ts="2026-05-30T10:00:00")
+    finally:
+        memory_lib._write_txn = real
+    assert seen["spool"] is not None and seen["spool"]["op"] == "save_memory"
+    assert conn.execute("SELECT 1 FROM memories WHERE id='m1'").fetchone() is not None
     conn.close()

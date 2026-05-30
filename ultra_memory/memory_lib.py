@@ -8,12 +8,80 @@ delete = soft tombstone.
 """
 import hashlib
 import json
+import sqlite3
+import time
 from pathlib import Path
 
 from . import db
 from .redact_secrets import strip_secrets
 
 _MIGRATIONS = Path(__file__).resolve().parent / "migrations"
+
+
+class WriteSpooled(Exception):
+    """Raised LOUDLY when a write could not be committed after the bounded retries
+    (db stayed busy) and was therefore written to the durable spool for replay
+    rather than silently dropped (spec §6 + §15)."""
+
+
+def _is_busy(exc):
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    msg = str(exc).lower()
+    return "locked" in msg or "busy" in msg
+
+
+def _spool_dir(conn):
+    """The memory_spool/ dir beside the main db file. None for an in-memory db."""
+    for _seq, name, file in conn.execute("PRAGMA database_list"):
+        if name == "main":
+            return (Path(file).parent / "memory_spool") if file else None
+    return None
+
+
+def _spool(conn, record):
+    """Persist a failed write's intent for later replay. Keyed by content hash so a
+    retried-then-spooled op writes one stable file, not duplicates."""
+    if record is None:
+        return
+    target = _spool_dir(conn)
+    if target is None:
+        return
+    target.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(record, sort_keys=True, ensure_ascii=False)
+    key = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    (target / f"{key}.json").write_text(payload)
+
+
+def _write_txn(conn, work, *, spool=None, retries=5, base_delay=0.05, sleep=time.sleep):
+    """Run work() inside BEGIN IMMEDIATE/COMMIT with bounded retry-with-backoff on
+    SQLITE_BUSY (spec §6). work() must be re-runnable (it re-executes from scratch
+    each attempt; the prior attempt was rolled back). A non-busy error surfaces
+    immediately. On retry exhaustion the op is spooled durably and WriteSpooled is
+    raised loudly — never a silent drop."""
+    last = None
+    for attempt in range(retries):
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            work()
+            conn.execute("COMMIT")
+            return
+        except sqlite3.OperationalError as exc:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            if not _is_busy(exc):
+                raise
+            last = exc
+            sleep(base_delay * (2 ** attempt))
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+    _spool(conn, spool)
+    raise WriteSpooled(
+        f"write failed after {retries} retries (database busy); spooled for replay: "
+        f"{(spool or {}).get('op', '?')}"
+    ) from last
 
 
 def open_memory_db(path, migrations_dir=_MIGRATIONS):
@@ -40,8 +108,8 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
     body = strip_secrets(body)
     description = strip_secrets(description)
     index_hook = strip_secrets(index_hook)
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+
+    def work():
         prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
         if prior is None:
             conn.execute(
@@ -63,10 +131,12 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
             )
             _audit(conn, op="save", target_kind="memory", target_id=id,
                    reason="update", prior=dict(prior), ts=ts)
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
+
+    _write_txn(conn, work, spool={
+        "op": "save_memory", "id": id, "type": type, "title": title, "body": body,
+        "ts": ts, "origin_session_id": origin_session_id, "description": description,
+        "index_hook": index_hook, "node_type": node_type, "file_slug": file_slug,
+        "sort_order": sort_order})
     return id
 
 
@@ -82,8 +152,8 @@ def record_session_event(conn, *, session_id, kind, title, ts,
     detail = strip_secrets(detail)
     key = _event_key(session_id, ts, kind, title)
     sf = session_fields or {}
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+
+    def work():
         conn.execute(
             "INSERT OR IGNORE INTO sessions (id, started_at, status) VALUES (?,?,?)",
             (session_id, sf.get("started_at", ts), sf.get("status", "active")),
@@ -96,17 +166,17 @@ def record_session_event(conn, *, session_id, kind, title, ts,
              json.dumps(files) if files is not None else None,
              json.dumps(refs) if refs is not None else None, key),
         )
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
+
+    _write_txn(conn, work, spool={
+        "op": "record_session_event", "session_id": session_id, "kind": kind,
+        "title": title, "ts": ts, "detail": detail, "files": files, "refs": refs,
+        "event_key": key})
     return key
 
 
 def record_access(conn, *, target_kind, target_id, ts, context=None):
     """Append-only access log + atomic access_count increment (memory targets only)."""
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    def work():
         conn.execute(
             "INSERT INTO access_log (target_kind, target_id, ts, context) VALUES (?,?,?,?)",
             (target_kind, target_id, ts, context),
@@ -117,16 +187,15 @@ def record_access(conn, *, target_kind, target_id, ts, context=None):
                 "WHERE id=?",
                 (ts, target_id),
             )
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
+
+    _write_txn(conn, work, spool={
+        "op": "record_access", "target_kind": target_kind, "target_id": target_id,
+        "ts": ts, "context": context})
 
 
 def consolidate(conn, *, loser_id, canonical_id, reason, ts):
     """Redirect-stub: mark loser status='redirect' + supersedes=canonical. Never deletes."""
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    def work():
         prior = conn.execute("SELECT * FROM memories WHERE id=?", (loser_id,)).fetchone()
         if prior is None:
             raise KeyError(loser_id)
@@ -136,10 +205,10 @@ def consolidate(conn, *, loser_id, canonical_id, reason, ts):
         )
         _audit(conn, op="redirect", target_kind="memory", target_id=loser_id,
                reason=reason, prior=dict(prior), ts=ts)
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
+
+    _write_txn(conn, work, spool={
+        "op": "consolidate", "loser_id": loser_id, "canonical_id": canonical_id,
+        "reason": reason, "ts": ts})
 
 
 _DELETE_TIERS = ("durable", "volatile")
@@ -150,15 +219,14 @@ def delete(conn, *, id, reason, tier, ts):
     Hard purge is a separate, later step."""
     if tier not in _DELETE_TIERS:
         raise ValueError(f"unknown tier: {tier!r} (expected one of {_DELETE_TIERS})")
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+
+    def work():
         prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
         if prior is None:
             raise KeyError(id)
         conn.execute("UPDATE memories SET status='deleted', updated_at=? WHERE id=?", (ts, id))
         _audit(conn, op="soft_delete", target_kind="memory", target_id=id,
                reason=f"[{tier}] {reason}", prior=dict(prior), ts=ts)
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
+
+    _write_txn(conn, work, spool={
+        "op": "delete", "id": id, "reason": reason, "tier": tier, "ts": ts})
