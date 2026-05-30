@@ -140,8 +140,12 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
     return id
 
 
-def _event_key(session_id, ts, kind, title):
-    return hashlib.sha256(f"{session_id}|{ts}|{kind}|{title}".encode("utf-8")).hexdigest()
+def _event_key(session_id, ts, kind, title, detail=None):
+    """Content-addressed idempotency key. Includes detail so two events sharing
+    session/ts/kind/title but differing in body are distinct (not silently merged);
+    byte-identical events still collide → genuine dedupe."""
+    raw = f"{session_id}|{ts}|{kind}|{title}|{detail or ''}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def record_session_event(conn, *, session_id, kind, title, ts,
@@ -150,7 +154,7 @@ def record_session_event(conn, *, session_id, kind, title, ts,
     session row exists first (FK). Returns the event_key."""
     title = strip_secrets(title)
     detail = strip_secrets(detail)
-    key = _event_key(session_id, ts, kind, title)
+    key = _event_key(session_id, ts, kind, title, detail)
     sf = session_fields or {}
 
     def work():

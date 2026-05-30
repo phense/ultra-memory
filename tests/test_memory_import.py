@@ -154,6 +154,21 @@ timeless header block.
 """
 
 
+def test_import_today_count_reflects_recorded_not_blocks(tmp_path):
+    """M1: two byte-identical blocks at the same minute dedupe to one row — the
+    returned count must reflect what was recorded (1), not the block count (2),
+    and the dropped duplicate must be warned, not silent."""
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    text = "## 10:00 | main\ndup line\n\n## 10:00 | main\ndup line\n"
+    n, warnings = mi.import_today_file(conn, text, day="2026-05-30")
+    rows = conn.execute(
+        "SELECT COUNT(*) FROM session_events WHERE session_id='legacy-2026-05-30'").fetchone()[0]
+    assert rows == 1
+    assert n == 1  # count does not lie
+    assert any("duplicate" in w.lower() for w in warnings)
+    conn.close()
+
+
 def test_import_today_endash_range_is_its_own_block(tmp_path):
     conn = memory_lib.open_memory_db(tmp_path / "m.db")
     n, warnings = mi.import_today_file(conn, _TODAY_REAL, day="2026-05-29")

@@ -65,6 +65,19 @@ def test_record_session_event_creates_session_and_event(tmp_path):
     conn.close()
 
 
+def test_record_session_event_distinct_detail_no_collision(tmp_path):
+    """M1: same session/ts/kind/title but DIFFERENT detail must both persist —
+    the event_key must not collide them into one silently-dropped row."""
+    conn = _db(tmp_path)
+    memory_lib.record_session_event(conn, session_id="s1", kind="note", title="same",
+                                    ts="2026-05-30T10:00:00", detail="first")
+    memory_lib.record_session_event(conn, session_id="s1", kind="note", title="same",
+                                    ts="2026-05-30T10:00:00", detail="second")
+    n = conn.execute("SELECT COUNT(*) FROM session_events WHERE session_id='s1'").fetchone()[0]
+    assert n == 2
+    conn.close()
+
+
 def test_record_session_event_is_idempotent(tmp_path):
     conn = _db(tmp_path)
     for _ in range(2):

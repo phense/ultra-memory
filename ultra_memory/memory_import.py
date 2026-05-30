@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from . import memory_lib
+from .redact_secrets import strip_secrets
 
 _INDEX_LINE = re.compile(r"^- \[(?P<title>.+?)\]\((?P<slug>[^)]+?)\.md\)"
                          r"(?:\s+—\s+(?P<hook>.*\S))?\s*$")
@@ -136,9 +137,20 @@ def import_today_file(conn, text, *, day):
         elif line.strip():
             warnings.append(f"skip non-conforming prose: {line.strip()[:40]!r}")
     count = 0
+    seen = set()
     for ts, ctx, body_lines in blocks:
         detail = "\n".join(body_lines).strip()
         title = (detail.splitlines()[0] if detail else ctx)[:120]
+        # Dedupe within the run on the same content-addressed key record_session_event
+        # uses (computed on redacted text), so the returned count reflects rows
+        # actually recorded — not the block count — and true dupes are warned, not
+        # silently swallowed by INSERT OR IGNORE.
+        key = memory_lib._event_key(
+            session_id, ts, "legacy_note", strip_secrets(title), strip_secrets(detail))
+        if key in seen:
+            warnings.append(f"duplicate block skipped (identical content at {ts}): {title!r}")
+            continue
+        seen.add(key)
         memory_lib.record_session_event(
             conn, session_id=session_id, kind="legacy_note", title=title, ts=ts,
             detail=detail, session_fields={"started_at": f"{day}T00:00:00"})
