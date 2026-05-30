@@ -32,25 +32,31 @@ def _audit(conn, *, op, target_kind, target_id, reason, prior, ts):
     )
 
 
-def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None):
+def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
+                description=None, index_hook=None, node_type="memory"):
     """Upsert a memory through the redact chokepoint + audit. Returns id."""
     title = strip_secrets(title)
     body = strip_secrets(body)
+    description = strip_secrets(description)
+    index_hook = strip_secrets(index_hook)
     conn.execute("BEGIN IMMEDIATE")
     try:
         prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
         if prior is None:
             conn.execute(
-                "INSERT INTO memories (id, type, title, body, created_at, updated_at, "
-                "origin_session_id) VALUES (?,?,?,?,?,?,?)",
-                (id, type, title, body, ts, ts, origin_session_id),
+                "INSERT INTO memories (id, type, title, body, description, index_hook, "
+                "node_type, created_at, updated_at, origin_session_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (id, type, title, body, description, index_hook, node_type,
+                 ts, ts, origin_session_id),
             )
             _audit(conn, op="save", target_kind="memory", target_id=id,
                    reason="create", prior=None, ts=ts)
         else:
             conn.execute(
-                "UPDATE memories SET type=?, title=?, body=?, updated_at=? WHERE id=?",
-                (type, title, body, ts, id),
+                "UPDATE memories SET type=?, title=?, body=?, description=?, "
+                "index_hook=?, node_type=?, updated_at=? WHERE id=?",
+                (type, title, body, description, index_hook, node_type, ts, id),
             )
             _audit(conn, op="save", target_kind="memory", target_id=id,
                    reason="update", prior=dict(prior), ts=ts)

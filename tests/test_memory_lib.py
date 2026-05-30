@@ -137,3 +137,17 @@ def test_delete_unknown_tier_raises(tmp_path):
         memory_lib.delete(conn, id="m1", reason="x", tier="bogus",
                           ts="2026-05-30T11:00:00")
     conn.close()
+
+
+def test_save_memory_persists_fidelity_fields(tmp_path):
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="Human Title",
+                           body="b", ts="2026-05-30T10:00:00",
+                           description="one-liner", index_hook="the hook",
+                           node_type="memory")
+    row = conn.execute("SELECT description, index_hook, node_type FROM memories "
+                       "WHERE id='m1'").fetchone()
+    assert row["description"] == "one-liner"
+    assert row["index_hook"] == "the hook"
+    assert row["node_type"] == "memory"
+    conn.close()
