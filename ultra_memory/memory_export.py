@@ -47,7 +47,12 @@ def export_memory(conn, out_dir, *, ts, snapshot=True):
         return False
 
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    (out_dir / "memory.dump.sql").write_text("\n".join(conn.iterdump()))
+    # iterdump() does NOT serialize PRAGMA user_version; append it so the dump —
+    # the sole git-committed rollback artifact — round-trips the schema version.
+    # Without this, a restore comes back at version 0 and reopen re-runs migrations.
+    schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
+    dump = "\n".join(conn.iterdump()) + f"\nPRAGMA user_version={schema_version};\n"
+    (out_dir / "memory.dump.sql").write_text(dump)
 
     if snapshot:
         snap = out_dir / "memory.snapshot.db"
