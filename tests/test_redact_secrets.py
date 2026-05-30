@@ -40,3 +40,44 @@ def test_leaves_prose_untouched():
 def test_handles_empty_and_none():
     assert strip_secrets("") == ""
     assert strip_secrets(None) is None
+
+
+# --- M4: missing credential classes ---
+
+def test_redacts_pem_private_key():
+    pem = ("-----BEGIN RSA PRIVATE KEY-----\n"
+           "MIIEpAIBAAKCAQEAabcdef0123456789\n"
+           "-----END RSA PRIVATE KEY-----")
+    out = strip_secrets(pem)
+    assert "MIIEpAIBAAKCAQEA" not in out and R in out
+
+
+def test_redacts_connection_string_userinfo():
+    out = strip_secrets("db postgres://admin:s3cr3tPass@db.example.com:5432/app done")
+    assert "admin:s3cr3tPass" not in out
+    assert R in out
+    assert "db.example.com" in out  # host/path preserved, only userinfo scrubbed
+
+
+def test_redacts_provider_prefixes():
+    assert R in strip_secrets("stripe sk_live_0123456789abcdefABCDEFghij")
+    assert R in strip_secrets("twilio ACdeadbeefdeadbeefdeadbeefdeadbeef")
+    assert R in strip_secrets(
+        "sendgrid SG.0123456789abcdefABCDEF.0123456789abcdefABCDEF0123456789abcdef")
+
+
+def test_redacts_passwd_pwd_assignments():
+    assert R in strip_secrets("passwd=SuperSecret123")
+    assert R in strip_secrets("pwd: anotherSecret9")
+
+
+# --- M5: greedy keyword:colon rule must not eat hyphenated prose ---
+
+def test_keyvalue_leaves_hyphenated_prose():
+    prose = "secret = institutional-grade-discipline"
+    assert strip_secrets(prose) == prose  # hyphen-joined words are not a credential
+
+
+def test_keyvalue_still_redacts_real_values():
+    assert R in strip_secrets('api_key="abcd1234efgh5678"')   # quoted
+    assert R in strip_secrets("password: hunter2hunter2")     # has entropy/digits
