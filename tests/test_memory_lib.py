@@ -155,6 +155,94 @@ def test_delete_unknown_tier_raises(tmp_path):
     conn.close()
 
 
+def test_consolidate_missing_has_descriptive_message(tmp_path):
+    """Nit: the KeyError must name the operation + id, not just bare-raise the id."""
+    conn = _db(tmp_path)
+    with pytest.raises(KeyError, match="consolidate"):
+        memory_lib.consolidate(conn, loser_id="nope", canonical_id="c", reason="x",
+                               ts="2026-05-30T10:00:00")
+    conn.close()
+
+
+def test_delete_missing_has_descriptive_message(tmp_path):
+    conn = _db(tmp_path)
+    with pytest.raises(KeyError, match="delete"):
+        memory_lib.delete(conn, id="nope", reason="x", tier="volatile",
+                          ts="2026-05-30T10:00:00")
+    conn.close()
+
+
+def test_write_rolls_back_partial_on_error(tmp_path, monkeypatch):
+    """L4: a write failing mid-transaction must leave no partial row and the
+    connection must stay usable (rollback)."""
+    conn = _db(tmp_path)
+
+    def boom(*a, **k):
+        raise RuntimeError("audit failed")
+
+    monkeypatch.setattr(memory_lib, "_audit", boom)
+    with pytest.raises(RuntimeError):
+        memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
+                               ts="2026-05-30T10:00:00")
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE id='m1'").fetchone()[0] == 0
+    monkeypatch.undo()
+    memory_lib.save_memory(conn, id="m2", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00")  # connection still usable
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE id='m2'").fetchone()[0] == 1
+    conn.close()
+
+
+def test_concurrent_access_increments_no_lost_update(tmp_path):
+    """L4: N threads each opening their own connection and incrementing the same
+    memory's access_count must total N — no lost updates (WAL + busy_timeout +
+    atomic SQL increment + retry)."""
+    import threading
+
+    dbp = tmp_path / "m.db"
+    conn = memory_lib.open_memory_db(dbp)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00")
+    conn.close()
+
+    n = 20
+    errors = []
+
+    def worker():
+        c = memory_lib.open_memory_db(dbp)
+        try:
+            memory_lib.record_access(c, target_kind="memory", target_id="m1",
+                                     ts="2026-05-30T10:05:00")
+        except Exception as exc:  # pragma: no cover
+            errors.append(exc)
+        finally:
+            c.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    final = memory_lib.open_memory_db(dbp)
+    count = final.execute("SELECT access_count FROM memories WHERE id='m1'").fetchone()[0]
+    final.close()
+    assert count == n
+
+
+def test_session_event_redacts_secret_in_detail(tmp_path):
+    """L10: session-event title/detail (the .remember import path) must pass through
+    the redaction chokepoint."""
+    conn = _db(tmp_path)
+    memory_lib.record_session_event(
+        conn, session_id="s1", kind="note", title="t", ts="2026-05-30T10:00:00",
+        detail="token sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF tail")
+    detail = conn.execute(
+        "SELECT detail FROM session_events WHERE session_id='s1'").fetchone()[0]
+    assert "sk-ant" not in detail and "[REDACTED]" in detail
+    conn.close()
+
+
 def test_resave_preserves_deleted_tombstone(tmp_path):
     """M7: a re-save (e.g. a re-import while the file still exists on disk) must NOT
     resurrect a deliberately-deleted memory — content updates, tombstone stays."""

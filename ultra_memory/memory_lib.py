@@ -209,7 +209,7 @@ def consolidate(conn, *, loser_id, canonical_id, reason, ts):
     def work():
         prior = conn.execute("SELECT * FROM memories WHERE id=?", (loser_id,)).fetchone()
         if prior is None:
-            raise KeyError(loser_id)
+            raise KeyError(f"consolidate: no memory with id {loser_id!r}")
         conn.execute(
             "UPDATE memories SET status='redirect', supersedes=?, updated_at=? WHERE id=?",
             (canonical_id, ts, loser_id),
@@ -234,7 +234,7 @@ def delete(conn, *, id, reason, tier, ts):
     def work():
         prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
         if prior is None:
-            raise KeyError(id)
+            raise KeyError(f"delete: no memory with id {id!r}")
         conn.execute("UPDATE memories SET status='deleted', updated_at=? WHERE id=?", (ts, id))
         _audit(conn, op="soft_delete", target_kind="memory", target_id=id,
                reason=f"[{tier}] {reason}", prior=dict(prior), ts=ts)

@@ -146,6 +146,24 @@ def test_staleness_flag_and_penalty(tmp_path):
     conn.close()
 
 
+def test_staleness_penalty_lowers_ranking(tmp_path):
+    """L11: the staleness penalty must actually affect the score/ordering — two
+    equally-relevant memories rank with the fresh one above the stale one."""
+    conn = _db(tmp_path)
+    _save(conn, id="fresh", title="fresh", body="same body", ts="2026-04-20T00:00:00")
+    _save(conn, id="stale", title="stale", body="same body", ts="2026-01-01T00:00:00")
+    emb = _fake_embedder({"same body": [1.0, 0.0, 0.0], "q": [1.0, 0.0, 0.0]})
+    out = memory_query.query_memories(conn, "q", embedder=emb, dim=3,
+                                      now_ts="2026-05-02T00:00:00", staleness_days=90)
+    ids = [r["id"] for r in out]
+    assert ids.index("fresh") < ids.index("stale")
+    fresh = next(r for r in out if r["id"] == "fresh")
+    stale = next(r for r in out if r["id"] == "stale")
+    assert fresh["stale"] is False and stale["stale"] is True
+    assert stale["score"] < fresh["score"]
+    conn.close()
+
+
 def test_not_stale_when_recent(tmp_path):
     conn = _db(tmp_path)
     _save(conn, id="fresh", title="fresh", body="fresh doc", ts="2026-04-20T00:00:00")
