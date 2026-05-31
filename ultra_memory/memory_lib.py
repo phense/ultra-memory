@@ -353,19 +353,75 @@ def delete(conn, *, id, reason, tier, ts):
         "op": "delete", "id": id, "reason": reason, "tier": tier, "ts": ts})
 
 
-def set_pinned(conn, *, id, pinned, ts, reason="manual pin"):
-    """Set/clear a memory's pinned flag. Pinned memories are injected into every
-    SessionStart rehydration gist, so this is human-settable (spec §14). Audited."""
-    def work():
-        prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
-        if prior is None:
-            raise KeyError(f"set_pinned: no memory with id {id!r}")
-        conn.execute("UPDATE memories SET pinned=? WHERE id=?", (1 if pinned else 0, id))
-        _audit(conn, op="pin" if pinned else "unpin", target_kind="memory",
-               target_id=id, reason=reason, prior=dict(prior), ts=ts)
+_PIN_SOURCE_KINDS = ("memory", "knowledge")
+
+
+def set_pinned(conn, *, source_kind=None, source_id=None, id=None, pinned, ts,
+               reason="manual pin"):
+    """Set/clear a pin in the ONE cross-store pin space (SP-3 Stage 4, D7). Pinned
+    units are surfaced in every SessionStart rehydration gist's single
+    "## Pinned rules" section, so this is human-settable (spec §14). Audited.
+
+    `source_kind ∈ {memory, knowledge}` selects the store:
+      - 'memory'    → flip `memories.pinned` (today's behavior).
+      - 'knowledge' → upsert the `knowledge_pins(slug, topic, pinned, reason,
+                      pinned_at)` table — a wiki page has no row in `memories`, so
+                      its pin lives in its own small table (migration 0004).
+
+    Back-compat shim (Risk §14.10): the legacy SP-1 call `set_pinned(conn, id=…,
+    pinned=…, …)` (used by `/memory-pin`, `memory_inbox`, and pre-SP-3 spool
+    records) is still accepted and treated as `source_kind='memory', source_id=id`,
+    so existing callers + spooled records keep working through the cutover. Supply
+    EITHER `source_kind`+`source_id` OR the legacy `id=` — not a conflicting mix."""
+    # --- normalize legacy id= → (source_kind='memory', source_id=id) ------------
+    if id is not None:
+        if source_kind is not None and source_kind != "memory":
+            raise ValueError(
+                "set_pinned: legacy id= is memory-only; do not combine it with a "
+                f"non-memory source_kind ({source_kind!r})")
+        if source_id is not None and source_id != id:
+            raise ValueError("set_pinned: pass either id= or source_id=, not both")
+        source_kind = "memory"
+        source_id = id
+    if source_kind is None:
+        source_kind = "memory"
+    if source_id is None:
+        raise ValueError("set_pinned: a source_id (or legacy id=) is required")
+    if source_kind not in _PIN_SOURCE_KINDS:
+        raise ValueError(
+            f"set_pinned: unknown source_kind {source_kind!r} "
+            f"(expected one of {_PIN_SOURCE_KINDS})")
+
+    op = "pin" if pinned else "unpin"
+
+    if source_kind == "memory":
+        def work():
+            prior = conn.execute(
+                "SELECT * FROM memories WHERE id=?", (source_id,)).fetchone()
+            if prior is None:
+                raise KeyError(f"set_pinned: no memory with id {source_id!r}")
+            conn.execute("UPDATE memories SET pinned=? WHERE id=?",
+                         (1 if pinned else 0, source_id))
+            _audit(conn, op=op, target_kind="memory", target_id=source_id,
+                   reason=reason, prior=dict(prior), ts=ts)
+    else:  # knowledge: upsert knowledge_pins (idempotent on slug PK)
+        def work():
+            prior = conn.execute(
+                "SELECT * FROM knowledge_pins WHERE slug=?", (source_id,)).fetchone()
+            conn.execute(
+                "INSERT INTO knowledge_pins (slug, topic, pinned, reason, pinned_at) "
+                "VALUES (?,?,?,?,?) "
+                "ON CONFLICT(slug) DO UPDATE SET "
+                "pinned=excluded.pinned, reason=excluded.reason, "
+                "pinned_at=excluded.pinned_at",
+                (source_id, None, 1 if pinned else 0, strip_secrets(reason), ts))
+            _audit(conn, op=op, target_kind="knowledge", target_id=source_id,
+                   reason=reason, prior=dict(prior) if prior is not None else None,
+                   ts=ts)
 
     _write_txn(conn, work, spool={
-        "op": "set_pinned", "id": id, "pinned": bool(pinned), "ts": ts, "reason": reason})
+        "op": "set_pinned", "source_kind": source_kind, "source_id": source_id,
+        "pinned": bool(pinned), "ts": ts, "reason": reason})
 
 
 def set_verified(conn, *, id, ts, reason="manual verify"):

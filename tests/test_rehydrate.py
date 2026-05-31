@@ -18,6 +18,103 @@ def test_gist_includes_pinned_rules(tmp_path):
     assert "Year-End Tax Fence" in g
 
 
+# ---------------------------------------------------------------------------
+# SP-3 Stage 4 (D7): build_gist unions memory pins + knowledge pins into the one
+# "## Pinned rules" section. The knowledge page's display title comes from
+# unified_index (Stage 5 mirror); a pin with no unified_index row falls back to
+# its slug so a pin is never silently dropped.
+# ---------------------------------------------------------------------------
+
+def test_gist_unions_knowledge_pins(tmp_path):
+    p, conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="r6", type="feedback", title="Year-End Tax Fence",
+                           body="Close all US options Dec 30.", ts="2026-05-01T00:00:00Z")
+    conn.execute("UPDATE memories SET pinned=1 WHERE id='r6'")
+    # A pinned wiki page + its unified_index mirror row (for the display title).
+    memory_lib.set_pinned(conn, source_kind="knowledge", source_id="german-tax-fence",
+                          pinned=True, ts="2026-05-01T00:00:00Z")
+    conn.execute(
+        "INSERT INTO unified_index (slug, topic, title, snippet, updated_at) "
+        "VALUES (?,?,?,?,?)",
+        ("german-tax-fence", "trading", "German Tax Year-End Fence",
+         "Close all US options at the 2nd-to-last NYSE day in December.",
+         "2026-05-01T00:00:00Z"))
+    conn.commit()
+    g = rehydrate.build_gist(conn)
+    # Both stores' pins land in the SINGLE "## Pinned rules" section.
+    assert g.count("## Pinned rules") == 1
+    assert "Year-End Tax Fence" in g          # memory pin
+    assert "German Tax Year-End Fence" in g   # knowledge pin (title from unified_index)
+
+
+def test_gist_knowledge_pin_falls_back_to_slug_without_index_row(tmp_path):
+    p, conn = _db(tmp_path)
+    memory_lib.set_pinned(conn, source_kind="knowledge", source_id="orphan-slug",
+                          pinned=True, ts="2026-05-01T00:00:00Z")
+    conn.commit()
+    g = rehydrate.build_gist(conn)
+    assert "## Pinned rules" in g
+    assert "orphan-slug" in g  # no unified_index title → slug, never dropped
+
+
+def test_gist_excludes_unpinned_knowledge(tmp_path):
+    p, conn = _db(tmp_path)
+    memory_lib.set_pinned(conn, source_kind="knowledge", source_id="was-pinned",
+                          pinned=False, ts="2026-05-01T00:00:00Z")
+    conn.commit()
+    g = rehydrate.build_gist(conn)
+    assert "was-pinned" not in g
+
+
+def test_gist_byte_identical_with_zero_knowledge_pins(tmp_path):
+    """SAFETY GATE for the eventual merge to ultra-memory master (Trading's LIVE
+    SessionStart hook runs build_gist). Trading today has ZERO knowledge_pins rows;
+    the Stage-4 change to build_gist MUST be byte-identical to the memory-pins-only
+    output in that state, so going live can't perturb Trading's rehydration.
+
+    Two DBs built identically EXCEPT one has the knowledge-pin machinery exercised
+    then fully cleared (zero pinned knowledge rows). Their gists must be byte-equal.
+    """
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    # Reference DB: only memory pins, knowledge_pins never touched.
+    pa, ca = _db(tmp_path / "a")
+    # Comparison DB: the knowledge-pin path is reachable, but no knowledge pin is
+    # set → knowledge_pins is empty (Trading's current production state).
+    pb, cb = _db(tmp_path / "b")
+    for conn in (ca, cb):
+        memory_lib.save_memory(conn, id="r6", type="feedback",
+                               title="Year-End Tax Fence",
+                               body="Close all US options Dec 30.",
+                               ts="2026-05-01T00:00:00Z")
+        conn.execute("UPDATE memories SET pinned=1 WHERE id='r6'")
+        memory_lib.save_memory(conn, id="m2", type="project", title="Second rule",
+                               body="Body two.", ts="2026-05-02T00:00:00Z")
+        conn.execute("UPDATE memories SET pinned=1 WHERE id='m2'")
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, summary) VALUES (?,?,?)",
+            ("s1", "2026-05-29T10:00:00Z", "Did the thing."))
+        conn.commit()
+    # The comparison DB exercises set_pinned(knowledge) then unpins → zero pinned
+    # knowledge rows remain (proves the gist is invariant when no knowledge pin is
+    # active, not merely when the code path is unreached).
+    memory_lib.set_pinned(cb, source_kind="knowledge", source_id="x",
+                          pinned=True, ts="2026-05-03T00:00:00Z")
+    memory_lib.set_pinned(cb, source_kind="knowledge", source_id="x",
+                          pinned=False, ts="2026-05-04T00:00:00Z")
+    cb.commit()
+    assert cb.execute(
+        "SELECT COUNT(*) FROM knowledge_pins WHERE pinned=1").fetchone()[0] == 0
+    ga = rehydrate.build_gist(ca)
+    gb = rehydrate.build_gist(cb)
+    assert ga == gb, (
+        "build_gist diverged with zero active knowledge_pins — the merge to "
+        f"master would perturb Trading's live rehydration.\n--- ref ---\n{ga}\n"
+        f"--- cmp ---\n{gb}")
+    ca.close()
+    cb.close()
+
+
 def test_gist_includes_last_session_summary(tmp_path):
     p, conn = _db(tmp_path)
     conn.execute("INSERT INTO sessions (id, started_at, summary) VALUES (?,?,?)",

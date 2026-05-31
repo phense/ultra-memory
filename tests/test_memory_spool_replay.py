@@ -48,6 +48,40 @@ def test_replay_drops_non_param_keys(tmp_path):
     conn.close()
 
 
+def test_replay_drains_knowledge_pin(tmp_path):
+    """SP-3 Stage 4: a spooled knowledge pin (new source_kind/source_id arg shape)
+    replays into knowledge_pins via the set_pinned dispatch entry."""
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    sd = tmp_path / "memory_spool"
+    sd.mkdir()
+    _spool(sd, {"op": "set_pinned", "source_kind": "knowledge",
+                "source_id": "spooled-slug", "pinned": True,
+                "ts": "2026-05-01T00:00:00", "reason": "manual pin"})
+    s = memory_lib.replay_spool(conn)
+    assert s["replayed"] == 1 and s["failed"] == 0, s
+    assert conn.execute(
+        "SELECT pinned FROM knowledge_pins WHERE slug='spooled-slug'"
+    ).fetchone()[0] == 1
+    assert not list(sd.glob("*.json"))
+    conn.close()
+
+
+def test_replay_drains_legacy_id_pin(tmp_path):
+    """Back-compat: a pre-SP-3 spooled set_pinned record (legacy id= arg) must still
+    replay and flip the memory's pinned flag through the shim."""
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    memory_lib.save_memory(conn, id="legacy", type="project", title="t", body="b",
+                           ts="2026-05-01T00:00:00")
+    sd = tmp_path / "memory_spool"
+    sd.mkdir()
+    _spool(sd, {"op": "set_pinned", "id": "legacy", "pinned": True,
+                "ts": "2026-05-01T00:00:00", "reason": "manual pin"})
+    s = memory_lib.replay_spool(conn)
+    assert s["replayed"] == 1 and s["failed"] == 0, s
+    assert conn.execute("SELECT pinned FROM memories WHERE id='legacy'").fetchone()[0] == 1
+    conn.close()
+
+
 def test_replay_unknown_op_kept_and_recorded(tmp_path):
     conn = memory_lib.open_memory_db(tmp_path / "m.db")
     sd = tmp_path / "memory_spool"
