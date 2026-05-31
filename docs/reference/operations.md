@@ -39,9 +39,13 @@ BLOBs (the markdown views do not).
 If a write cannot get the lock after the bounded retries, `_write_txn` writes the
 operation's intent to `memory_spool/<hash>.json` and raises `WriteSpooled`. The
 file is keyed by content hash (a retried-then-spooled op writes one stable file).
-A future replay step drains the spool; until then, the loud failure ensures the
-loss is visible, not silent. (Hands-off operation should wire `WriteSpooled` to an
-alert — see the spec's observability section.)
+`memory_lib.replay_spool(conn)` drains the spool: it re-applies each spooled write
+via its op (deleting the file on success), leaves a still-failing op spooled (it
+re-writes the same content-hash file — no duplicate) and records it, and keeps any
+unknown/corrupt record rather than dropping it. Returns `{replayed, failed, errors}`.
+The loud `WriteSpooled` failure still ensures the original loss is visible, not
+silent. (Hands-off operation should also wire `WriteSpooled` to an alert — see the
+spec's observability section.)
 
 ## Redaction policy
 

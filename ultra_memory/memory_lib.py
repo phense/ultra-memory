@@ -269,3 +269,37 @@ def set_verified(conn, *, id, ts, reason="manual verify"):
                reason=reason, prior=dict(prior), ts=ts)
 
     _write_txn(conn, work, spool={"op": "set_verified", "id": id, "ts": ts, "reason": reason})
+
+
+def replay_spool(conn, *, spool_dir=None):
+    """Drain memory_spool/: re-apply each spooled write (a prior SQLITE_BUSY casualty)
+    via its op, deleting the file on success. A still-failing op re-spools to the SAME
+    content-hash file (no duplicate) and is left in place + recorded. Unknown/corrupt
+    records are kept (never silently dropped). Returns {replayed, failed, errors}."""
+    import inspect
+
+    target = Path(spool_dir) if spool_dir is not None else _spool_dir(conn)
+    summary = {"replayed": 0, "failed": 0, "errors": []}
+    if target is None or not target.is_dir():
+        return summary
+
+    dispatch = {
+        "save_memory": save_memory, "record_session_event": record_session_event,
+        "record_access": record_access, "consolidate": consolidate, "delete": delete,
+        "set_pinned": set_pinned, "set_verified": set_verified,
+    }
+    for f in sorted(target.glob("*.json")):
+        try:
+            rec = json.loads(f.read_text(encoding="utf-8"))
+            fn = dispatch.get(rec.get("op"))
+            if fn is None:
+                raise ValueError(f"unknown spooled op {rec.get('op')!r}")
+            accepted = set(inspect.signature(fn).parameters)
+            kwargs = {k: v for k, v in rec.items() if k != "op" and k in accepted}
+            fn(conn, **kwargs)
+            f.unlink()
+            summary["replayed"] += 1
+        except Exception as exc:
+            summary["failed"] += 1
+            summary["errors"].append(f"{f.name}: {exc!r}")
+    return summary
