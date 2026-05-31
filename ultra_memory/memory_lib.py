@@ -181,7 +181,8 @@ def _resolve_topic(*, topic, topic_router, type, title, body, origin_session_id,
 def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
                 description=None, index_hook=None, node_type="memory",
                 file_slug=None, sort_order=None, created_at=None, updated_at=None,
-                topic=None, topic_router=None, genesis_hook=None, caller_class=None):
+                topic=None, topic_router=None, genesis_hook=None, caller_class=None,
+                created_by="human"):
     """Upsert a memory through the redact chokepoint + audit. Returns id.
 
     `ts` is the action time (always the audit-row timestamp). `created_at`/
@@ -196,7 +197,17 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
     injectable, best-effort callback (default no-op) the CONSUMER wires its topic
     genesis (e.g. wiki_topics.ensure_topic) into — fired only when a non-NULL topic
     is resolved; a raising hook never aborts the write (fail-open). The engine
-    itself has NO wiki dependency."""
+    itself has NO wiki dependency.
+
+    `created_by` (SP-3 Stage 7a, D16 — the §7a SUBSTRATE, NOT the loop) is the
+    write's PROVENANCE: 'human' (the safe-immutable default — CLI / /memory-*
+    verbs), 'agent' (an agent-initiated save, distinct from the human CLI),
+    'background_review' (a Tier-2 maintenance write), or 'import' (the bootstrap
+    importer). The §7a provenance gate (SP-7) may auto-edit only the
+    'agent'/'background_review' rows, never 'human' — so each writer MUST stamp its
+    true origin. Stamped on BOTH the INSERT and the UPDATE (an 'agent' re-save stays
+    'agent'; the column never silently reverts to the default). Spooled + replayed
+    so a busy-casualty write keeps its provenance."""
     title = strip_secrets(title)
     body = strip_secrets(body)
     description = strip_secrets(description)
@@ -216,10 +227,11 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
             conn.execute(
                 "INSERT INTO memories (id, type, title, body, description, index_hook, "
                 "node_type, file_slug, sort_order, created_at, updated_at, "
-                "origin_session_id, topic) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "origin_session_id, topic, created_by) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (id, type, title, body, description, index_hook, node_type,
                  file_slug, sort_order, created, updated, origin_session_id,
-                 resolved_topic),
+                 resolved_topic, created_by),
             )
             _audit(conn, op="save", target_kind="memory", target_id=id,
                    reason="create", prior=None, ts=ts)
@@ -227,9 +239,9 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
             conn.execute(
                 "UPDATE memories SET type=?, title=?, body=?, description=?, "
                 "index_hook=?, node_type=?, file_slug=?, sort_order=?, updated_at=?, "
-                "topic=? WHERE id=?",
+                "topic=?, created_by=? WHERE id=?",
                 (type, title, body, description, index_hook, node_type,
-                 file_slug, sort_order, updated, resolved_topic, id),
+                 file_slug, sort_order, updated, resolved_topic, created_by, id),
             )
             _audit(conn, op="save", target_kind="memory", target_id=id,
                    reason="update", prior=dict(prior), ts=ts)
@@ -241,7 +253,7 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
         "sort_order": sort_order, "created_at": created, "updated_at": updated,
         # Spool the RESOLVED topic, not the router — replay must be deterministic and
         # the router/hook are in-process callables that don't serialize.
-        "topic": resolved_topic})
+        "topic": resolved_topic, "created_by": created_by})
 
     # Genesis fires only AFTER a successful, durable write and only for a non-NULL
     # topic. Best-effort + fail-open: the consumer's genesis (e.g. the wiki) is not
@@ -264,11 +276,24 @@ def _event_key(session_id, ts, kind, title, detail=None):
 
 
 def record_session_event(conn, *, session_id, kind, title, ts,
-                         detail=None, files=None, refs=None, session_fields=None):
+                         detail=None, files=None, refs=None, session_fields=None,
+                         outcome_signal=None):
     """Append a typed session event idempotently (UNIQUE event_key). Ensures the
-    session row exists first (FK). Returns the event_key."""
+    session row exists first (FK). Returns the event_key.
+
+    `outcome_signal` (SP-3 Stage 7a, D13 — the §7a self-improvement SUBSTRATE,
+    NOT the loop) is an OPTIONAL deterministic per-event outcome hint
+    (e.g. 'tests_passed' / 'trade_win' / 'commit_landed'), captured on the warm
+    path with NO LLM. It is PAYLOAD, not part of the idempotency key — the key
+    stays content-addressed on (session, ts, kind, title, detail) so two
+    otherwise-identical events differing only in outcome_signal still dedupe to
+    one row (the first write wins via INSERT OR IGNORE). `kind` is free text, so a
+    SP-7 capture row (e.g. kind='skill_learning_candidate') needs no schema change.
+    Inert by default: an omitted signal stores NULL. Spooled + replayed like every
+    other write."""
     # Key on the RAW (pre-redaction) text so a future redaction-rule change can't
     # shift the idempotency key and un-dedupe a replayed / re-imported event.
+    # outcome_signal is deliberately EXCLUDED from the key (it is payload, D13).
     key = _event_key(session_id, ts, kind, title, detail)
     title = strip_secrets(title)
     detail = strip_secrets(detail)
@@ -281,17 +306,17 @@ def record_session_event(conn, *, session_id, kind, title, ts,
         )
         conn.execute(
             "INSERT OR IGNORE INTO session_events "
-            "(session_id, ts, kind, title, detail, files, refs, event_key) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "(session_id, ts, kind, title, detail, files, refs, event_key, "
+            "outcome_signal) VALUES (?,?,?,?,?,?,?,?,?)",
             (session_id, ts, kind, title, detail,
              json.dumps(files) if files is not None else None,
-             json.dumps(refs) if refs is not None else None, key),
+             json.dumps(refs) if refs is not None else None, key, outcome_signal),
         )
 
     _write_txn(conn, work, spool={
         "op": "record_session_event", "session_id": session_id, "kind": kind,
         "title": title, "ts": ts, "detail": detail, "files": files, "refs": refs,
-        "event_key": key})
+        "event_key": key, "outcome_signal": outcome_signal})
     return key
 
 

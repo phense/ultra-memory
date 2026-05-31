@@ -100,13 +100,16 @@ def main(argv=None, *, db_path=None, embedder=None, dim=None, ts=None):
                       file=sys.stderr)
                 return 1
             # Re-save through the gateway, PRESERVING every other field (save_memory's
-            # UPDATE overwrites them all, so omitting one would wipe it).
+            # UPDATE overwrites them all, so omitting one would wipe it). The /memory-*
+            # CLI is the HUMAN (owner) write path — stamp created_by='human' (SP-3
+            # D16) so a human edit keeps the safe-immutable provenance the §7a gate
+            # never auto-edits.
             memory_lib.save_memory(
                 conn, id=args.id, type=row["type"], title=row["title"], body=body, ts=ts,
                 description=row["description"], index_hook=row["index_hook"],
                 node_type=row["node_type"], file_slug=row["file_slug"],
                 sort_order=row["sort_order"], created_at=row["created_at"],
-                origin_session_id=row["origin_session_id"])
+                origin_session_id=row["origin_session_id"], created_by="human")
             print(f"edited {args.id}")
             return 0
 
@@ -117,9 +120,12 @@ def main(argv=None, *, db_path=None, embedder=None, dim=None, ts=None):
                 print(f"save: cannot read --from-file {args.from_file!r}: {exc}",
                       file=sys.stderr)
                 return 1
+            # /memory-* save = the HUMAN (owner) write path (SP-3 D16) — created_by
+            # defaults to 'human'; pass it explicitly so the provenance is intentional.
             memory_lib.save_memory(
                 conn, id=args.id, type=args.type, title=args.title, body=body, ts=ts,
-                description=args.description, node_type=args.node_type)
+                description=args.description, node_type=args.node_type,
+                created_by="human")
             print(f"saved {args.id}")
             return 0
 

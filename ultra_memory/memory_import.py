@@ -106,6 +106,10 @@ def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
             file_slug=slug,
             sort_order=order_map.get(slug),
             created_at=mtime, updated_at=mtime,
+            # SP-3 D16: the bootstrap importer's provenance — NOT human-authored
+            # this session, NOT agent/background_review. The §7a gate (SP-7) treats
+            # 'import' rows as it does any non-'human' origin.
+            created_by="import",
         )
         count += 1
     return count
