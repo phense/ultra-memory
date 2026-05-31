@@ -15,6 +15,38 @@ Built with `uv`; run tests with `uv run pytest`.
 (architecture + contributing), and [`reference/`](docs/reference/) (schema, API,
 operations). Start at [`docs/README.md`](docs/README.md).
 
+## Install as a plugin
+
+ultra-memory is a drop-in Claude Code plugin. Into any consumer project:
+
+1. **Install** (local, this cycle — no public marketplace):
+   ```
+   /plugin marketplace add /Users/<you>/Agents/ultra-memory
+   /plugin install ultra-memory@ultra-memory
+   ```
+2. **Configure** one required value when prompted: `data_db_path` — the absolute
+   path to the consumer's canonical `memory.db`. Optional: `caller_class`
+   (default `subagent`), `rehydrate_budget` (default `2000`), `oauth_token`
+   (only if you run LLM maintenance — never an API key).
+3. **Bootstrap:** run `/memory-setup` (builds the runtime venv under
+   `${CLAUDE_PLUGIN_DATA}/venv`, optionally imports a legacy memory dir once,
+   stamps the DB ready, sanity-checks). Then restart Claude Code so the
+   `knowledge` MCP registers.
+
+That is the whole install: no hand-editing `.mcp.json`, `settings.json`, or any
+wrapper. On each SessionStart the rehydration gist is injected (sync) and
+maintenance runs (async, throttled ≤ ~1×/day); on Stop a checkpoint is written.
+The `using-memory` skill teaches every agent the read/write interface.
+
+The full command surface (`/memory-recall`, `/memory-pin`, `/memory-verify`,
+`/memory-edit`, `/memory-inbox`, `/memory-save`, `/memory-setup`,
+`/memory-maintain`) plus the MCP, the hooks, the `import_complete` gate, the
+self-healing maintenance, and the fail-open behavior are documented in
+[`docs/reference/operations.md`](docs/reference/operations.md).
+
+**Requirements:** `uv` on PATH; Python 3.13; first `/memory-setup` downloads the
+embedder model (~bge-small, cached afterward).
+
 **Contributing:** TDD is mandatory and `docs/` are kept in lockstep with the code.
 A warn-only doc-discipline hook ships under `.githooks/`; enable it once per clone
 with `git config core.hooksPath .githooks`. See
