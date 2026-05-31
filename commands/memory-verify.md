@@ -7,4 +7,4 @@ Verify (reconfirm) the memory: **$ARGUMENTS** (an id).
 uv run --directory "${CLAUDE_PLUGIN_ROOT}" python -m ultra_memory.memory_cli verify --id "$ARGUMENTS"
 ```
 
-(Needs `ULTRA_MEMORY_DB` set.) Confirm the result to the user. This resets the memory's age-based staleness penalty in recall ranking.
+(Needs `ULTRA_MEMORY_DB` set.) Confirm the result to the user. This resets the memory's age-based staleness penalty in recall ranking. Use this when a recalled fact shows `"stale": true` and you have confirmed it still holds.

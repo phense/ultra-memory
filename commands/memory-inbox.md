@@ -7,4 +7,4 @@ Drain the correction inbox (directives: `pin <id>`, `unpin <id>`, `verify <id>`;
 uv run --directory "${CLAUDE_PLUGIN_ROOT}" python -m ultra_memory.memory_cli inbox
 ```
 
-(Needs `ULTRA_MEMORY_DB` set; the inbox defaults to `<db-dir>/memory_inbox.md`, override with `--path` or `$ULTRA_MEMORY_INBOX`.) Report the JSON summary — `applied` / `notes` / `errors`. Surface any `errors` (e.g. an unknown id) to the user, and mention any preserved `notes` that still need manual handling.
+(Needs `ULTRA_MEMORY_DB` set; the inbox defaults to `<db-dir>/memory_inbox.md`, override with `--path` or `$ULTRA_MEMORY_INBOX`.) Report the JSON summary — `applied` / `notes` / `errors`. Surface any `errors` (e.g. an unknown id) to the user, and mention any preserved `notes` that still need manual handling. Free-text directives that aren't recognised commands are preserved under an "Unprocessed" section of the inbox file, not discarded.
