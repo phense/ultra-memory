@@ -24,8 +24,10 @@ not a rollback source for those.
 | Module | Responsibility |
 |---|---|
 | `db.py` | Connection discipline (WAL, busy_timeout, FK, autocommit) + the forward-only, transactional, idempotent migration runner. |
-| `migrations/*.sql` | Ordered `NNNN_name.sql`. `0001` initial schema, `0002` import-fidelity columns, `0003` harness slug + sort order. |
-| `memory_lib.py` | **The only writer.** Every mutation: redact → `BEGIN IMMEDIATE`/`COMMIT` with retry+spool → `audit_log`. |
+| `migrations/*.sql` | Ordered `NNNN_name.sql`. `0001` initial schema, `0002` import-fidelity columns, `0003` harness slug + sort order, `0004` cross-store fabric (topic/provenance/outcome columns; `unified_index`/`knowledge_pins`/`agent_topic_bindings` tables; `links` sub-types). |
+| `memory_lib.py` | **The only writer.** Every mutation: redact → `BEGIN IMMEDIATE`/`COMMIT` with retry+spool → `audit_log`. SP-3 adds the topic write path + `make_keyword_router`, `record_link`/`mirror_cross_store_links` (the `links` spine's first writer), the generalized `set_pinned(source_kind=…)`, and the gated `backfill_topic`. |
+| `wiki_sync.py` | **(SP-3)** Tier-1 wiki→memory mirror: walk consumer-fed `wiki_roots`, upsert pages into `unified_index`, reconcile orphans, embed into the shared cache. Project-agnostic, idempotent (sha-skip), fail-open. Population only. |
+| `unified_query.py` | **(SP-3)** the warm cross-store retrieval surface: `unified_recall` (memory cosine + generic knowledge BM25/cosine, FU-4 RRF, × outcome_weight) + the fail-closed `topic_scope_from_env`. No LLM. |
 | `redact_secrets.py` | Pure secret-stripper (the pre-persist + pre-export chokepoint). |
 | `retrieval_core.py` | cosine, RRF, vector (de)serialise, content hash, embedding cache (single + batch), lazy fastembed (model cached in a persistent `$HOME` dir, never `$TMPDIR`). |
 | `memory_query.py` | Read side: candidates → cosine → title boost → ranking signals → 1-hop links. No LLM. |
@@ -90,6 +92,120 @@ reranker are deferred behind a measured eval gate (the wiki side keeps full RRF)
 single batched call + one write txn (`get_or_embed_batch`), ranks, and attaches
 1-hop links. The embedder is always injected.
 
+## Cross-store fabric (SP-3)
+
+SP-3 makes the two stores — Session Memory (`memory.db`) and Expert Knowledge (the
+consumer's wiki files) — behave as **one system without merging their canonical
+storage**: files stay files, `memory.db` stays the memory store. The fabric is
+deliberately on the **non-LLM warm/hot path** (no `claude` CLI on inflow or
+retrieval). All of it lands in migration `0004` (additive) plus the engine APIs
+above. The §7a self-improvement loop is **not** built — only its substrate (see
+below).
+
+```
+   memory.db (canonical) ─┬─ memories(+topic,+created_by,+outcome_weight)
+                          ├─ session_events(+outcome_signal)
+                          ├─ links(+src_type,+dst_type)        ← THE cross-store edge spine
+                          ├─ embeddings(target_kind ∈ {memory, knowledge})  ← one warm cache
+                          ├─ unified_index(slug, topic, …, outcome_weight)  ← derived wiki mirror
+                          ├─ knowledge_pins(slug, topic, pinned)
+                          └─ agent_topic_bindings(agent_name, topic)
+                                    ▲ wiki_sync (Tier-1, idempotent, no LLM)
+   wiki/<topic>/**.md (FILES = canonical) ──┘   wiki/graph/graph.sqlite (wiki-internal; pure wiki↔wiki edges stay here)
+
+   unified_recall(query, caller_class, agent_topics)
+     = FU-4 RRF([ memory-cosine ranks, knowledge-BM25 ranks, knowledge-embed ranks ])
+       · scoped by (topic ∈ agent_topics OR topic IS NULL) AND (type ∈ allowed_types_for(caller_class))
+       · × outcome_weight (inert 1.0 until §7a)
+```
+
+### Project-agnostic boundary (the hard NFR)
+
+The engine must import **nothing** from the consumer (enforced by
+`test_no_hardcoded_paths` + the no-wiki-import test). So the fabric is fed, not
+coupled:
+
+- `wiki_sync(conn, wiki_roots, …)` takes consumer-fed root paths; it derives
+  `topic` generically (first path component under the root) and parses front-matter
+  with a hand-rolled scanner — no topic-model import, not even PyYAML.
+- `mirror_cross_store_links(conn, wiki_edges, …)` takes consumer-read edges; the
+  engine never opens `graph.sqlite`.
+- `save_memory(genesis_hook=…)` and `topic_router=…` are injectable callables; the
+  consumer wires `wiki_topics.ensure_topic` / its keyword map in.
+- `maintain.run` reads the wiki roots from the `ULTRA_MEMORY_WIKI_ROOTS` env seam;
+  unset ⇒ `wiki_sync` is skipped and a pure-memory deployment is byte-identically
+  unaffected.
+
+**Decision D-S6** (the auditable why): the spec said `unified_recall` would *reuse*
+`wiki_query`'s backends + FU-4 RRF, but `wiki_query` is a Trading-side module the
+agnostic boundary forbids importing. So `unified_query` re-implements the
+*algorithm* engine-side — a generic in-module BM25 + cosine over `unified_index`,
+fused with a generic re-implementation of best-rank-per-backend RRF (k=60). True
+cross-codebase byte-parity with `wiki_query` is **deferred to an SP-5 Trading-side
+test** (which can import both). The memory-store byte-identity is enforced here.
+
+### The topic / pin / scope model
+
+- **`topic` is nullable.** `NULL` = "cross-topic / visible to everyone"; a non-NULL
+  topic walls the row. Operational `user`/`feedback` rows always stay `NULL` (D11) —
+  they apply in every topic, and the *type*-scope (fail-closed) still hides them
+  from subagents. Topic ⟂ type. An un-topiced corpus stays fully visible (no
+  retrieval regression): `query_memories(topic=…)` filters `topic = ? OR topic IS
+  NULL`.
+- **One pin space, two stores.** Memory pins use `memories.pinned`; knowledge pins
+  (a wiki page has no `memories` row) use `knowledge_pins`. `set_pinned(source_kind
+  ∈ {memory, knowledge})` writes the right one; `rehydrate.build_gist` unions both
+  into the single `## Pinned rules` gist section. A back-compat `id=` shim keeps
+  the SP-1 `/memory-pin` + spooled records working.
+- **Fail-closed role + topic scope.** The access wall composes two orthogonal
+  axes by AND: `visible(fact) ⟺ (topic ∈ agent_topics OR topic IS NULL) AND (type ∈
+  allowed_types_for(caller_class))`. `topic_scope_from_env` resolves
+  `agent_topics` from `ULTRA_MEMORY_CALLER_TOPIC` + `agent_topic_bindings`, and
+  fails closed: **no binding ⇒ the empty set**, so a subagent with no topic binding
+  sees only `topic IS NULL` operational memories of its allowed types — and **zero
+  topiced knowledge**. The orchestrator / trusted CLI passes `agent_topics=None`
+  (all-topics sentinel). The degraded mode (per-subagent identity unresolved, SP-0
+  spike #7) is safe: sees less, never more.
+
+### The `links` spine vs the wiki graph (D6)
+
+`links` is the **cross-store** edge spine (memory↔memory, memory↔knowledge);
+`wiki/graph/graph.sqlite` stays the wiki-internal typed graph. A **one-way** mirror
+(`mirror_cross_store_links`) lifts only the edges that *cross* stores into `links`;
+pure wiki↔wiki edges stay in `graph.sqlite` so the 5k-edge wiki graph is not
+duplicated into `memory.db`. `record_link` is idempotent on the edge key
+`(src_kind, src_id, predicate, dst_kind, dst_id)` — enforced in code (SELECT-then-
+UPDATE-or-INSERT) because the pre-existing table has no UNIQUE on that key. This is
+the read path north-star Risk §14.8 flagged as never-exercised; Stage 0 verified
+`_links_for` against populated rows before the writer shipped.
+
+### Self-improvement substrate — columns only (the loop is SP-6/SP-7)
+
+SP-3 lands the **columns and relations** the §7a loop will need, all **inert** this
+cycle:
+
+- `memories.created_by` (provenance gate input): stamped `human` by the CLI /
+  `/memory-*` verbs (the safe-immutable default), `import` by the bootstrap
+  importer. **`agent` and `background_review` have no engine write site yet** — they
+  are reserved values an agent-initiated save / a future Tier-2 maintenance write
+  will set; the SP-7 provenance gate may auto-edit only those non-`human` rows.
+- `session_events.outcome_signal` (the deterministic capture hint) is accepted by
+  `record_session_event` but **set by no engine writer** — the Stop-hook capture
+  that enqueues `skill_learning_candidate` rows is **Trading-side** (it lives in the
+  consumer repo, not this engine), and is paired with this commit, not shipped here.
+- `memories.outcome_weight` / `unified_index.outcome_weight` default 1.0 and are
+  multiplicatively inert in `unified_recall`; no writer changes them this cycle.
+- `export_learnings_projection` materializes the read-only per-skill `Learnings.md`
+  **projection** (D14/D15) from the DB system-of-record, the way `export_memory`
+  regenerates the views. The loop that *feeds* it (capture-queue drain,
+  consolidation judge, auto-edit) is **not built** — that is SP-6 and the gated
+  SP-7.
+
+The `procedures` table stays unwired dead weight (Fork A / D12): captured
+procedures route through `memories` with `node_type='procedure'` for the full
+lifecycle (pinning, links, topic, scope, FSM); dropping the empty table is deferred
+to SP-5.
+
 ## Secret handling (spec §7.5)
 
 `strip_secrets` runs on every persisted text field at the write chokepoint, and
@@ -109,10 +225,26 @@ to the `claude` CLI. Never the `anthropic` SDK / `api.anthropic.com` /
 
 ## What's built vs future
 
-Built + tested: `db`, `migrations`, `memory_lib`, `redact_secrets`,
-`retrieval_core`, `memory_query`, `memory_import`, `memory_export`, `claude_cli`,
-`retention`, and the session `hooks` (`common`, `checkpoint`, `rehydrate`).
-Future (Plans 5 cutover onward): the **live** bootstrap import + shadow→cutover
-wiring behind `meta.import_complete` (consumer-side; the hook logic is built and
-unit-tested here), the `knowledge` MCP server (read-only, writes proxied to a
-short-lived `memory_lib`), the wiki write-gateway, and plugin packaging/publish.
+Built + tested: `db`, `migrations` (through `0004`), `memory_lib`,
+`redact_secrets`, `retrieval_core`, `memory_query`, `memory_import`,
+`memory_export`, `claude_cli`, `retention`, `maintain`, the session `hooks`
+(`common`, `checkpoint`, `rehydrate`), the `knowledge_mcp` read tool, and the SP-3
+cross-store fabric (`wiki_sync`, `unified_query`, the `links` spine, cross-store
+pinning, the topic write path, and the §7a substrate **columns**).
+
+Future:
+- **§7a self-improvement loop (SP-6/SP-7).** SP-3 shipped the substrate columns
+  (`created_by`, `outcome_signal`, `outcome_weight`) and the `validated_as` link
+  relation as **inert**. The loop itself — the capture-queue drain, the
+  consolidation judge, the outcome-weight aggregate, and the gated auto-edit /
+  self-reversion — is not built. `agent`/`background_review` provenance and a
+  non-1.0 outcome weight have no writer yet.
+- **The D4 topic backfill** is a gated one-time data step (`backfill_topic`); the
+  DDL is live but the row-touch awaits sign-off (spec §10).
+- **Cross-codebase wiki_query parity** is deferred to an SP-5 Trading-side test
+  (D-S6); **doc consolidation + the generic `using-knowledge` split** are SP-5;
+  the consumer-side `wiki/SCHEMA.md` / `CLAUDE.md` updates land with the post-merge
+  Trading change, not here.
+- The **live** bootstrap import + shadow→cutover wiring behind `meta.import_complete`
+  and the per-subagent topic-identity mechanism (SP-0 spike #7; the env-var
+  fallback is the locked interim) remain consumer-side / open.

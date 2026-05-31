@@ -17,9 +17,17 @@ section. In short: `/plugin install`, set the one required `userConfig` value
 | Key | Required | Default | Purpose |
 |---|---|---|---|
 | `data_db_path` | yes | — | Absolute path to the consumer's canonical `memory.db`; the MCP + hooks read this. |
-| `caller_class` | no | `subagent` | MCP recall privilege class. Fail-closed: `subagent` ⇒ `project`/`reference` only. |
+| `caller_class` | no | `subagent` | MCP recall privilege class (the **type** axis). Fail-closed: `subagent` ⇒ `project`/`reference` only. |
 | `rehydrate_budget` | no | `2000` | Character budget for the SessionStart rehydration gist. |
 | `oauth_token` | no | — | OAuth token, NEVER an `ANTHROPIC_API_KEY`. Only for LLM maintenance; the prune+export slice does not use it. |
+
+Engine env seams the wrapper / consumer can also set (SP-3):
+
+| Env var | Purpose |
+|---|---|
+| `ULTRA_MEMORY_WIKI_ROOTS` | `os.pathsep`- or comma-separated Expert-Knowledge root paths. Read by `maintain.run` → `wiki_sync`. **Unset ⇒ `wiki_sync` is skipped** and a pure-memory deployment is byte-identically unaffected. |
+| `ULTRA_MEMORY_CALLER_TOPIC` | Comma/`:`/`;`-separated topic list — the **topic** axis of the access wall (the interim source until SP-0 spike #7 resolves per-subagent identity). Fail-closed: unset + no `agent_topic_bindings` row ⇒ the empty topic set. |
+| `ULTRA_MEMORY_AGENT_NAME` | Agent name for the `agent_topic_bindings` lookup (`topic_scope_from_env`). |
 
 `/memory-setup` builds the runtime venv under `${CLAUDE_PLUGIN_DATA}/venv`,
 optionally imports a legacy memory dir **once**, stamps the DB ready (the
@@ -75,12 +83,55 @@ survives while raw rows stay bounded. Retention window: `maintain._KEEP_DAYS`
 (90d default); export dir defaults to `<db-dir>/memory_export/views`
 (override with `ULTRA_MEMORY_EXPORT_DIR`).
 
+**SP-3 — `wiki_sync` inside the same throttle.** When `ULTRA_MEMORY_WIKI_ROOTS`
+is set, `maintain.run` also mirrors the Expert-Knowledge pages into `unified_index`
+(and embeds their `title+snippet` into the shared `embeddings` cache as
+`target_kind='knowledge'`). It is idempotent (a `content_sha256` match skips a page
++ skips re-embed), reconciling (orphan rows whose file vanished are pruned, scoped
+to the topics synced this call — the Risk §14.4 drift guard), and fail-open (a sync
+error lands as `result["wiki_sync"]["error"]` and never blocks). The return then
+carries a `wiki_sync` summary `{upserted, skipped, pruned, embedded, errors}`
+beside `{pruned, exported, skipped}`. With no roots configured the sync is skipped
+entirely.
+
+## Topic backfill (gated) {#topic-backfill-gated}
+
+`memory_lib.backfill_topic(conn, *, default_topic, ts)` stamps `topic =
+default_topic` on every `memories` row that is `topic IS NULL AND type NOT IN
+('user','feedback')` (operational rows stay cross-topic `NULL`). It is the **one
+data step** SP-3's `0004` migration deliberately keeps out of the `.sql`:
+
+- **Idempotent + guarded:** a `meta.topic_backfill_complete` flag short-circuits a
+  re-run (mirrors `import_complete`).
+- **Audited per row** + **git-reversible** (the export dump + `audit_log` + clearing
+  the flag undo it).
+- `default_topic` is **consumer-supplied** (content-free in the engine; Trading →
+  `trading`).
+- **Gated on sign-off (spec §10):** it touches the live canonical store, so it runs
+  only behind Peter's explicit go, in the same paused-cron + git-checkpoint
+  discipline SP-2's wiki re-root used. The `0004` DDL itself is non-destructive and
+  can land first; only this data step gates.
+
 ## Privilege boundary
 
-`caller_class=subagent` (the default) ⇒ MCP recall is type-scoped to
-`project`/`reference` only, never `user`/`feedback`. Trusted full recall is the
-`/memory-recall` CLI, not the MCP — there is no `orchestrator` MCP instance this
-cycle (`[[feedback_subagents_can_leak_secrets]]`).
+The access wall has **two orthogonal axes** (composed by AND):
+
+- **Type** (SP-0/SP-1): `caller_class=subagent` (the default) ⇒ MCP recall is
+  type-scoped to `project`/`reference` only, never `user`/`feedback`.
+- **Topic** (SP-3): a caller sees a fact only if `topic ∈ agent_topics OR topic IS
+  NULL`. `agent_topics` comes from `ULTRA_MEMORY_CALLER_TOPIC` /
+  `agent_topic_bindings` (`topic_scope_from_env`), **fail-closed** — no binding ⇒
+  the empty set ⇒ only `topic IS NULL` operational memories of allowed types, and
+  **zero topiced knowledge**. The cross-store `unified_recall` (the MCP routes to it
+  when topic bindings are present) enforces both axes.
+
+`visible(fact) ⟺ (topic ∈ agent_topics OR topic IS NULL) AND (type ∈
+allowed_types_for(caller_class))`. Trusted full recall (all topics + all types) is
+the `/memory-recall` CLI, not the MCP — there is no `orchestrator` MCP instance
+this cycle (`[[feedback_subagents_can_leak_secrets]]`). The per-subagent
+topic-identity mechanism is the unresolved SP-0 spike #7; the env-var fallback is
+the locked interim, and the fail-closed default means the degraded mode is safe
+(sees less, never more).
 
 ## venv lifecycle
 
