@@ -22,11 +22,68 @@ def _now_z():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _get_meta(conn, key):
+    row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def _set_meta(conn, key, value):
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def _hours_between(earlier_z, later_z):
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    a = datetime.datetime.strptime(earlier_z, fmt)
+    b = datetime.datetime.strptime(later_z, fmt)
+    return (b - a).total_seconds() / 3600.0
+
+
 def run(conn, *, out_dir, ts=None, keep_days=_KEEP_DAYS, force=False):
-    """Stage-3 fills in the throttle + prune + export body. Returns a summary dict."""
-    raise NotImplementedError  # Implemented in Task 3.1.
+    """Throttled prune + export. Returns {pruned, exported, skipped}. Fail-soft:
+    the caller wraps this so an error never blocks a session."""
+    ts = ts or _now_z()
+    last = _get_meta(conn, _META_KEY)
+    if not force and last:
+        try:
+            if _hours_between(last, ts) < _THROTTLE_HOURS:
+                return {"pruned": 0, "exported": False, "skipped": True}
+        except ValueError:
+            pass  # unparseable stamp -> proceed (self-heal)
+    pruned = retention.prune_session_events(conn, keep_days=keep_days, ts=ts)
+    exported = memory_export.export_memory(conn, out_dir, ts=ts)
+    _set_meta(conn, _META_KEY, ts)
+    return {"pruned": pruned, "exported": bool(exported), "skipped": False}
 
 
-def main(argv=None):  # pragma: no cover - exercised via the wrapper + Task 3.3
-    """Stage-3 wires argv/env → run(). Stub returns 0 so the wrapper can dispatch."""
+def main(argv=None):
+    """CLI / hook entry. Resolves DB + out_dir from env; fail-open (exit 0).
+
+    out_dir defaults to <db-dir>/memory_export/views (mirrors the export layout
+    consumers already use); override with ULTRA_MEMORY_EXPORT_DIR.
+    """
+    import sys
+    from pathlib import Path
+    db = os.environ.get("ULTRA_MEMORY_DB", "")
+    if not db or not Path(db).is_file():
+        return 0
+    out_dir = os.environ.get("ULTRA_MEMORY_EXPORT_DIR") or str(
+        Path(db).parent / "memory_export" / "views")
+    force = os.environ.get("ULTRA_MEMORY_MAINTAIN_FORCE", "") == "1"
+    try:
+        conn = memory_lib.open_memory_db(db)
+        try:
+            res = run(conn, out_dir=out_dir, force=force)
+        finally:
+            conn.close()
+        sys.stderr.write(f"ultra-memory maintain: {res}\n")
+    except Exception as exc:  # never block the session
+        sys.stderr.write(f"ultra-memory maintain skipped: {exc}\n")
     return 0
