@@ -47,7 +47,7 @@ def _save(conn, **kw):
 
 
 def _add_knowledge(conn, *, slug, topic, title, snippet, page_type="concept",
-                   ts="2026-05-01T00:00:00", outcome_weight=None):
+                   ts="2026-05-01T00:00:00", outcome_weight=None, bm25_text=None):
     """Insert a unified_index row directly (Stage-5 wiki_sync's output shape)."""
     fm = json.dumps({"type": page_type, "title": title}, sort_keys=True)
     cols = ("slug", "topic", "page_type", "title", "snippet", "frontmatter",
@@ -57,6 +57,9 @@ def _add_knowledge(conn, *, slug, topic, title, snippet, page_type="concept",
     if outcome_weight is not None:
         cols = cols + ("outcome_weight",)
         vals = vals + [outcome_weight]
+    if bm25_text is not None:
+        cols = cols + ("bm25_text",)
+        vals = vals + [bm25_text]
     placeholders = ",".join("?" for _ in cols)
     conn.execute("BEGIN IMMEDIATE")
     conn.execute(f"INSERT INTO unified_index ({','.join(cols)}) VALUES ({placeholders})",
@@ -367,6 +370,49 @@ def test_fence5b_best_rank_no_double_count():
     # Across two SEPARATE backends it earns one term each (that's correct — two
     # backends), demonstrating per-backend single-credit (not per-list summation).
     assert abs(fused_double[item] - 2.0 / (k + 1)) < 1e-12
+
+
+# ---------------------------------------------------------------------------
+# SP-6 #6 (D11) — _knowledge_doc_text BM25s the FULL bm25_text, falling back to
+# snippet for un-migrated / NULL rows (back-compat).
+# ---------------------------------------------------------------------------
+
+def test_knowledge_doc_text_uses_bm25_text_full_body():
+    row = {"title": "T", "snippet": "short preview", "frontmatter": "{}",
+           "bm25_text": "the full collapsed body with a back-half quokkasaurus term"}
+    doc = unified_query._knowledge_doc_text(row)
+    assert "quokkasaurus" in doc          # the full body is the BM25 document
+    assert "short preview" not in doc     # snippet is NOT used when bm25_text exists
+    assert "T" in doc and "{}" in doc     # title + frontmatter still present
+
+
+def test_knowledge_doc_text_falls_back_to_snippet_when_bm25_text_null():
+    row = {"title": "T", "snippet": "short preview", "frontmatter": "{}",
+           "bm25_text": None}
+    doc = unified_query._knowledge_doc_text(row)
+    assert "short preview" in doc         # NULL bm25_text -> fall back to snippet
+
+
+def test_knowledge_doc_text_handles_row_missing_bm25_text_column():
+    """A row dict produced before migration 0005 has no bm25_text key at all —
+    the doc-text builder must still fall back to snippet (back-compat)."""
+    row = {"title": "T", "snippet": "legacy preview", "frontmatter": "{}"}
+    doc = unified_query._knowledge_doc_text(row)
+    assert "legacy preview" in doc
+
+
+def test_knowledge_candidates_ranks_back_half_term_via_bm25_text(tmp_path):
+    """End-to-end: a query term that lives ONLY in bm25_text (past the snippet cap)
+    still ranks the page — the SP-5 tail-divergence the fix closes."""
+    conn = _db(tmp_path)
+    filler = ("filler " * 80).strip()
+    full_body = filler + " quokkasaurus tail term"
+    _add_knowledge(conn, slug="longpage", topic="trading", title="Long Page",
+                   snippet=filler[:400], bm25_text=full_body)
+    bm25_ranked, _embed_ranked, by_slug = unified_query._knowledge_candidates(
+        conn, "quokkasaurus", agent_topics={"trading"}, embedder=None, dim=3)
+    assert "longpage" in bm25_ranked
+    conn.close()
 
 
 # ---------------------------------------------------------------------------

@@ -191,9 +191,27 @@ def topic_scope_from_env(env, conn=None, *, agent_name=None):
 # Knowledge-side candidate ranking over unified_index (generic BM25 + cosine).
 # ---------------------------------------------------------------------------
 
+def _row_get(row, key):
+    """Read `key` from a sqlite3.Row OR a plain dict, tolerating a column the row
+    does not carry (a pre-migration-0005 row has no `bm25_text`). Returns None when
+    absent — both sqlite3.Row and dict raise on a missing key, so we guard."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
+
+
 def _knowledge_doc_text(row):
-    """The generic IR text for a unified_index row: title + snippet + frontmatter."""
-    return f"{row['title'] or ''}\n{row['snippet'] or ''}\n{row['frontmatter'] or ''}"
+    """The generic IR text for a unified_index row: title + FULL body + frontmatter.
+
+    SP-6 #6 (D11): the BM25 document is the FULL collapsed body (`bm25_text`), not
+    the 400-char display `snippet` — so a query term in a page's back half ranks,
+    matching `wiki_query`'s full-text BM25 (closes the SP-5 parity tail-divergence).
+    Falls back to `snippet` for un-migrated / NULL `bm25_text` rows (back-compat)."""
+    title = _row_get(row, "title") or ""
+    bm25 = _row_get(row, "bm25_text") or _row_get(row, "snippet") or ""
+    frontmatter = _row_get(row, "frontmatter") or ""
+    return f"{title}\n{bm25}\n{frontmatter}"
 
 
 def _knowledge_candidates(conn, query, *, agent_topics, embedder, dim):
@@ -217,13 +235,14 @@ def _knowledge_candidates(conn, query, *, agent_topics, embedder, dim):
         return [], [], {}
     if agent_topics is None:
         rows = conn.execute(
-            "SELECT slug, topic, page_type, title, snippet, frontmatter, path, "
-            "outcome_weight FROM unified_index WHERE topic IS NOT NULL").fetchall()
+            "SELECT slug, topic, page_type, title, snippet, bm25_text, frontmatter, "
+            "path, outcome_weight FROM unified_index WHERE topic IS NOT NULL"
+        ).fetchall()
     else:
         placeholders = ",".join("?" for _ in agent_topics)
         rows = conn.execute(
-            "SELECT slug, topic, page_type, title, snippet, frontmatter, path, "
-            f"outcome_weight FROM unified_index WHERE topic IN ({placeholders})",
+            "SELECT slug, topic, page_type, title, snippet, bm25_text, frontmatter, "
+            f"path, outcome_weight FROM unified_index WHERE topic IN ({placeholders})",
             tuple(agent_topics)).fetchall()
     if not rows:
         return [], [], {}

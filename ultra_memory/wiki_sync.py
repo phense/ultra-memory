@@ -75,9 +75,21 @@ def _first_heading(body):
 
 def _snippet(body, *, limit=400):
     """A rendered snippet: front-matter already stripped; collapse blank runs and
-    cap length. Generic — no wiki-specific rendering."""
+    cap length. Generic — no wiki-specific rendering. This is the DISPLAY preview
+    (recall UX), NOT the BM25 document — those have different right answers (a
+    400-char preview is correct UX; the full body is correct for ranking). See
+    `_bm25_text`."""
     text = " ".join(body.split())
     return text[:limit]
+
+
+def _bm25_text(body):
+    """The FULL collapsed body for the knowledge-side BM25 document (SP-6 #6, D11):
+    whitespace-collapsed, NO length cap. `unified_query._knowledge_doc_text` indexes
+    this so a query term in a page's back half ranks — matching `wiki_query`'s
+    full-text BM25 (closes the SP-5 parity tail-divergence). Generic, no wiki-
+    specific rendering. Stored in `unified_index.bm25_text` (migration 0005)."""
+    return " ".join(body.split())
 
 
 def _iter_pages(root):
@@ -102,13 +114,19 @@ def _iter_pages(root):
         yield path, topic, path.stem
 
 
-def wiki_sync(conn, wiki_roots, *, embedder=None, ts):
+def wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts):
     """Mirror Expert-Knowledge pages into `unified_index` + the shared embeddings
     cache. Idempotent, reconciling, fail-open. POPULATION ONLY (§5.4, D8).
 
     `wiki_roots` is a consumer-fed iterable of root paths (str or Path). `embedder`
     is list[str] -> list[list[float]] (None -> skip embedding, still upsert rows).
     Returns {upserted, skipped, pruned, embedded, errors}.
+
+    `rebuild=True` forces every page to re-populate even when its `content_sha256`
+    is unchanged — the one-pass backfill for SP-6 #6 (D11): a row written by the
+    PRE-fix wiki_sync carries a NULL `bm25_text` that the normal sha-skip would
+    leave forever. A `--rebuild` run repopulates `bm25_text` (and re-embeds) for
+    all pages. Single-root/normal callers leave it False (sha-skip preserved).
     """
     from pathlib import Path
 
@@ -134,6 +152,7 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, ts):
                 page_type = fm.get("type")
                 title = fm.get("title") or _first_heading(body) or slug
                 snippet = _snippet(body)
+                bm25_text = _bm25_text(body)
                 frontmatter_json = json.dumps(fm, ensure_ascii=False, sort_keys=True)
                 sha = retrieval_core.content_sha256(text)
             except Exception:
@@ -143,7 +162,8 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, ts):
             prior = conn.execute(
                 "SELECT content_sha256 FROM unified_index WHERE slug=?",
                 (slug,)).fetchone()
-            if prior is not None and prior["content_sha256"] == sha:
+            if (not rebuild and prior is not None
+                    and prior["content_sha256"] == sha):
                 summary["skipped"] += 1
                 continue
 
@@ -151,17 +171,18 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, ts):
                 conn.execute("BEGIN IMMEDIATE")
                 conn.execute(
                     "INSERT INTO unified_index "
-                    "(slug, topic, page_type, title, snippet, frontmatter, path, "
-                    " content_sha256, updated_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?) "
+                    "(slug, topic, page_type, title, snippet, bm25_text, "
+                    " frontmatter, path, content_sha256, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(slug) DO UPDATE SET "
                     "topic=excluded.topic, page_type=excluded.page_type, "
                     "title=excluded.title, snippet=excluded.snippet, "
+                    "bm25_text=excluded.bm25_text, "
                     "frontmatter=excluded.frontmatter, path=excluded.path, "
                     "content_sha256=excluded.content_sha256, "
                     "updated_at=excluded.updated_at",
-                    (slug, topic, page_type, title, snippet, frontmatter_json,
-                     str(path), sha, ts),
+                    (slug, topic, page_type, title, snippet, bm25_text,
+                     frontmatter_json, str(path), sha, ts),
                 )
                 conn.execute("COMMIT")
             except Exception:
