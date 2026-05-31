@@ -16,12 +16,17 @@ as a local plugin. This `docs/` tree is split by reading intent:
   - [api.md](reference/api.md) — every public function + behaviour
   - [operations.md](reference/operations.md) — export/dump format, spool, rollback, redaction
 
-## Status (2026-05-30)
+## Status (2026-05-31)
 
-The **memory engine + import/export are built and tested** (Plans 1–4; the test
-suite is green). The **MCP server, session hooks/rehydration, slash-command verbs,
-the wiki write-gateway, and the live one-time bootstrap import are future work**
-(Plans 5–8). Treat anything described here as "future" until its plan lands.
+The **memory engine + import/export + session hooks are built and tested**
+(Plans 1–4; the test suite is green, 150 tests). The **read-only `knowledge` MCP
+core is built and tested** (`ultra_memory/knowledge_mcp.py`: type-scoped recall —
+untrusted callers get `project`/`reference` only, never `user`/`feedback` — plus
+read-path `strip_secrets`, access-log audit, the `knowledge_query` tool, and a
+config-driven stdio `main()`; the embedder needs the `retrieval` extra at launch).
+Still future: **MCP reachability wiring + 3-path verification, slash-command verbs,
+the live one-time bootstrap import, and plugin packaging/publish** (Plans 5–8).
+Treat anything described here as "future" until its plan lands.
 
 A full adversarial audit of the engine ran on 2026-05-30 (verdict
 `go-after-fixes`); all findings — 4 critical, 1 high, 7 medium, 11 low + 1 nit —
