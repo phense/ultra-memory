@@ -286,6 +286,62 @@ def set_verified(conn, *, id, ts, reason="manual verify"):
     _write_txn(conn, work, spool={"op": "set_verified", "id": id, "ts": ts, "reason": reason})
 
 
+_BACKFILL_FLAG = "topic_backfill_complete"
+# Operational rows are cross-topic by nature (OAuth-only / commit-proactively apply
+# in every topic — D11) → they stay topic=NULL so the §5 topic wall renders them
+# visible regardless of an agent's binding (the type-scope still hides them from
+# subagents). Topic + type stay orthogonal.
+_TOPIC_EXEMPT_TYPES = ("user", "feedback")
+
+
+def backfill_topic(conn, *, default_topic, ts, reason="topic backfill (D4)"):
+    """Stamp `topic = default_topic` on every existing `memories` row whose topic is
+    NULL and whose type is NOT operational (D11 keeps user/feedback rows NULL). The
+    default topic is consumer-supplied (content-free in the engine: Trading → 'trading').
+
+    Guarded + idempotent: a `meta.topic_backfill_complete` flag short-circuits a
+    re-run (mirrors `import_complete`). Audited per stamped row. Reversible — the
+    git-tracked export + audit_log + clearing the flag undo it. Returns a summary
+    dict: {stamped, skipped_already_complete}.
+
+    NOTE: a one-time touch of the live canonical store — gated on Peter's sign-off
+    (spec §10). NEVER run on a live DB without that gate; the suite runs it on tmp DBs.
+    """
+    if not default_topic:
+        raise ValueError("backfill_topic: default_topic must be a non-empty string")
+
+    flag = conn.execute(
+        "SELECT value FROM meta WHERE key=?", (_BACKFILL_FLAG,)).fetchone()
+    if flag is not None and str(flag[0]) == "1":
+        return {"stamped": 0, "skipped_already_complete": True}
+
+    summary = {"stamped": 0, "skipped_already_complete": False}
+
+    def work():
+        placeholders = ",".join("?" * len(_TOPIC_EXEMPT_TYPES))
+        # Snapshot the rows we are about to touch (for per-row audit prior-state) so
+        # the change is fully reconstructable from audit_log.
+        targets = conn.execute(
+            f"SELECT * FROM memories WHERE topic IS NULL "
+            f"AND type NOT IN ({placeholders})",
+            tuple(_TOPIC_EXEMPT_TYPES),
+        ).fetchall()
+        for row in targets:
+            conn.execute(
+                "UPDATE memories SET topic=? WHERE id=?", (default_topic, row["id"]))
+            _audit(conn, op="backfill_topic", target_kind="memory",
+                   target_id=row["id"], reason=reason, prior=dict(row), ts=ts)
+        summary["stamped"] = len(targets)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, '1') "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (_BACKFILL_FLAG,))
+
+    _write_txn(conn, work, spool={
+        "op": "backfill_topic", "default_topic": default_topic, "ts": ts,
+        "reason": reason})
+    return summary
+
+
 def replay_spool(conn, *, spool_dir=None):
     """Drain memory_spool/: re-apply each spooled write (a prior SQLITE_BUSY casualty)
     via its op, deleting the file on success. A still-failing op re-spools to the SAME
@@ -302,6 +358,7 @@ def replay_spool(conn, *, spool_dir=None):
         "save_memory": save_memory, "record_session_event": record_session_event,
         "record_access": record_access, "consolidate": consolidate, "delete": delete,
         "set_pinned": set_pinned, "set_verified": set_verified,
+        "backfill_topic": backfill_topic,
     }
     for f in sorted(target.glob("*.json")):
         try:

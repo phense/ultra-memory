@@ -12,7 +12,7 @@ from .redact_secrets import strip_secrets
 
 _STABLE_COLS = ("id", "type", "title", "description", "index_hook", "node_type",
                 "file_slug", "sort_order", "body", "status", "supersedes",
-                "origin_session_id")
+                "origin_session_id", "topic", "created_by")
 
 
 def _content_hash(conn):
