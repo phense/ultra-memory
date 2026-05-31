@@ -16,5 +16,28 @@
     "rag-alternative",
     "claude-code"
   ],
-  "category": "productivity"
+  "category": "productivity",
+  "userConfig": {
+    "data_db_path": {
+      "type": "file",
+      "required": true,
+      "description": "Absolute path to the consumer's canonical memory.db (the knowledge MCP + hooks read this)."
+    },
+    "caller_class": {
+      "type": "string",
+      "default": "subagent",
+      "description": "Privilege class for knowledge-MCP recall. Fail-closed: 'subagent' => project/reference facts only. Set 'orchestrator' only on a trusted top-level instance."
+    },
+    "rehydrate_budget": {
+      "type": "number",
+      "default": 2000,
+      "description": "Character budget for the SessionStart rehydration gist."
+    },
+    "oauth_token": {
+      "type": "string",
+      "sensitive": true,
+      "required": false,
+      "description": "OAuth token, NEVER an ANTHROPIC_API_KEY. Only needed if a consumer runs LLM maintenance; the memory maintenance slice (prune+export) does not use it."
+    }
+  }
 }
