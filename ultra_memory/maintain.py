@@ -8,7 +8,7 @@ never block a session.
 import datetime
 import os
 
-from ultra_memory import memory_lib, retention, memory_export
+from ultra_memory import memory_lib, retention, memory_export, wiki_sync
 
 # Retention window for session_events (days). Conservative default; rolled into
 # sessions.summary before deletion, so nothing is lost — only the raw rows are bounded.
@@ -16,6 +16,13 @@ _KEEP_DAYS = 90
 # Throttle: skip if the last successful run was within this many hours.
 _THROTTLE_HOURS = 20
 _META_KEY = "last_maintenance"
+
+# SP-3 Stage 5: the wiki-root injection seam. The expert-wiki roots are NOT known
+# to the engine (project-agnostic NFR) — a CONSUMER (Trading) supplies them via
+# this env var (os.pathsep- OR comma-separated). UNSET/empty -> wiki_sync is
+# skipped entirely, so a pure-memory deployment with no expert-wiki is byte-
+# identically unaffected.
+_WIKI_ROOTS_ENV = "ULTRA_MEMORY_WIKI_ROOTS"
 
 
 def _now_z():
@@ -46,10 +53,45 @@ def _hours_between(earlier_z, later_z):
     return (b - a).total_seconds() / 3600.0
 
 
-def run(conn, *, out_dir, ts=None, keep_days=_KEEP_DAYS, force=False):
-    """Throttled prune + export. Returns {pruned, exported, skipped}. Fail-soft:
-    the caller wraps this so an error never blocks a session."""
+def _resolve_wiki_roots(env):
+    """The wiki-root injection seam (project-agnostic). Parse ULTRA_MEMORY_WIKI_ROOTS
+    (os.pathsep- OR comma-separated) into a list of Path. UNSET/blank -> [] (the
+    pure-memory no-wiki skip). Returns list[Path]."""
+    from pathlib import Path
+    raw = env.get(_WIKI_ROOTS_ENV, "")
+    if not raw or not raw.strip():
+        return []
+    parts = []
+    for chunk in raw.split(os.pathsep):
+        parts.extend(chunk.split(","))
+    return [Path(p.strip()) for p in parts if p.strip()]
+
+
+def _maybe_default_embedder(env):
+    """Resolve an embedder for wiki_sync's knowledge embeddings: reuse the engine's
+    lazy fastembed embedder. Fail-open: if the optional extra is not installed,
+    return None (index rows still upsert; embedding is skipped). Never crashes."""
+    from ultra_memory import retrieval_core
+    try:
+        return retrieval_core.default_embedder()
+    except Exception:
+        return None
+
+
+def run(conn, *, out_dir, ts=None, keep_days=_KEEP_DAYS, force=False,
+        wiki_roots=None, embedder=None, env=None):
+    """Throttled prune + export (+ optional wiki_sync). Returns {pruned, exported,
+    skipped} — plus a `wiki_sync` summary ONLY when wiki roots are configured.
+    Fail-soft: the caller wraps this so an error never blocks a session.
+
+    SP-3 Stage 5: wiki_sync runs INSIDE this same throttle (no second throttle).
+    The wiki roots come from `wiki_roots=` (explicit) or, when None, the
+    ULTRA_MEMORY_WIKI_ROOTS env seam (`_resolve_wiki_roots`). If there are no roots
+    (the pure-memory deployment), wiki_sync is skipped ENTIRELY and the return value
+    is byte-identical to pre-Stage-5 behavior."""
     ts = ts or _now_z()
+    if env is None:
+        env = os.environ
     last = _get_meta(conn, _META_KEY)
     if not force and last:
         try:
@@ -59,8 +101,21 @@ def run(conn, *, out_dir, ts=None, keep_days=_KEEP_DAYS, force=False):
             pass  # unparseable stamp -> proceed (self-heal)
     pruned = retention.prune_session_events(conn, keep_days=keep_days, ts=ts)
     exported = memory_export.export_memory(conn, out_dir, ts=ts)
+    result = {"pruned": pruned, "exported": bool(exported), "skipped": False}
+
+    # SP-3 Stage 5 — wiki_sync, inside the throttle, fail-open. Skipped entirely
+    # when no roots are configured (pure-memory deployments stay unaffected).
+    roots = wiki_roots if wiki_roots is not None else _resolve_wiki_roots(env)
+    if roots:
+        try:
+            emb = embedder if embedder is not None else _maybe_default_embedder(env)
+            result["wiki_sync"] = wiki_sync.wiki_sync(
+                conn, roots, embedder=emb, ts=ts)
+        except Exception as exc:  # fail-open: a sync error never blocks maintenance
+            result["wiki_sync"] = {"error": str(exc)}
+
     _set_meta(conn, _META_KEY, ts)
-    return {"pruned": pruned, "exported": bool(exported), "skipped": False}
+    return result
 
 
 def main(argv=None):
