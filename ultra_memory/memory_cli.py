@@ -43,6 +43,15 @@ def _build_parser():
     e.add_argument("--from-file", required=True)
     i = sub.add_parser("inbox", help="apply + clear the correction inbox")
     i.add_argument("--path", default=None)
+    s = sub.add_parser("save", help="create/update a durable memory from a body file")
+    s.add_argument("--id", required=True)
+    s.add_argument("--type", default="reference",
+                   help="user | feedback | project | reference (privilege-scoped on recall)")
+    s.add_argument("--title", required=True)
+    s.add_argument("--from-file", required=True,
+                   help="path to the memory body (avoids shell-escaping prose)")
+    s.add_argument("--description", default=None)
+    s.add_argument("--node-type", default="memory")
     return ap
 
 
@@ -99,6 +108,19 @@ def main(argv=None, *, db_path=None, embedder=None, dim=None, ts=None):
                 sort_order=row["sort_order"], created_at=row["created_at"],
                 origin_session_id=row["origin_session_id"])
             print(f"edited {args.id}")
+            return 0
+
+        if args.cmd == "save":
+            try:
+                body = Path(args.from_file).read_text(encoding="utf-8")
+            except OSError as exc:
+                print(f"save: cannot read --from-file {args.from_file!r}: {exc}",
+                      file=sys.stderr)
+                return 1
+            memory_lib.save_memory(
+                conn, id=args.id, type=args.type, title=args.title, body=body, ts=ts,
+                description=args.description, node_type=args.node_type)
+            print(f"saved {args.id}")
             return 0
 
         if args.cmd == "inbox":
