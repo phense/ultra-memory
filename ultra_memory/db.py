@@ -38,7 +38,15 @@ def _apply_statement(conn, stmt):
 def connect(db_path, *, busy_timeout_ms=30000):
     conn = sqlite3.connect(str(db_path), isolation_level=None)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    # WAL can silently fall back (e.g. on a network/FUSE filesystem), which voids the
+    # concurrent-reader + single-writer + busy_timeout discipline. Read the resulting
+    # mode and fail loud rather than degrade silently. ("memory" = an in-memory db,
+    # which legitimately cannot WAL.)
+    mode = str(conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]).lower()
+    if mode not in ("wal", "memory"):
+        raise sqlite3.OperationalError(
+            f"journal_mode=WAL not honored (got {mode!r}); the connection discipline "
+            "requires WAL (is the DB on a network/FUSE filesystem?)")
     conn.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
@@ -50,7 +58,12 @@ def migrate(conn, migrations_dir):
     current = conn.execute("PRAGMA user_version").fetchone()[0]
     applied = current
     for path in sorted(migrations_dir.glob("*.sql")):
-        version = int(path.name.split("_", 1)[0])
+        prefix = path.name.split("_", 1)[0]
+        if not prefix.isdigit():
+            # Skip stray/mis-named .sql (a scratch/backup copy) instead of letting
+            # int() crash the entire migration run on a fresh bootstrap.
+            continue
+        version = int(prefix)
         if version <= current:
             continue
         statements = _split_statements(path.read_text(encoding="utf-8"))

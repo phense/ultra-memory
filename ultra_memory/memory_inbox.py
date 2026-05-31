@@ -47,18 +47,20 @@ def import_inbox(conn, inbox_path, *, ts):
     header (preserving any notes under an Unprocessed section). Returns a summary
     dict {applied, notes, errors, skipped}. Missing file → a no-op zero summary."""
     path = Path(inbox_path)
-    summary = {"applied": 0, "notes": 0, "errors": [], "skipped": 0}
+    summary = {"applied": 0, "notes": 0, "errors": [], "skipped": 0, "spooled": 0}
     if not path.is_file():
         return summary
 
     items = parse_inbox(path.read_text(encoding="utf-8"))
     notes = []
+    failed_lines = []  # directive lines re-emitted so a failed correction is never lost
     for it in items:
         op = it["op"]
         if op == "note":
             notes.append(it["text"])
             continue
         mid = it["id"]
+        directive_line = f"{op} {mid}"
         try:
             if op == "pin":
                 memory_lib.set_pinned(conn, id=mid, pinned=True, ts=ts, reason="inbox pin")
@@ -67,15 +69,25 @@ def import_inbox(conn, inbox_path, *, ts):
             elif op == "verify":
                 memory_lib.set_verified(conn, id=mid, ts=ts)
             summary["applied"] += 1
+        except memory_lib.WriteSpooled:
+            # Durably spooled (DB busy), NOT lost — it self-heals via replay_spool.
+            # Distinct from a genuine error, and re-emitted so a human sees it's pending.
+            summary["spooled"] += 1
+            failed_lines.append(directive_line)
         except KeyError as exc:
             summary["errors"].append(f"{op} {mid}: {exc}")
-        except Exception as exc:  # pragma: no cover - defensive: never let one bad line wedge the import
+            failed_lines.append(directive_line)
+        except Exception as exc:  # defensive: one bad line must not wedge the import
             summary["errors"].append(f"{op} {mid}: {exc!r}")
+            failed_lines.append(directive_line)
 
     summary["notes"] = len(notes)
 
-    # Rewrite the file: clean header, plus any unprocessed notes preserved for review.
+    # Rewrite the file: clean header + failed directives (to retry) + preserved notes.
     new_text = _HEADER
+    if failed_lines:
+        new_text += ("\n## Failed (fix, then re-import)\n"
+                     + "\n".join(failed_lines) + "\n")
     if notes:
         new_text += "\n## Unprocessed (review manually)\n" + "\n".join(notes) + "\n"
     path.write_text(new_text, encoding="utf-8")

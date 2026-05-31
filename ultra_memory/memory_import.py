@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 
 from . import memory_lib
-from .redact_secrets import strip_secrets
 
 _INDEX_LINE = re.compile(r"^- \[(?P<title>.+?)\]\((?P<slug>[^)]+?)\.md\)"
                          r"(?:\s+—\s+(?P<hook>.*\S))?\s*$")
@@ -157,11 +156,10 @@ def import_today_file(conn, text, *, day):
         detail = "\n".join(body_lines).strip()
         title = (detail.splitlines()[0] if detail else ctx)[:120]
         # Dedupe within the run on the same content-addressed key record_session_event
-        # uses (computed on redacted text), so the returned count reflects rows
-        # actually recorded — not the block count — and true dupes are warned, not
-        # silently swallowed by INSERT OR IGNORE.
-        key = memory_lib._event_key(
-            session_id, ts, "legacy_note", strip_secrets(title), strip_secrets(detail))
+        # uses (computed on RAW pre-redaction text), so the returned count reflects
+        # rows actually recorded — not the block count — and true dupes are warned,
+        # not silently swallowed by INSERT OR IGNORE.
+        key = memory_lib._event_key(session_id, ts, "legacy_note", title, detail)
         if key in seen:
             warnings.append(f"duplicate block skipped (identical content at {ts}): {title!r}")
             continue

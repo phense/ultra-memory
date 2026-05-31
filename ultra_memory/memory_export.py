@@ -98,7 +98,13 @@ def export_memory(conn, out_dir, *, ts, snapshot=True):
         conn.execute(f"VACUUM INTO '{safe}'")
 
     views = out_dir / "views"
-    views.mkdir(exist_ok=True)
+    views.mkdir(parents=True, exist_ok=True)
+    # Prune orphan views: a deleted (status!='active') or renamed memory must not
+    # leave a phantom .md in the git-tracked views/ (it is absent from view_files).
+    keep = set(view_files)
+    for stale in views.glob("*.md"):
+        if stale.name not in keep:
+            stale.unlink()
     for name, content in view_files.items():
         (views / name).write_text(content)
 
@@ -108,6 +114,16 @@ def export_memory(conn, out_dir, *, ts, snapshot=True):
     tmp.write_text(dump)
     os.replace(tmp, out_dir / "memory.dump.sql")
 
-    # Hash LAST → an interrupted export re-runs rather than skipping.
-    hash_path.write_text(new_hash)
+    # Hash LAST → an interrupted export re-runs rather than skipping. But first
+    # re-validate against the live DB: if a writer landed between the read snapshot
+    # and now, the artifacts (dump/views from the old snapshot vs snapshot.db from a
+    # later VACUUM) may disagree — so withhold the hash and let the next run
+    # re-export a mutually-consistent set instead of skipping with a stale snapshot.
+    conn.execute("BEGIN")
+    try:
+        live_hash = _content_hash(conn)
+    finally:
+        conn.execute("COMMIT")
+    if live_hash == new_hash:
+        hash_path.write_text(new_hash)
     return True

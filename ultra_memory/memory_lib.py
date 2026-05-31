@@ -53,6 +53,17 @@ def _spool(conn, record):
     (target / f"{key}.json").write_text(payload)
 
 
+def _safe_rollback(conn):
+    """Roll back an active txn without letting the cleanup error mask the original
+    failure — a COMMIT/ROLLBACK can itself hit SQLITE_BUSY, which previously
+    propagated out of the except block and skipped the retry/spool path."""
+    try:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+    except sqlite3.Error:
+        pass
+
+
 def _write_txn(conn, work, *, spool=None, retries=5, base_delay=0.05, sleep=time.sleep):
     """Run work() inside BEGIN IMMEDIATE/COMMIT with bounded retry-with-backoff on
     SQLITE_BUSY (spec §6). work() must be re-runnable (it re-executes from scratch
@@ -67,15 +78,13 @@ def _write_txn(conn, work, *, spool=None, retries=5, base_delay=0.05, sleep=time
             conn.execute("COMMIT")
             return
         except sqlite3.OperationalError as exc:
-            if conn.in_transaction:
-                conn.execute("ROLLBACK")
+            _safe_rollback(conn)
             if not _is_busy(exc):
                 raise
             last = exc
             sleep(base_delay * (2 ** attempt))
         except Exception:
-            if conn.in_transaction:
-                conn.execute("ROLLBACK")
+            _safe_rollback(conn)
             raise
     _spool(conn, spool)
     raise WriteSpooled(
@@ -92,10 +101,12 @@ def open_memory_db(path, migrations_dir=_MIGRATIONS):
 
 
 def _audit(conn, *, op, target_kind, target_id, reason, prior, ts):
+    # `reason` is caller-supplied free text that lands in the git-exported audit_log;
+    # redact it too (prior is a snapshot of an already-redacted row, so it's clean).
     conn.execute(
         "INSERT INTO audit_log (ts, op, target_kind, target_id, reason, prior_state) "
         "VALUES (?,?,?,?,?,?)",
-        (ts, op, target_kind, target_id, reason,
+        (ts, op, target_kind, target_id, strip_secrets(reason),
          json.dumps(prior) if prior is not None else None),
     )
 
@@ -113,8 +124,10 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
     body = strip_secrets(body)
     description = strip_secrets(description)
     index_hook = strip_secrets(index_hook)
-    created = created_at or ts
-    updated = updated_at or ts
+    # `is None` (not `or`): an explicit falsy override (e.g. epoch 0) must be kept,
+    # otherwise the bootstrap mtime-stamping the override exists for is silently lost.
+    created = ts if created_at is None else created_at
+    updated = ts if updated_at is None else updated_at
 
     def work():
         prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
@@ -159,9 +172,11 @@ def record_session_event(conn, *, session_id, kind, title, ts,
                          detail=None, files=None, refs=None, session_fields=None):
     """Append a typed session event idempotently (UNIQUE event_key). Ensures the
     session row exists first (FK). Returns the event_key."""
+    # Key on the RAW (pre-redaction) text so a future redaction-rule change can't
+    # shift the idempotency key and un-dedupe a replayed / re-imported event.
+    key = _event_key(session_id, ts, kind, title, detail)
     title = strip_secrets(title)
     detail = strip_secrets(detail)
-    key = _event_key(session_id, ts, kind, title, detail)
     sf = session_fields or {}
 
     def work():

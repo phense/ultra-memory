@@ -157,12 +157,11 @@ def test_inbox_verify_under_busy_spools_then_replay_lands_it(
     3. Release the lock and replay_spool -> the verify lands (last_verified set)
        and the spool drains.
 
-    NOTE on the inbox summary: ``import_inbox`` does not special-case
-    ``WriteSpooled`` — it is caught by the generic ``except Exception`` and the
-    op is reported under ``summary["errors"]`` (NOT ``applied``), even though the
-    write was durably spooled and is recoverable. We assert that *observed*
-    behavior here; the observability gap is flagged in bugsFound for human
-    review (no data is lost — the spool + replay make it eventually consistent).
+    NOTE on the inbox summary: ``import_inbox`` now special-cases ``WriteSpooled``
+    — it is counted under ``summary["spooled"]`` (NOT ``errors``/``applied``) and
+    the directive line is re-emitted to the inbox so it self-heals on the next
+    replay. We assert that fixed behavior here (no data is lost — the spool +
+    replay make it eventually consistent).
     """
     inbox = tmp_path / "inbox.md"
     inbox.write_text("verify foo-1\n", encoding="utf-8")
@@ -178,11 +177,12 @@ def test_inbox_verify_under_busy_spools_then_replay_lands_it(
         holder.rollback()
         holder.close()
 
-    # the spooled write was NOT applied and NOT counted as "applied"
+    # the spooled write was NOT applied; it is counted under "spooled" (distinct
+    # from a genuine error), and the directive line is re-emitted for retry.
     assert summary["applied"] == 0
-    # WriteSpooled surfaces as an error entry (the observability gap, see NOTE)
-    assert len(summary["errors"]) == 1
-    assert "foo-1" in summary["errors"][0]
+    assert summary["spooled"] == 1
+    assert summary["errors"] == []
+    assert "verify foo-1" in inbox.read_text(encoding="utf-8")
     # but it WAS durably spooled and the DB was not mutated
     assert len(spooled_files) == 1
     assert lv_during is None

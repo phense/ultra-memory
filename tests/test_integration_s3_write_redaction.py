@@ -210,12 +210,10 @@ def test_spooled_write_replays_redacted_into_db(tmp_path, monkeypatch):
 # 5. Characterization: audit_log.reason is cleartext in the live DB + snapshot
 #    but scrubbed in the git-tracked SQL dump.
 # ---------------------------------------------------------------------------
-def test_audit_reason_cleartext_in_db_but_scrubbed_in_dump(conn, tmp_path):
-    """Pins the real boundary: the write path does NOT redact the delete reason
-    (ml:240 stores f"[{tier}] {reason}" verbatim), so the secret lives in
-    audit_log.reason in BOTH the live DB and the raw VACUUM snapshot.  Only the
-    SQL dump's whole-text redaction pass (mexp:70) scrubs it.  This makes the
-    silent live-DB/snapshot leak boundary explicit and locks the dump behavior.
+def test_audit_reason_redacted_everywhere(conn, tmp_path):
+    """FIXED (audit M): the delete `reason` is caller free-text that reaches the
+    git-exported audit_log, so it is now redacted at the write chokepoint. The
+    secret is therefore absent from the live DB, the VACUUM snapshot, AND the dump.
     """
     memory_lib.save_memory(
         conn, id="m_audit", type="user",
@@ -227,22 +225,21 @@ def test_audit_reason_cleartext_in_db_but_scrubbed_in_dump(conn, tmp_path):
     out = tmp_path / "export"
     assert memory_export.export_memory(conn, out, ts=TS) is True
 
-    # (a) live DB: reason is cleartext (boundary, NOT a bug — the live .db is
-    #     local & git-ignored; the dump is the only git artifact).
+    # (a) live DB: reason redacted at the write chokepoint.
     reason = conn.execute(
         "SELECT reason FROM audit_log WHERE op='soft_delete'").fetchone()[0]
-    assert SECRET in reason, "write path is expected NOT to redact the delete reason"
+    assert SECRET not in reason and "[REDACTED]" in reason
 
-    # (b) snapshot binary copy: also cleartext (raw VACUUM INTO of the live DB).
+    # (b) snapshot binary copy inherits the already-redacted reason.
     snap = sqlite3.connect(str(out / "memory.snapshot.db"))
     try:
         snap_reason = snap.execute(
             "SELECT reason FROM audit_log WHERE op='soft_delete'").fetchone()[0]
     finally:
         snap.close()
-    assert SECRET in snap_reason, "raw snapshot inherits the cleartext reason"
+    assert SECRET not in snap_reason
 
-    # (c) SQL dump: scrubbed by export_memory's whole-dump strip_secrets pass.
+    # (c) SQL dump: scrubbed as well.
     dump = (out / "memory.dump.sql").read_text(encoding="utf-8")
     assert SECRET not in dump
     assert "[REDACTED]" in dump
