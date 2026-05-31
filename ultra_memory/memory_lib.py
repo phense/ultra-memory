@@ -381,6 +381,101 @@ def set_verified(conn, *, id, ts, reason="manual verify"):
     _write_txn(conn, work, spool={"op": "set_verified", "id": id, "ts": ts, "reason": reason})
 
 
+# ---------------------------------------------------------------------------
+# The `links` cross-store edge spine (SP-3 Stage 3, D5/D6). `record_link` is the
+# FIRST writer the `links` table ever gets (north-star Risk §14.8: defined + read
+# via memory_query._links_for, but never written). The edge KEY is
+# (src_kind, src_id, predicate, dst_kind, dst_id); the writer is idempotent on it
+# (an upsert that refreshes the sub-types / evidence / confidence rather than
+# duplicating the row). `links` has no UNIQUE on the key (0001:41 predates this and
+# a UNIQUE add would need a destructive table rebuild), so idempotency is enforced
+# in code: SELECT-then-UPDATE-or-INSERT inside the same BEGIN IMMEDIATE txn.
+# ---------------------------------------------------------------------------
+
+_LINK_KEY_COLS = ("src_kind", "src_id", "predicate", "dst_kind", "dst_id")
+
+
+def record_link(conn, *, src_kind, src_id, predicate, dst_kind, dst_id,
+                src_type=None, dst_type=None, evidence=None, confidence=None, ts):
+    """Upsert a cross-store edge into `links` (idempotent on the edge key) + audit.
+
+    The edge KEY is (src_kind, src_id, predicate, dst_kind, dst_id). Re-recording
+    the same edge is a no-op/upsert — it refreshes `src_type`/`dst_type`/`evidence`/
+    `confidence`/`created_at` on the existing row, never appends a duplicate. A
+    different predicate (or any differing key field) is a DISTINCT edge.
+
+    `src_kind`/`dst_kind` are the store side (`memory`/`knowledge`); `src_type`/
+    `dst_type` (migration 0004) are the within-kind sub-type (e.g. `feedback`,
+    `mechanism`) so a reader can filter without a join. Through the redact/audit
+    chokepoint + `_write_txn` (BEGIN IMMEDIATE + bounded retry + durable spool) like
+    every other write; registered in `replay_spool`'s dispatch.
+    """
+    evidence = strip_secrets(evidence)
+
+    def work():
+        key_vals = (src_kind, src_id, predicate, dst_kind, dst_id)
+        where = " AND ".join(f"{c}=?" for c in _LINK_KEY_COLS)
+        prior = conn.execute(
+            f"SELECT rowid, * FROM links WHERE {where}", key_vals).fetchone()
+        if prior is None:
+            conn.execute(
+                "INSERT INTO links (src_kind, src_id, src_type, predicate, "
+                "dst_kind, dst_id, dst_type, evidence, confidence, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (src_kind, src_id, src_type, predicate, dst_kind, dst_id,
+                 dst_type, evidence, confidence, ts),
+            )
+        else:
+            conn.execute(
+                f"UPDATE links SET src_type=?, dst_type=?, evidence=?, "
+                f"confidence=?, created_at=? WHERE {where}",
+                (src_type, dst_type, evidence, confidence, ts, *key_vals),
+            )
+        # Audit against the source unit (the edge "belongs" to its source).
+        _audit(conn, op="link", target_kind=src_kind, target_id=src_id,
+               reason=f"{predicate} -> {dst_kind}:{dst_id}",
+               prior=dict(prior) if prior is not None else None, ts=ts)
+
+    _write_txn(conn, work, spool={
+        "op": "record_link", "src_kind": src_kind, "src_id": src_id,
+        "src_type": src_type, "predicate": predicate, "dst_kind": dst_kind,
+        "dst_id": dst_id, "dst_type": dst_type, "evidence": evidence,
+        "confidence": confidence, "ts": ts})
+
+
+def mirror_cross_store_links(conn, wiki_edges, *, ts):
+    """Lift CROSS-STORE wiki-graph edges into `links` (D6) via `record_link`.
+
+    PROJECT-AGNOSTIC (hard NFR): `wiki_edges` is a CONSUMER-FED iterable — the
+    consumer (Trading) reads them out of its OWN `wiki/graph/graph.sqlite` and hands
+    them in. The engine NEVER opens / imports that DB (the agnostic-import test stays
+    green). Each edge is a mapping with keys: `src_kind`, `src_id`, `predicate`,
+    `dst_kind`, `dst_id`, and optionally `src_type`/`dst_type`/`evidence`/
+    `confidence`.
+
+    Only edges that CROSS stores (one side `memory`, the other `knowledge`) are
+    mirrored. A pure wiki<->wiki edge (both sides `knowledge`) is skipped — those
+    stay in the consumer's `graph.sqlite` (D6). In practice the consumer feeds only
+    cross-store edges; the skip is defense-in-depth. Idempotent (each lift goes
+    through the idempotent `record_link`). Returns
+    {mirrored, skipped_wiki_internal}.
+    """
+    summary = {"mirrored": 0, "skipped_wiki_internal": 0}
+    for e in wiki_edges:
+        sk, dk = e["src_kind"], e["dst_kind"]
+        crosses = ("memory" in (sk, dk)) and ("knowledge" in (sk, dk))
+        if not crosses:
+            summary["skipped_wiki_internal"] += 1
+            continue
+        record_link(
+            conn, src_kind=sk, src_id=e["src_id"], predicate=e["predicate"],
+            dst_kind=dk, dst_id=e["dst_id"],
+            src_type=e.get("src_type"), dst_type=e.get("dst_type"),
+            evidence=e.get("evidence"), confidence=e.get("confidence"), ts=ts)
+        summary["mirrored"] += 1
+    return summary
+
+
 _BACKFILL_FLAG = "topic_backfill_complete"
 # Operational rows are cross-topic by nature (OAuth-only / commit-proactively apply
 # in every topic — D11) → they stay topic=NULL so the §5 topic wall renders them
@@ -453,7 +548,7 @@ def replay_spool(conn, *, spool_dir=None):
         "save_memory": save_memory, "record_session_event": record_session_event,
         "record_access": record_access, "consolidate": consolidate, "delete": delete,
         "set_pinned": set_pinned, "set_verified": set_verified,
-        "backfill_topic": backfill_topic,
+        "backfill_topic": backfill_topic, "record_link": record_link,
     }
     for f in sorted(target.glob("*.json")):
         try:

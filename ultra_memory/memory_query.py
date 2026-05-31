@@ -40,11 +40,15 @@ def _days_between(later_ts, earlier_ts):
 
 
 def _links_for(conn, mid):
+    # Surfaces the SP-3 (migration 0004) cross-store sub-types `src_type`/`dst_type`
+    # alongside the existing edge fields. This is the read path that, per north-star
+    # Risk §14.8, had never run against populated rows until the Stage-3 writer landed.
     rows = conn.execute(
-        "SELECT predicate, dst_kind, dst_id FROM links "
+        "SELECT predicate, src_type, dst_kind, dst_id, dst_type FROM links "
         "WHERE src_kind='memory' AND src_id=? ORDER BY rowid", (mid,)).fetchall()
-    return [{"predicate": r["predicate"], "dst_kind": r["dst_kind"],
-             "dst_id": r["dst_id"]} for r in rows]
+    return [{"predicate": r["predicate"], "src_type": r["src_type"],
+             "dst_kind": r["dst_kind"], "dst_id": r["dst_id"],
+             "dst_type": r["dst_type"]} for r in rows]
 
 
 def _title_hit(title, query):
