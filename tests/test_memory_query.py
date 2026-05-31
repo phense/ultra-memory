@@ -185,5 +185,9 @@ def test_one_hop_links_attached(tmp_path):
     out = memory_query.query_memories(conn, "q", embedder=emb, dim=3,
                                       now_ts="2026-05-02T00:00:00")
     links = out[0]["links"]
-    assert links == [{"predicate": "grounded_in", "dst_kind": "wiki", "dst_id": "some-slug"}]
+    # SP-3 Stage 3: _links_for now also surfaces the cross-store sub-types
+    # (src_type/dst_type, migration 0004); both NULL here since the raw INSERT
+    # omits them.
+    assert links == [{"predicate": "grounded_in", "src_type": None,
+                      "dst_kind": "wiki", "dst_id": "some-slug", "dst_type": None}]
     conn.close()

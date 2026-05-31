@@ -10,22 +10,60 @@ _PULL_POINTER = (
 )
 
 
+def _knowledge_pin_lines(conn, *, limit=12):
+    """Render the pinned KNOWLEDGE rows (SP-3 Stage 4, D7) as gist lines.
+
+    Reads `knowledge_pins WHERE pinned=1`; the human-readable display title comes
+    from the `unified_index` mirror (Stage 5) and falls back to the slug when no
+    mirror row exists yet, so a pin is never silently dropped. Returns `[]` when
+    there are no pinned knowledge rows — this is the byte-identity guarantee: an
+    empty `knowledge_pins` (Trading's current state) appends nothing to the gist.
+    The `unified_index` lookup is LEFT JOIN-tolerant via a guarded subquery so a
+    pre-Stage-5 DB (no unified_index content) still renders the slug."""
+    try:
+        rows = conn.execute(
+            "SELECT k.slug, "
+            "       (SELECT u.title FROM unified_index u WHERE u.slug = k.slug) AS title "
+            "FROM knowledge_pins k WHERE k.pinned=1 "
+            "ORDER BY k.pinned_at DESC, k.slug ASC"
+        ).fetchall()
+    except Exception:
+        # Fail-open: a malformed/absent table never breaks rehydration.
+        return []
+    lines = []
+    for slug, title in rows[:limit]:
+        label = (title or "").strip() or slug
+        lines.append(f"- {label}")
+    return lines
+
+
 def build_gist(conn, *, budget_chars=2000):
     """Compose the rehydration gist from the DB. Each section is capped so one
     section can't starve the others; the whole is truncated to budget_chars."""
     sections = []
 
+    # One pin space (SP-3 Stage 4, D7): union memory pins (memories.pinned) with
+    # knowledge pins (knowledge_pins, migration 0004) into the SINGLE "## Pinned
+    # rules" section. SAFETY INVARIANT for the live merge to ultra-memory master
+    # (Trading's SessionStart hook runs this): with ZERO knowledge_pins rows —
+    # Trading's current state — the output is byte-identical to the memory-only
+    # gist. The knowledge block is appended ONLY when there is at least one pinned
+    # knowledge row, so an empty knowledge_pins table changes nothing.
     pinned = conn.execute(
         "SELECT title, body FROM memories WHERE pinned=1 AND status='active' "
         "ORDER BY updated_at DESC"
     ).fetchall()
-    if pinned:
+    knowledge_pins = _knowledge_pin_lines(conn)
+    if pinned or knowledge_pins:
         lines = []
         for t, b in pinned:
             first = (b or "").strip().splitlines()
             head = first[0][:160] if first else ""
             lines.append(f"- {t}: {head}")
-        sections.append("## Pinned rules\n" + "\n".join(lines[:12]))
+        # Memory pins capped at 12 (unchanged); knowledge pins append after, so the
+        # byte-identity hold when knowledge_pins is empty (no trailing change).
+        lines = lines[:12] + knowledge_pins
+        sections.append("## Pinned rules\n" + "\n".join(lines))
 
     last = conn.execute(
         "SELECT summary FROM sessions WHERE summary IS NOT NULL AND summary != '' "

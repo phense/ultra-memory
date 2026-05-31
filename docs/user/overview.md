@@ -13,6 +13,14 @@ loose markdown memory files + ad-hoc session logs with a single SQLite database
   staleness/strength/access ranking signals (no LLM on the read path).
 - **Import** of an existing markdown memory tree + `.remember/today-*.md` logs.
 - **Export** of a consistent, redacted text dump — the git rollback artifact.
+- **Cross-store fabric (SP-3)** — memory becomes one system with an external
+  Expert-Knowledge (wiki) store *without merging their storage*: a `topic` on each
+  memory, one `links` edge spine spanning both stores, one pin space surfaced in the
+  SessionStart gist, and a single warm `unified_recall` that ranks across both —
+  scoped by an orthogonal (type × topic) fail-closed access wall. Still no LLM on
+  the warm path. The fabric is fed consumer-side (root paths / edges injected), so
+  the engine stays project-agnostic. *(The §7a self-improvement loop is not built —
+  SP-3 lands only its inert substrate columns.)*
 
 ## Why a database
 

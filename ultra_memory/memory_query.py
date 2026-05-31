@@ -40,11 +40,15 @@ def _days_between(later_ts, earlier_ts):
 
 
 def _links_for(conn, mid):
+    # Surfaces the SP-3 (migration 0004) cross-store sub-types `src_type`/`dst_type`
+    # alongside the existing edge fields. This is the read path that, per north-star
+    # Risk §14.8, had never run against populated rows until the Stage-3 writer landed.
     rows = conn.execute(
-        "SELECT predicate, dst_kind, dst_id FROM links "
+        "SELECT predicate, src_type, dst_kind, dst_id, dst_type FROM links "
         "WHERE src_kind='memory' AND src_id=? ORDER BY rowid", (mid,)).fetchall()
-    return [{"predicate": r["predicate"], "dst_kind": r["dst_kind"],
-             "dst_id": r["dst_id"]} for r in rows]
+    return [{"predicate": r["predicate"], "src_type": r["src_type"],
+             "dst_kind": r["dst_kind"], "dst_id": r["dst_id"],
+             "dst_type": r["dst_type"]} for r in rows]
 
 
 def _title_hit(title, query):
@@ -66,13 +70,19 @@ def _title_hit(title, query):
 
 def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
                    include_statuses=_DEFAULT_STATUSES, include_types=None,
-                   now_ts=None, staleness_days=90):
+                   now_ts=None, staleness_days=90, topic=None):
     """Rank active memories for `query`. Returns a list of JSON-serialisable dicts
     ordered by final score desc (cosine + title boost + ranking signals).
 
     `include_types`, when given, scopes the candidate set in SQL BEFORE ranking and
     truncation — so a type-restricted caller (the knowledge MCP privilege boundary)
     is never starved by higher-ranked out-of-scope rows filling a fixed window.
+
+    `topic` (SP-3 Stage 2, D11), when given, scopes candidates to that topic OR
+    `topic IS NULL`: a topiced caller still sees the cross-topic (NULL) operational
+    rows, and — critically — a corpus of un-topiced rows stays FULLY visible (NO
+    retrieval regression). Omitting `topic` returns every row exactly as before. The
+    topic axis is orthogonal to and composes (AND) with `include_types`.
     """
     top_k = max(0, int(top_k))
     if now_ts is None:
@@ -87,6 +97,11 @@ def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
             return []
         clauses.append(f"type IN ({','.join('?' * len(include_types))})")
         params += list(include_types)
+    if topic is not None:
+        # `topic IS NULL` is ALWAYS retained — cross-topic rows are visible to every
+        # caller (D11), and an un-topiced corpus does not regress.
+        clauses.append("(topic = ? OR topic IS NULL)")
+        params.append(topic)
     rows = conn.execute(
         f"SELECT * FROM memories WHERE {' AND '.join(clauses)}",
         tuple(params),

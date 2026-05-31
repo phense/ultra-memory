@@ -36,6 +36,14 @@ secret-redactor first, and every mutation writes an `audit_log` row. Optional
 fields: `description`, `index_hook`, `node_type`, `file_slug`, `sort_order`,
 `origin_session_id`, and `created_at`/`updated_at` overrides (default to `ts`).
 
+SP-3 adds three optional fields. Pass a `topic` to wall the memory to a topic
+(omitted → `NULL` = cross-topic / visible to all; `user`/`feedback` rows are always
+`NULL`); supply a `topic_router=make_keyword_router({...})` to assign one
+deterministically when `topic` is omitted; and `created_by` records provenance
+(`human` default / `agent` / `import` / `background_review`). An injectable
+`genesis_hook(topic)` lets the consumer scaffold an unknown topic — the engine
+itself has no wiki dependency.
+
 ## Query memories
 
 ```python
@@ -83,6 +91,38 @@ memory_lib.delete(conn, id="garbage", reason="...", tier="volatile", ts="...")  
 There is no automatic fuzzy-batch deletion. `consolidate` redirects; `delete`
 tombstones a single id (tier `durable` or `volatile`). Hard purge is a separate,
 later step.
+
+## Cross-store fabric (SP-3)
+
+```python
+# One edge spine spanning both stores (links table; idempotent on the edge key).
+memory_lib.record_link(
+    conn, src_kind="memory", src_id="feedback-oauth-only",
+    predicate="grounded_in", dst_kind="knowledge", dst_id="oauth-only-page",
+    dst_type="mechanism", ts="...")
+
+# One pin space — memory pins and knowledge (wiki) pins share the gist section.
+memory_lib.set_pinned(conn, source_kind="knowledge",
+                      source_id="german-tax-us-options-yearend-trap",
+                      pinned=True, ts="...")        # legacy id=... still works for memories
+
+# One warm retrieval surface spanning both stores, scoped by (type × topic).
+from ultra_memory import unified_query
+hits = unified_query.unified_recall(
+    conn, "year-end close-out rule",
+    caller_class="subagent",
+    agent_topics={"trading"},        # None = all topics (orchestrator); set() = fail-closed
+    embedder=my_embedder, top_k=5, ts="...")
+# -> memory hits ({source_kind:'memory', id, …}) + knowledge hits
+#    ({source_kind:'knowledge', slug, topic, page_type, snippet, path}), one ranked list
+```
+
+The knowledge side is populated by `wiki_sync(conn, wiki_roots, …)` (run inside
+`maintain.run` when `ULTRA_MEMORY_WIKI_ROOTS` is set) mirroring `wiki/<topic>/**.md`
+into `unified_index`. The engine never reads the wiki itself — roots and edges are
+**injected** by the consumer, keeping it project-agnostic. Access is fail-closed: a
+subagent with no topic binding sees only `topic IS NULL` operational memories of its
+allowed types, never any topiced knowledge.
 
 ## Import a legacy markdown tree
 

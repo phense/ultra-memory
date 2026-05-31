@@ -12,7 +12,7 @@ from .redact_secrets import strip_secrets
 
 _STABLE_COLS = ("id", "type", "title", "description", "index_hook", "node_type",
                 "file_slug", "sort_order", "body", "status", "supersedes",
-                "origin_session_id")
+                "origin_session_id", "topic", "created_by")
 
 
 def _content_hash(conn):
@@ -127,3 +127,59 @@ def export_memory(conn, out_dir, *, ts, snapshot=True):
     if live_hash == new_hash:
         hash_path.write_text(new_hash)
     return True
+
+
+# ---------------------------------------------------------------------------
+# Generic Learnings projection (SP-3 Stage 7a, D14/D15 — the §7a SUBSTRATE's
+# PROJECTION capability, NOT the loop). The DB is the system of record for
+# graduated learnings (rows in `memories`); the per-skill Learnings.md surface
+# becomes a regenerated, git-trackable PROJECTION — exactly the way export_memory
+# regenerates the views/ above. The §7a loop (SP-6/SP-7) is NOT built here; this
+# only materializes the projection the loop will later feed.
+#
+# PROJECT-AGNOSTIC (hard NFR): the output `path` and the `skill_tag` are
+# CONSUMER-fed parameters. There is NO Trading literal, no hardcoded skill name,
+# no wiki dependency — an arbitrary consumer tag projects to an arbitrary consumer
+# path. Deterministic: a stable ORDER BY → re-run is byte-identical.
+# ---------------------------------------------------------------------------
+
+def _learning_entry(row):
+    """One projected learning block. Body verbatim (already redacted at write)."""
+    body = (row["body"] or "").strip()
+    return f"### {row['title']}\n\n{body}\n"
+
+
+def export_learnings_projection(conn, path, *, skill_tag, title=None):
+    """Regenerate a Learnings-style markdown projection from the store, filtered to
+    the active memories carrying `skill_tag` (matched against `index_hook`). Writes
+    `path` (parents created). Returns the count of projected learnings.
+
+    AGNOSTIC: both the output `path` and the `skill_tag` are consumer-supplied —
+    the engine names no skill and no path of its own. DETERMINISTIC: rows are
+    selected `WHERE status='active' AND index_hook=?` and ordered by a stable key
+    (created_at, id) so a re-run with an unchanged store is byte-identical (the §7a
+    projection guarantee, mirroring the export views). No LLM, no network.
+
+    This is the read-only PROJECTION (D14) — the canonical store is the DB; this
+    surface is rebuildable and never the write path. Inactive (deleted/redirect)
+    learnings are excluded, like the export views' active filter.
+    """
+    rows = conn.execute(
+        "SELECT id, title, body, index_hook FROM memories "
+        "WHERE status='active' AND index_hook=? "
+        "ORDER BY created_at, id",
+        (skill_tag,),
+    ).fetchall()
+
+    heading = title or f"# Learnings — {skill_tag}"
+    parts = [heading, ""]
+    if rows:
+        parts.extend(_learning_entry(r) for r in rows)
+    else:
+        parts.append("_No learnings recorded yet._\n")
+    content = "\n".join(parts)
+
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(content)
+    return len(rows)
