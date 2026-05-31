@@ -17,6 +17,12 @@ SAFE_TYPES = ("project", "reference")
 ALL_TYPES = ("project", "reference", "user", "feedback")
 _TRUSTED = frozenset({"orchestrator", "owner"})
 
+# Sentinel distinguishing "no topic argument supplied" (legacy SP-1 memory-only
+# recall) from "topic-scoped recall, all-topics" (`agent_topics=None`). The
+# all-topics sentinel is a real, meaningful value (the orchestrator), so it can't
+# overload `None` — hence a dedicated sentinel for "argument absent".
+_NO_TOPIC_ARG = object()
+
 
 def allowed_types_for(caller_class):
     """Memory types a caller_class may recall. Trusted (orchestrator/owner) → all;
@@ -71,10 +77,19 @@ def knowledge_recall(conn, query, *, caller_class, embedder, top_k=5, dim=None,
 
 
 def run_query_tool(arguments, *, conn, embedder, caller_class, dim=None,
-                   now_ts=None, ts=None):
-    """MCP tool handler: map {query, top_k} → knowledge_recall → one JSON
-    TextContent. Returns a structured {"error": ...} payload (never raises) on a
-    missing/invalid query so a malformed tool call can't crash the server loop.
+                   now_ts=None, ts=None, agent_topics=_NO_TOPIC_ARG):
+    """MCP tool handler: map {query, top_k} → recall → one JSON TextContent.
+    Returns a structured {"error": ...} payload (never raises) on a missing/invalid
+    query so a malformed tool call can't crash the server loop.
+
+    ADDITIVE cross-store routing (SP-3 Stage 6, §5.6): when `agent_topics` is
+    provided (a topic-scoped caller — a set, or the orchestrator's `None`
+    all-topics sentinel), route to `unified_query.unified_recall` so the caller's
+    recall spans BOTH the memory store and the topic-scoped Expert-Knowledge mirror,
+    fail-closed on the (type × topic) wall. When `agent_topics` is NOT supplied
+    (the default `_NO_TOPIC_ARG` sentinel — the legacy SP-1 invocation), behavior is
+    UNCHANGED: pure memory-store `knowledge_recall`. So every existing knowledge-MCP
+    test keeps passing.
 
     `mcp` is imported lazily so the core recall logic stays importable without the
     optional `mcp` extra installed.
@@ -93,9 +108,18 @@ def run_query_tool(arguments, *, conn, embedder, caller_class, dim=None,
     except (TypeError, ValueError):
         top_k = 5
     try:
-        results = knowledge_recall(
-            conn, query, caller_class=caller_class, embedder=embedder,
-            top_k=top_k, dim=dim, now_ts=now_ts, ts=ts)
+        if agent_topics is _NO_TOPIC_ARG:
+            results = knowledge_recall(
+                conn, query, caller_class=caller_class, embedder=embedder,
+                top_k=top_k, dim=dim, now_ts=now_ts, ts=ts)
+        else:
+            from . import unified_query
+            recall_kwargs = {
+                "caller_class": caller_class, "agent_topics": agent_topics,
+                "embedder": embedder, "top_k": top_k, "now_ts": now_ts, "ts": ts}
+            if dim is not None:
+                recall_kwargs["dim"] = dim
+            results = unified_query.unified_recall(conn, query, **recall_kwargs)
     except Exception as exc:  # degrade ONE query, never kill the server loop (§13)
         return [TextContent(type="text", text=json.dumps(
             {"error": f"recall failed: {exc}"}))]
