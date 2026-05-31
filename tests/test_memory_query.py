@@ -38,11 +38,12 @@ def test_title_hit_is_word_bounded(tmp_path):
     assert memory_query._title_hit("car", "oscar predictions") is False
 
 
-def test_days_between_survives_tz_mismatch():
-    """L2: a tz-aware vs naive timestamp subtraction raises TypeError; it must be
-    swallowed (treated as 0 days) rather than crashing the whole query."""
+def test_days_between_normalizes_tz_mismatch():
+    """L2: a tz-aware vs naive timestamp must be normalized to naive UTC and yield
+    the REAL age — not crash, and not silently 0. Returning 0 here used to kill the
+    staleness signal in production (tz-aware now vs naive-UTC stored ts)."""
     assert memory_query._days_between(
-        "2026-05-30T10:00:00+00:00", "2026-01-01T00:00:00") == 0
+        "2026-05-30T10:00:00+00:00", "2026-01-01T00:00:00") == 149
 
 
 def test_query_ranks_by_cosine(tmp_path):

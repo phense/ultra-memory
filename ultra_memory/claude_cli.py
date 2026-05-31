@@ -47,12 +47,21 @@ def run_claude(prompt, *, model, system=None, claude_bin="claude",
     `runner` is injectable (subprocess.run-compatible) so tests never spawn a process.
     Returns stdout text; raises OAuthViolation / ClaudeCliError.
     """
+    if not model or not str(model).strip():
+        raise ValueError("run_claude: a non-empty model is required")
     child_env = _child_env(env)
     cmd = [claude_bin, "--model", model]
     if system is not None:
         cmd += ["--system-prompt", system]
     cmd += ["-p", prompt, "--output-format", "text"]
-    proc = runner(cmd, capture_output=True, text=True, timeout=timeout, env=child_env)
+    try:
+        proc = runner(cmd, capture_output=True, text=True, timeout=timeout, env=child_env)
+    except FileNotFoundError as exc:
+        raise ClaudeCliError(
+            f"claude binary not found ({claude_bin!r}); is the CLI installed and on PATH?"
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ClaudeCliError(f"claude timed out after {timeout}s") from exc
     if proc.returncode != 0:
         raise ClaudeCliError(
             f"claude exited {proc.returncode}: {(proc.stderr or '')[:500]}"

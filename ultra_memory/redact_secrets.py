@@ -41,9 +41,13 @@ _PATTERNS = [
 ]
 
 # keyword=value / keyword: value — value must be credential-shaped (see _looks_credential).
+# keyword vocabulary includes `username` (the Webshare rotating-proxy USERNAME is a
+# named secret); the value floor is 6 (not 12) so short credentials like
+# `password=p4ssvalue` no longer slip through. `_looks_credential` still guards
+# against mangling hyphen-joined prose.
 _KEYVALUE = re.compile(
-    r"(?i)(?P<pre>(?:api[_-]?key|secret|token|password|passwd|pwd)\s*[=:]\s*)"
-    r"(?P<q>['\"]?)(?P<val>[A-Za-z0-9._\-/+]{12,})(?P=q)"
+    r"(?i)(?P<pre>(?:api[_-]?key|secret|token|password|passwd|pwd|username)\s*[=:]\s*)"
+    r"(?P<q>['\"]?)(?P<val>[A-Za-z0-9._\-/+]{6,})(?P=q)"
 )
 _HYPHEN_WORDS = re.compile(r"[A-Za-z]+(?:-[A-Za-z]+)+")
 

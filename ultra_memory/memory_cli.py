@@ -61,13 +61,21 @@ def main(argv=None, *, db_path=None, embedder=None, dim=None, ts=None):
             return 0
 
         if args.cmd == "pin":
-            memory_lib.set_pinned(conn, id=args.id, pinned=not args.unpin, ts=ts,
-                                  reason="cli unpin" if args.unpin else "cli pin")
+            try:
+                memory_lib.set_pinned(conn, id=args.id, pinned=not args.unpin, ts=ts,
+                                      reason="cli unpin" if args.unpin else "cli pin")
+            except KeyError:
+                print(f"pin: no memory with id {args.id!r}", file=sys.stderr)
+                return 1
             print(f"{'unpinned' if args.unpin else 'pinned'} {args.id}")
             return 0
 
         if args.cmd == "verify":
-            memory_lib.set_verified(conn, id=args.id, ts=ts)
+            try:
+                memory_lib.set_verified(conn, id=args.id, ts=ts)
+            except KeyError:
+                print(f"verify: no memory with id {args.id!r}", file=sys.stderr)
+                return 1
             print(f"verified {args.id}")
             return 0
 
@@ -76,7 +84,12 @@ def main(argv=None, *, db_path=None, embedder=None, dim=None, ts=None):
             if row is None:
                 print(f"edit: no memory with id {args.id!r}", file=sys.stderr)
                 return 1
-            body = Path(args.from_file).read_text(encoding="utf-8")
+            try:
+                body = Path(args.from_file).read_text(encoding="utf-8")
+            except OSError as exc:
+                print(f"edit: cannot read --from-file {args.from_file!r}: {exc}",
+                      file=sys.stderr)
+                return 1
             # Re-save through the gateway, PRESERVING every other field (save_memory's
             # UPDATE overwrites them all, so omitting one would wipe it).
             memory_lib.save_memory(
@@ -93,7 +106,7 @@ def main(argv=None, *, db_path=None, embedder=None, dim=None, ts=None):
                           or str(Path(db).parent / "memory_inbox.md"))
             summary = memory_inbox.import_inbox(conn, inbox_path, ts=ts)
             print(json.dumps(summary))
-            return 0
+            return 1 if summary.get("errors") else 0
     finally:
         conn.close()
     return 0

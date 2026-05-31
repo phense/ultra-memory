@@ -99,18 +99,10 @@ def test_fixture_sanity_sensitive_rows_outrank_allowed(tmp_path):
     conn.close()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG (high): knowledge_recall over-fetches top_k*4 candidates from "
-        "query_memories and type-filters AFTER that bound. When > top_k*4 "
-        "sensitive rows out-rank the allowed rows, the whole over-fetch window "
-        "is sensitive and gets filtered to nothing -> the subagent is starved "
-        "(0 rows) even though allowed rows exist. The type scope must be pushed "
-        "into the fetch, not applied after a fixed over-fetch."
-    ),
-    strict=True,
-)
 def test_subagent_not_starved_when_sensitive_rows_rank_high(tmp_path):
+    """FIXED (was xfail): the type allowlist is now pushed into query_memories via
+    include_types, so candidates are type-scoped in SQL BEFORE ranking/truncation —
+    a sensitive-heavy store can no longer starve an allowed caller."""
     conn = _db(tmp_path)
     top_k = 2
     # Must exceed top_k*4 (=8) so the over-fetch window is ALL sensitive.

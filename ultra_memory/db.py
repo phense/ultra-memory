@@ -54,7 +54,7 @@ def migrate(conn, migrations_dir):
         if version <= current:
             continue
         statements = _split_statements(path.read_text(encoding="utf-8"))
-        conn.execute("BEGIN")
+        conn.execute("BEGIN IMMEDIATE")
         try:
             for stmt in statements:
                 _apply_statement(conn, stmt)

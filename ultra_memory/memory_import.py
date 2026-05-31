@@ -76,11 +76,21 @@ def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
     # MEMORY.md line order → sort_order (keyed by filename slug, the index's link target).
     order_map = {slug: i for i, slug in enumerate(index)}
     count = 0
+    seen = {}
     for path in sorted(memory_dir.glob("*.md")):
         if path.name == "MEMORY.md":
             continue
         fm, body = split_frontmatter(path.read_text())
         name = fm.get("name") or path.stem
+        # Two files resolving to the same id (frontmatter `name:` is NOT unique
+        # across files — the harness strips type prefixes) would silently upsert
+        # onto one row, destroying the first and over-reporting the count. Fail
+        # loud, naming both offenders, instead of losing a memory.
+        if name in seen:
+            raise ValueError(
+                f"duplicate memory id {name!r}: {path.name} collides with "
+                f"{seen[name]} — frontmatter 'name:' must be unique across files")
+        seen[name] = path.name
         meta = fm.get("metadata", {})
         slug = path.stem  # underscore filename stem = how the harness addresses the file
         idx = index.get(slug, {})

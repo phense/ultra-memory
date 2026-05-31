@@ -4,7 +4,7 @@ BM25/RRF/reranker for memory are deferred behind the eval harness (D11). No LLM.
 Every entry point takes an injected `embedder` (list[str] -> list[list[float]]).
 """
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from . import retrieval_core as rc
 
@@ -25,10 +25,17 @@ def _days_between(later_ts, earlier_ts):
     try:
         a = datetime.fromisoformat(later_ts)
         b = datetime.fromisoformat(earlier_ts)
+        # Normalize to naive UTC so an aware/naive mix computes the REAL age instead
+        # of raising (and being swallowed to 0). Production callers pass a tz-aware
+        # `now` while stored timestamps are naive-UTC; swallowing that mismatch
+        # silently killed the staleness signal everywhere.
+        if a.tzinfo is not None:
+            a = a.astimezone(timezone.utc).replace(tzinfo=None)
+        if b.tzinfo is not None:
+            b = b.astimezone(timezone.utc).replace(tzinfo=None)
         return (a - b).days
     except (ValueError, TypeError):
-        # Unparseable, or a tz-aware vs naive mismatch (subtraction raises
-        # TypeError) — treat as 0 days rather than crashing the whole query.
+        # Genuinely unparseable timestamp — treat as 0 days rather than crashing.
         return 0
 
 
@@ -58,14 +65,31 @@ def _title_hit(title, query):
 
 
 def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
-                   include_statuses=_DEFAULT_STATUSES, now_ts=None,
-                   staleness_days=90):
+                   include_statuses=_DEFAULT_STATUSES, include_types=None,
+                   now_ts=None, staleness_days=90):
     """Rank active memories for `query`. Returns a list of JSON-serialisable dicts
-    ordered by final score desc (cosine + title boost, ranking signals in Task 5)."""
-    placeholders = ",".join("?" * len(include_statuses))
+    ordered by final score desc (cosine + title boost + ranking signals).
+
+    `include_types`, when given, scopes the candidate set in SQL BEFORE ranking and
+    truncation — so a type-restricted caller (the knowledge MCP privilege boundary)
+    is never starved by higher-ranked out-of-scope rows filling a fixed window.
+    """
+    top_k = max(0, int(top_k))
+    if now_ts is None:
+        # Default to now so the staleness signal is live for in-process callers that
+        # omit now_ts (else _days_between short-circuits and `stale` is always False).
+        now_ts = datetime.now(timezone.utc).isoformat()
+    clauses = [f"status IN ({','.join('?' * len(include_statuses))})"]
+    params = list(include_statuses)
+    if include_types is not None:
+        include_types = tuple(include_types)
+        if not include_types:
+            return []
+        clauses.append(f"type IN ({','.join('?' * len(include_types))})")
+        params += list(include_types)
     rows = conn.execute(
-        f"SELECT * FROM memories WHERE status IN ({placeholders})",
-        tuple(include_statuses),
+        f"SELECT * FROM memories WHERE {' AND '.join(clauses)}",
+        tuple(params),
     ).fetchall()
     if not rows:
         return []
@@ -77,6 +101,9 @@ def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
         embedder=embedder, dim=dim)
 
     q_vec = embedder([query])[0]
+    if len(q_vec) != dim:
+        raise ValueError(
+            f"query embedding dim {len(q_vec)} != expected {dim}; embedder/model mismatch")
     relevance = dict(rc.cosine_search(q_vec, list(vecs.items())))
 
     results = []

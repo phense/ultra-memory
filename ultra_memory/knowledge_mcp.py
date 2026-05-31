@@ -32,7 +32,12 @@ def knowledge_recall(conn, query, *, caller_class, embedder, top_k=5, dim=None,
     result set below `top_k`. Returns JSON-serialisable dicts.
     """
     allowed = set(allowed_types_for(caller_class))
-    kwargs = {"embedder": embedder, "top_k": max(top_k * 4, top_k), "now_ts": now_ts}
+    top_k = max(0, min(int(top_k), 100))
+    # Scope by type IN SQL (not only the post-rank filter below) so a sensitive-heavy
+    # store can't starve an allowed caller by filling a fixed candidate window with
+    # higher-ranked denied rows. The post-filter stays as defense-in-depth.
+    kwargs = {"embedder": embedder, "top_k": max(top_k * 4, top_k),
+              "include_types": sorted(allowed), "now_ts": now_ts}
     if dim is not None:
         kwargs["dim"] = dim
     raw = memory_query.query_memories(conn, query, **kwargs)
@@ -87,9 +92,13 @@ def run_query_tool(arguments, *, conn, embedder, caller_class, dim=None,
         top_k = int(args.get("top_k", 5))
     except (TypeError, ValueError):
         top_k = 5
-    results = knowledge_recall(
-        conn, query, caller_class=caller_class, embedder=embedder,
-        top_k=top_k, dim=dim, now_ts=now_ts, ts=ts)
+    try:
+        results = knowledge_recall(
+            conn, query, caller_class=caller_class, embedder=embedder,
+            top_k=top_k, dim=dim, now_ts=now_ts, ts=ts)
+    except Exception as exc:  # degrade ONE query, never kill the server loop (§13)
+        return [TextContent(type="text", text=json.dumps(
+            {"error": f"recall failed: {exc}"}))]
     return [TextContent(type="text", text=json.dumps({"results": results}))]
 
 
