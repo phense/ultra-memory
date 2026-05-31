@@ -47,12 +47,12 @@ The durable typed notes.
 | `strength` | REAL | default 1.0; multiplies relevance |
 | `access_count` | INTEGER | derived; atomically incremented by `record_access` |
 | `last_accessed` | TEXT | |
-| `status` | TEXT | `active` / `deleted` / `redirect` (default `active`) |
+| `status` | TEXT | `active` / `deleted` / `redirect` / `quarantined` / `reverted` (default `active`). The last two are **(SP-7)** demotions written by `set_status`; only `active` is recalled by default. |
 | `supersedes` | TEXT | canonical id when `status='redirect'` |
 | `pinned` | INTEGER | default 0 |
 | `topic` | TEXT | **(0004)** nullable. `NULL` = cross-topic / visible-to-all (composes with the §5 access wall as `topic IS NULL`); a non-NULL topic walls the row. `user`/`feedback` operational rows stay `NULL` (D11). |
 | `created_by` | TEXT | **(0004)** provenance; `NOT NULL DEFAULT 'human'`. `human` (CLI / `/memory-*`) / `agent` / `background_review` / `import`. The §7a provenance gate (SP-7) may auto-edit only non-`human` rows; the safe default treats un-marked rows as immutable. |
-| `outcome_weight` | REAL | **(0004)** `NOT NULL DEFAULT 1.0`. Reserved §7a hook; multiplied into the unified-recall score. **Inert this cycle** (no writer; 1.0 is multiplicatively neutral). |
+| `outcome_weight` | REAL | **(0004)** `NOT NULL DEFAULT 1.0`. Multiplied into the unified-recall score (`1.0` is multiplicatively neutral). **First writer (SP-7):** `set_outcome_weight` (the EWMA regression signal); inert until written. |
 
 ### `sessions`
 `id` (UUID) PK, `started_at`, `ended_at`, `status`, `branch`, `cwd`,
@@ -75,8 +75,9 @@ via `struct`), `content_sha256` (cache invalidation). The `(model_name, dim)`
 invariant is enforced loudly.
 
 ### `audit_log`
-`id` PK, `ts`, `op` (`save`/`redirect`/`soft_delete`), `target_kind`,
-`target_id`, `reason`, `prior_state` (JSON snapshot before the change).
+`id` PK, `ts`, `op` (`save`/`redirect`/`soft_delete`/`pin`/`verify`/`link`/
+`outcome_weight`/`set_status`/…), `target_kind`, `target_id`, `reason`,
+`prior_state` (JSON snapshot before the change).
 
 ### `access_log`
 Append-only reinforcement source of truth: `id`, `target_kind`, `target_id`,
