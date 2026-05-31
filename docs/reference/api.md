@@ -51,7 +51,12 @@ Every public function. The caller owns connections and supplies timestamps.
   dim=EMBED_DIM) -> {target_id: vector}` — batched: all misses in one embedder call
   + one write txn. `items` = iterable of `(target_kind, target_id, text)`.
 - `default_embedder(model_name=EMBED_MODEL) -> callable` — lazy fastembed; raises a
-  clear `RuntimeError` if the `[retrieval]` extra is absent.
+  clear `RuntimeError` if the `[retrieval]` extra is absent. The model is cached in
+  `persistent_cache_dir()`, never the OS temp dir.
+- `persistent_cache_dir() -> str` — the fastembed model-cache dir, anchored under
+  `$HOME` (never `tempfile.gettempdir()`, which macOS purges → onnxruntime
+  `NoSuchFile` at load). Resolution: `ULTRA_MEMORY_FASTEMBED_CACHE` →
+  `FASTEMBED_CACHE_PATH` → `~/.cache/ultra-memory/fastembed`; created on demand.
 
 ## `memory_query`
 

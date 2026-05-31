@@ -27,7 +27,7 @@ not a rollback source for those.
 | `migrations/*.sql` | Ordered `NNNN_name.sql`. `0001` initial schema, `0002` import-fidelity columns, `0003` harness slug + sort order. |
 | `memory_lib.py` | **The only writer.** Every mutation: redact → `BEGIN IMMEDIATE`/`COMMIT` with retry+spool → `audit_log`. |
 | `redact_secrets.py` | Pure secret-stripper (the pre-persist + pre-export chokepoint). |
-| `retrieval_core.py` | cosine, RRF, vector (de)serialise, content hash, embedding cache (single + batch), lazy fastembed. |
+| `retrieval_core.py` | cosine, RRF, vector (de)serialise, content hash, embedding cache (single + batch), lazy fastembed (model cached in a persistent `$HOME` dir, never `$TMPDIR`). |
 | `memory_query.py` | Read side: candidates → cosine → title boost → ranking signals → 1-hop links. No LLM. |
 | `memory_import.py` | Parse the legacy markdown tree + `.remember/today-*.md` → writes via `memory_lib`. |
 | `memory_export.py` | The rollback artifact: redacted dump + snapshot + views, atomic + skip-if-unchanged. |

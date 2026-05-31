@@ -185,3 +185,28 @@ def test_knowledge_tools_declares_query_tool():
     assert any(t.name == "knowledge_query" for t in tools)
     qt = next(t for t in tools if t.name == "knowledge_query")
     assert "query" in qt.inputSchema.get("required", [])
+
+
+def test_lazy_embedder_defers_build_until_first_call_and_memoizes():
+    """Startup resilience: the MCP must NOT build the (heavy) fastembed model at
+    startup — that raced the 30s connect timeout and a missing model file crashed
+    the whole server (knowledge MCP failure, 2026-05-31). lazy_embedder defers the
+    build to the first embed call, then reuses it (one build, warm thereafter)."""
+    builds = []
+
+    def factory():
+        builds.append(1)
+
+        def _embed(texts):
+            return [[float(len(t))] for t in texts]
+
+        return _embed
+
+    embed = knowledge_mcp.lazy_embedder(factory=factory)
+    assert builds == []  # constructing the wrapper must not build the model
+
+    assert embed(["abc"]) == [[3.0]]
+    assert builds == [1]  # built on first use
+
+    assert embed(["de", "f"]) == [[2.0], [1.0]]
+    assert builds == [1]  # memoized — no second build

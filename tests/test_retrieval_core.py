@@ -145,3 +145,62 @@ def test_default_embedder_without_fastembed_raises_clear(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(RuntimeError, match="fastembed"):
         rc.default_embedder()
+
+
+def _fake_fastembed(monkeypatch, captured):
+    """Install a fake `fastembed` whose TextEmbedding records its kwargs, so the
+    cache_dir wiring is testable without downloading a model."""
+    import sys
+    import types
+
+    class _FakeTextEmbedding:
+        def __init__(self, model_name=None, cache_dir=None, **kw):
+            captured["model_name"] = model_name
+            captured["cache_dir"] = cache_dir
+
+        def embed(self, texts):  # pragma: no cover - not exercised here
+            return [[0.0] for _ in texts]
+
+    mod = types.ModuleType("fastembed")
+    mod.TextEmbedding = _FakeTextEmbedding
+    monkeypatch.setitem(sys.modules, "fastembed", mod)
+
+
+def test_default_embedder_cache_dir_is_persistent_not_tempdir(monkeypatch):
+    """The model cache must NOT live in the OS temp dir: macOS purges
+    /var/folders/.../T on reboot + periodically, and a vanished model file crashes
+    onnxruntime at load (this killed the knowledge MCP at startup, 2026-05-31)."""
+    import tempfile
+
+    captured = {}
+    _fake_fastembed(monkeypatch, captured)
+    monkeypatch.delenv("ULTRA_MEMORY_FASTEMBED_CACHE", raising=False)
+    monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+
+    rc.default_embedder()
+    cache = captured["cache_dir"]
+    assert cache, "default_embedder must pass an explicit cache_dir"
+    assert not cache.startswith(tempfile.gettempdir()), \
+        f"cache_dir {cache!r} is under the purgeable system temp dir"
+
+
+def test_default_embedder_cache_dir_honors_env_override(monkeypatch, tmp_path):
+    """ULTRA_MEMORY_FASTEMBED_CACHE (then FASTEMBED_CACHE_PATH) overrides the
+    default; the chosen dir is created so a fresh machine just downloads into it."""
+    captured = {}
+    _fake_fastembed(monkeypatch, captured)
+
+    override = tmp_path / "persist-cache"
+    monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+    monkeypatch.setenv("ULTRA_MEMORY_FASTEMBED_CACHE", str(override))
+    rc.default_embedder()
+    assert captured["cache_dir"] == str(override)
+    assert override.is_dir()
+
+    # FASTEMBED_CACHE_PATH is the documented second-priority source.
+    monkeypatch.delenv("ULTRA_MEMORY_FASTEMBED_CACHE", raising=False)
+    alt = tmp_path / "fe-cache"
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(alt))
+    rc.default_embedder()
+    assert captured["cache_dir"] == str(alt)
+    assert alt.is_dir()

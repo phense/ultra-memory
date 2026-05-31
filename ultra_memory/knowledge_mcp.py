@@ -122,6 +122,33 @@ def db_path_from_env(env):
     return Path(raw)
 
 
+def lazy_embedder(factory=None):
+    """A callable embedder that defers the (heavy) fastembed build to its FIRST call.
+
+    The stdio server must answer `initialize` inside the client's connect timeout
+    (Claude Code: 30s). Building fastembed eagerly in `main()` raced that timeout —
+    and, worse, a missing model file (e.g. an OS temp purge) crashed the whole
+    server at startup instead of degrading a single query (knowledge MCP failure,
+    2026-05-31). Deferring the build lets the server connect instantly; the model
+    loads on the first `knowledge_query`. Memoised: built once, then reused (warm).
+    `factory` is injectable for tests; default = retrieval_core.default_embedder.
+    """
+    holder = {}
+
+    def embed(texts):
+        fn = holder.get("fn")
+        if fn is None:
+            if factory is not None:
+                fn = factory()
+            else:
+                from . import retrieval_core
+                fn = retrieval_core.default_embedder()
+            holder["fn"] = fn
+        return fn(texts)
+
+    return embed
+
+
 def knowledge_tools():
     """The MCP tool catalog. Lazy `mcp` import keeps the recall core importable
     without the optional `mcp` extra."""
@@ -148,8 +175,10 @@ def knowledge_tools():
 
 def main():
     """Stdio entry point for the read-only `knowledge` MCP. Reads config from env
-    (paths via config, not cwd), opens memory.db, builds the embedder once (warm
-    venv — fastembed is heavy), and serves `knowledge_query`. No LLM on this path."""
+    (paths via config, not cwd), opens memory.db, and serves `knowledge_query`. The
+    embedder is LAZY (built on the first query, not at startup) so the server answers
+    `initialize` instantly and a cold/missing model degrades one query rather than
+    killing the connection. No LLM on this path."""
     import asyncio
     import datetime
     import json
@@ -159,12 +188,12 @@ def main():
     from mcp.server.stdio import stdio_server
     from mcp.types import TextContent
 
-    from . import db, retrieval_core
+    from . import db
 
     db_path = db_path_from_env(os.environ)
     caller_class = caller_class_from_env(os.environ)
     conn = db.connect(db_path)
-    embedder = retrieval_core.default_embedder()
+    embedder = lazy_embedder()
 
     server = Server("ultra-memory-knowledge")
 

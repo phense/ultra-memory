@@ -150,11 +150,36 @@ def get_or_embed_batch(conn, items, *, embedder, model_name=EMBED_MODEL, dim=EMB
     return result
 
 
+def persistent_cache_dir():
+    """A PERSISTENT fastembed model-cache dir, never the system temp dir.
+
+    fastembed's own default is ``tempfile.gettempdir()/fastembed_cache`` — on macOS
+    that resolves under ``/var/folders/.../T`` which the OS purges on reboot and on a
+    periodic schedule. When the model file vanishes there, a process that loads the
+    embedder dies with onnxruntime ``NoSuchFile`` (this killed the knowledge MCP at
+    startup, 2026-05-31). Anchoring the cache under ``$HOME`` keeps the model across
+    reboots. Resolution order (first set wins):
+      1. ``ULTRA_MEMORY_FASTEMBED_CACHE`` — project override
+      2. ``FASTEMBED_CACHE_PATH``        — fastembed's own env convention
+      3. ``~/.cache/ultra-memory/fastembed`` — persistent default
+    The directory is created (parents, exist_ok) so a fresh machine just downloads.
+    """
+    import os
+    from pathlib import Path
+    raw = (os.environ.get("ULTRA_MEMORY_FASTEMBED_CACHE")
+           or os.environ.get("FASTEMBED_CACHE_PATH"))
+    path = Path(raw) if raw else Path.home() / ".cache" / "ultra-memory" / "fastembed"
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
 def default_embedder(model_name=EMBED_MODEL):
     """Lazy fastembed embedder. Optional extra: install ultra-memory[retrieval].
 
     Returns list[str] -> list[list[float]]. Not exercised by unit tests (they inject
-    a fake) — keeps the model download off the test path."""
+    a fake) — keeps the model download off the test path. The model is cached in a
+    PERSISTENT dir (persistent_cache_dir), never the OS temp dir, so a temp purge
+    can't silently delete it out from under a long-lived process."""
     try:
         from fastembed import TextEmbedding
     except ImportError as exc:  # pragma: no cover - exercised via monkeypatch
@@ -162,7 +187,7 @@ def default_embedder(model_name=EMBED_MODEL):
             "fastembed not installed; install the 'retrieval' extra "
             "(uv pip install -e '.[retrieval]') or inject an embedder"
         ) from exc
-    model = TextEmbedding(model_name=model_name)
+    model = TextEmbedding(model_name=model_name, cache_dir=persistent_cache_dir())
 
     def _embed(texts):
         return [[float(x) for x in v] for v in model.embed(list(texts))]
