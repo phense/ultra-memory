@@ -8,6 +8,7 @@ delete = soft tombstone.
 """
 import hashlib
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -111,15 +112,91 @@ def _audit(conn, *, op, target_kind, target_id, reason, prior, ts):
     )
 
 
+# ---------------------------------------------------------------------------
+# Topic on the write path (SP-3 Stage 2, D2/D3/D11). The engine is PROJECT-
+# AGNOSTIC: a topic is just a stored TEXT string; the router is a GENERIC
+# keyword/caller_class/origin_session heuristic (NO LLM, NO wiki import); and
+# the "unknown topic genesis" is an OPTIONAL injectable hook (default no-op).
+# The CONSUMER (Trading) wires wiki_topics.ensure_topic into the hook and supplies
+# the keyword map — the engine never references wiki_topics.
+# ---------------------------------------------------------------------------
+
+# Operational rows are cross-topic by nature (D11) — see _TOPIC_EXEMPT_TYPES,
+# defined below alongside backfill_topic; reused by the router + write path.
+
+
+def make_keyword_router(keyword_map):
+    """Build a deterministic, GENERIC fallback topic router from a
+    `{topic: (kw, kw, ...)}` map (caller-supplied — content-free in the engine).
+
+    The returned callable has the router contract:
+        router(*, type, title, body, origin_session_id, caller_class) -> str | None
+    It lowercases title+body and returns the FIRST topic whose map order contains a
+    matching whole-word keyword; abstains to None on no hit. Operational types
+    (user/feedback) always abstain (D11 — they are cross-topic). No LLM, no wiki dep,
+    no network — pure string matching, safe on the hot path.
+
+    The map insertion order is the priority order (Python dicts are ordered), so the
+    consumer controls tie-breaking deterministically.
+    """
+    # Pre-compile one whole-word regex per keyword so 'ibkr' doesn't match inside a
+    # larger token and matching stays O(text) per keyword.
+    compiled = {
+        topic: [re.compile(rf"(?<!\w){re.escape(kw.lower())}(?!\w)") for kw in kws]
+        for topic, kws in dict(keyword_map).items()
+    }
+
+    def router(*, type, title, body, origin_session_id=None, caller_class=None):
+        if type in _TOPIC_EXEMPT_TYPES:
+            return None
+        hay = f"{title or ''}\n{body or ''}".lower()
+        for topic, patterns in compiled.items():
+            if any(p.search(hay) for p in patterns):
+                return topic
+        return None
+
+    return router
+
+
+def _resolve_topic(*, topic, topic_router, type, title, body, origin_session_id,
+                   caller_class):
+    """Resolve the topic to persist (D3/D11). Precedence:
+      1. operational types (user/feedback) → ALWAYS NULL (cross-topic, D11) —
+         a hard invariant that overrides even an explicit topic= arg.
+      2. explicit topic= arg (the writer knows its context, north-star §6.1).
+      3. the generic fallback router, if one is enabled.
+      4. None (the router abstained / none supplied) → NULL.
+    No LLM. The router is a plain in-process callable."""
+    if type in _TOPIC_EXEMPT_TYPES:
+        return None
+    if topic is not None:
+        return topic
+    if topic_router is not None:
+        return topic_router(type=type, title=title, body=body,
+                            origin_session_id=origin_session_id,
+                            caller_class=caller_class)
+    return None
+
+
 def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
                 description=None, index_hook=None, node_type="memory",
-                file_slug=None, sort_order=None, created_at=None, updated_at=None):
+                file_slug=None, sort_order=None, created_at=None, updated_at=None,
+                topic=None, topic_router=None, genesis_hook=None, caller_class=None):
     """Upsert a memory through the redact chokepoint + audit. Returns id.
 
     `ts` is the action time (always the audit-row timestamp). `created_at`/
     `updated_at` default to `ts` but can be overridden so a bootstrap import can
     stamp the file's real age (mtime) — otherwise every imported memory looks
-    freshly written and the §8 staleness signal never fires."""
+    freshly written and the §8 staleness signal never fires.
+
+    `topic` (SP-3 Stage 2, D1/D3) is the topic string to persist. If omitted and a
+    `topic_router` is supplied, the deterministic generic router assigns one (no
+    LLM); if it abstains the topic stays NULL. user/feedback rows ALWAYS stay NULL
+    (D11), even if a topic= is passed. `genesis_hook(topic)` is an OPTIONAL,
+    injectable, best-effort callback (default no-op) the CONSUMER wires its topic
+    genesis (e.g. wiki_topics.ensure_topic) into — fired only when a non-NULL topic
+    is resolved; a raising hook never aborts the write (fail-open). The engine
+    itself has NO wiki dependency."""
     title = strip_secrets(title)
     body = strip_secrets(body)
     description = strip_secrets(description)
@@ -129,25 +206,30 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
     created = ts if created_at is None else created_at
     updated = ts if updated_at is None else updated_at
 
+    resolved_topic = _resolve_topic(
+        topic=topic, topic_router=topic_router, type=type, title=title, body=body,
+        origin_session_id=origin_session_id, caller_class=caller_class)
+
     def work():
         prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
         if prior is None:
             conn.execute(
                 "INSERT INTO memories (id, type, title, body, description, index_hook, "
                 "node_type, file_slug, sort_order, created_at, updated_at, "
-                "origin_session_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "origin_session_id, topic) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (id, type, title, body, description, index_hook, node_type,
-                 file_slug, sort_order, created, updated, origin_session_id),
+                 file_slug, sort_order, created, updated, origin_session_id,
+                 resolved_topic),
             )
             _audit(conn, op="save", target_kind="memory", target_id=id,
                    reason="create", prior=None, ts=ts)
         else:
             conn.execute(
                 "UPDATE memories SET type=?, title=?, body=?, description=?, "
-                "index_hook=?, node_type=?, file_slug=?, sort_order=?, updated_at=? "
-                "WHERE id=?",
+                "index_hook=?, node_type=?, file_slug=?, sort_order=?, updated_at=?, "
+                "topic=? WHERE id=?",
                 (type, title, body, description, index_hook, node_type,
-                 file_slug, sort_order, updated, id),
+                 file_slug, sort_order, updated, resolved_topic, id),
             )
             _audit(conn, op="save", target_kind="memory", target_id=id,
                    reason="update", prior=dict(prior), ts=ts)
@@ -156,7 +238,20 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
         "op": "save_memory", "id": id, "type": type, "title": title, "body": body,
         "ts": ts, "origin_session_id": origin_session_id, "description": description,
         "index_hook": index_hook, "node_type": node_type, "file_slug": file_slug,
-        "sort_order": sort_order, "created_at": created, "updated_at": updated})
+        "sort_order": sort_order, "created_at": created, "updated_at": updated,
+        # Spool the RESOLVED topic, not the router — replay must be deterministic and
+        # the router/hook are in-process callables that don't serialize.
+        "topic": resolved_topic})
+
+    # Genesis fires only AFTER a successful, durable write and only for a non-NULL
+    # topic. Best-effort + fail-open: the consumer's genesis (e.g. the wiki) is not
+    # allowed to break the canonical memory write. The engine stays agnostic — it
+    # neither knows nor cares what the hook does.
+    if resolved_topic is not None and genesis_hook is not None:
+        try:
+            genesis_hook(resolved_topic)
+        except Exception:
+            pass
     return id
 
 
