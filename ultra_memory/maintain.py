@@ -79,7 +79,7 @@ def _maybe_default_embedder(env):
 
 
 def run(conn, *, out_dir, ts=None, keep_days=_KEEP_DAYS, force=False,
-        wiki_roots=None, embedder=None, env=None):
+        wiki_roots=None, embedder=None, env=None, rebuild_index=False):
     """Throttled prune + export (+ optional wiki_sync). Returns {pruned, exported,
     skipped} — plus a `wiki_sync` summary ONLY when wiki roots are configured.
     Fail-soft: the caller wraps this so an error never blocks a session.
@@ -110,7 +110,7 @@ def run(conn, *, out_dir, ts=None, keep_days=_KEEP_DAYS, force=False,
         try:
             emb = embedder if embedder is not None else _maybe_default_embedder(env)
             result["wiki_sync"] = wiki_sync.wiki_sync(
-                conn, roots, embedder=emb, ts=ts)
+                conn, roots, embedder=emb, rebuild=rebuild_index, ts=ts)
         except Exception as exc:  # fail-open: a sync error never blocks maintenance
             result["wiki_sync"] = {"error": str(exc)}
 
@@ -123,19 +123,26 @@ def main(argv=None):
 
     out_dir defaults to <db-dir>/memory_export/views (mirrors the export layout
     consumers already use); override with ULTRA_MEMORY_EXPORT_DIR.
-    """
+
+    `--rebuild` (or ULTRA_MEMORY_REBUILD_INDEX=1) forces a one-pass re-population
+    of every unified_index row regardless of content_sha256 — the SP-6 #6 (D11)
+    bm25_text backfill for rows written by the pre-fix wiki_sync. A rebuild implies
+    force (else the throttle would skip the run it was invoked to perform)."""
     import sys
     from pathlib import Path
+    args = sys.argv[1:] if argv is None else list(argv)
+    rebuild = ("--rebuild" in args) or (
+        os.environ.get("ULTRA_MEMORY_REBUILD_INDEX", "") == "1")
     db = os.environ.get("ULTRA_MEMORY_DB", "")
     if not db or not Path(db).is_file():
         return 0
     out_dir = os.environ.get("ULTRA_MEMORY_EXPORT_DIR") or str(
         Path(db).parent / "memory_export" / "views")
-    force = os.environ.get("ULTRA_MEMORY_MAINTAIN_FORCE", "") == "1"
+    force = rebuild or os.environ.get("ULTRA_MEMORY_MAINTAIN_FORCE", "") == "1"
     try:
         conn = memory_lib.open_memory_db(db)
         try:
-            res = run(conn, out_dir=out_dir, force=force)
+            res = run(conn, out_dir=out_dir, force=force, rebuild_index=rebuild)
         finally:
             conn.close()
         sys.stderr.write(f"ultra-memory maintain: {res}\n")

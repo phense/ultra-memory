@@ -161,11 +161,17 @@ The Tier-1 wiki→memory mirror (population only; retrieval is `unified_query`).
 **Project-agnostic:** roots are consumer-fed; the engine imports nothing from the
 consumer's wiki (no topic-model module, not even PyYAML).
 
-- `wiki_sync(conn, wiki_roots, *, embedder=None, ts) -> {upserted, skipped, pruned,
-  embedded, errors}` — walk each `<root>/<topic>/**/*.md`, upsert each page into
-  `unified_index` (PK `slug`; `topic` = first path component under the root;
-  `page_type`/`title`/`snippet` parsed with a tiny hand-rolled front-matter
-  scanner). **Idempotent** (`content_sha256` match → skip + no re-embed),
+- `wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts) -> {upserted,
+  skipped, pruned, embedded, errors}` — walk each `<root>/<topic>/**/*.md`, upsert
+  each page into `unified_index` (PK `slug`; `topic` = first path component under the
+  root; `page_type`/`title`/`snippet`/`bm25_text` parsed with a tiny hand-rolled
+  front-matter scanner). `snippet` is the ~400-char display preview; **(SP-6, D11)**
+  `bm25_text` is the FULL collapsed body — the knowledge-side BM25 document
+  (`unified_query._knowledge_doc_text`) so a back-half query term ranks. `rebuild=True`
+  forces every page to re-populate regardless of `content_sha256` — the one-pass
+  `bm25_text` backfill for rows written by the pre-SP-6 `wiki_sync` (CLI:
+  `maintain --rebuild` / `ULTRA_MEMORY_REBUILD_INDEX=1`). **Idempotent**
+  (`content_sha256` match → skip + no re-embed, unless `rebuild`),
   **reconciling** (orphan-prune rows whose slug no longer maps to a file, scoped to
   the topics synced this call — mirrors the `memory_export` orphan prune),
   **fail-open** (a missing root / unreadable page / embed failure increments
@@ -188,6 +194,14 @@ best-rank-per-backend RRF, weighted by `outcome_weight` (inert 1.0). No LLM.
 > best-rank-per-backend RRF (k=60). Cross-codebase byte-parity with `wiki_query`
 > is **deferred to an SP-5 Trading-side test** (which can import both). The
 > memory-store byte-identity (below) *is* enforced here.
+>
+> **SP-6 (D11) — BM25 document is the FULL body.** `_knowledge_doc_text(row)`
+> indexes `title + bm25_text + frontmatter`, where `bm25_text` is the full
+> collapsed page body (migration `0005`), **not** the ~400-char `snippet`. This
+> matches `wiki_query`'s full-text BM25 so a query term in a page's back half
+> ranks — closing the SP-5 parity tail-divergence (the SP-5 test loosened θ to
+> tolerate the old snippet-cap). Falls back to `snippet` for `NULL`/pre-0005 rows
+> (back-compat). The ranking math is unchanged (BM25 `b=0.75` length-norm).
 
 - `unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
   top_k=5, dim=EMBED_DIM, now_ts=None, ts=None, audit=True) -> [dict]` — resolve

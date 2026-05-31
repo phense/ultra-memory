@@ -66,7 +66,15 @@ def _make_wiki(root, topic, slug, body, *, type_="concept", title=None):
 def _index_rows(conn):
     return conn.execute(
         "SELECT slug, topic, page_type, title, snippet, frontmatter, path, "
-        "content_sha256, updated_at FROM unified_index ORDER BY slug").fetchall()
+        "content_sha256, bm25_text, updated_at FROM unified_index ORDER BY slug"
+    ).fetchall()
+
+
+# A body whose useful term sits past the 400-char snippet cap. The first ~400
+# chars are filler; the distinctive back-half term `quokkasaurus` only appears
+# near the end, so it survives in bm25_text (full body) but NOT in snippet.
+_FILLER = ("filler " * 80).strip()           # ~560 chars, well past 400
+_BACK_HALF_BODY = _FILLER + " quokkasaurus tail term"
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +104,29 @@ def test_sync_upserts_every_page(tmp_path):
     # snippet is the rendered body (frontmatter stripped).
     assert "year-end fence" in by_slug["german-tax-fence"]["snippet"]
     assert "---" not in by_slug["german-tax-fence"]["snippet"]
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# 1b. SP-6 #6 (D11) — bm25_text holds the FULL body (no 400-char cap), while
+#     snippet stays the 400-char display preview.
+# ---------------------------------------------------------------------------
+
+def test_bm25_text_holds_full_body_snippet_stays_capped(tmp_path):
+    conn = _db(tmp_path)
+    root = tmp_path / "wiki"
+    _make_wiki(root, "trading", "longpage", _BACK_HALF_BODY)
+    wiki_sync.wiki_sync(conn, [root], ts="2026-05-31T10:00:00Z")
+    row = {r["slug"]: r for r in _index_rows(conn)}["longpage"]
+    # snippet is the 400-char display preview -> the back-half term is truncated.
+    assert len(row["snippet"]) == 400
+    assert "quokkasaurus" not in row["snippet"]
+    # bm25_text is the FULL collapsed body -> the back-half term survives.
+    assert "quokkasaurus" in row["bm25_text"]
+    assert len(row["bm25_text"]) > 400
+    # bm25_text is the whitespace-collapsed body (no raw frontmatter, no newlines).
+    assert "\n" not in row["bm25_text"]
+    assert "---" not in row["bm25_text"]
     conn.close()
 
 
@@ -206,6 +237,43 @@ def test_reconciliation_only_prunes_within_synced_roots(tmp_path):
     s = wiki_sync.wiki_sync(conn, [root_a], ts="2026-05-31T11:00:00Z")
     assert s["pruned"] == 0
     assert {r["slug"] for r in _index_rows(conn)} == {"from-a", "from-b"}
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# 4b. SP-6 #6 (D11) — `rebuild=True` backfills bm25_text on an existing row in
+#     one pass, even though its content_sha256 is unchanged (the un-migrated /
+#     pre-fix row carries a NULL bm25_text the sha-skip would otherwise leave).
+# ---------------------------------------------------------------------------
+
+def test_rebuild_backfills_bm25_text_on_unchanged_rows(tmp_path):
+    conn = _db(tmp_path)
+    root = tmp_path / "wiki"
+    _make_wiki(root, "trading", "longpage", _BACK_HALF_BODY)
+    wiki_sync.wiki_sync(conn, [root], ts="2026-05-31T10:00:00Z")
+    # Simulate a row written by the PRE-fix wiki_sync: bm25_text is NULL, content
+    # unchanged. A normal re-sync would sha-skip it and never populate bm25_text.
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute("UPDATE unified_index SET bm25_text=NULL WHERE slug='longpage'")
+    conn.execute("COMMIT")
+    assert conn.execute(
+        "SELECT bm25_text FROM unified_index WHERE slug='longpage'"
+    ).fetchone()["bm25_text"] is None
+
+    # A plain re-sync sha-skips (does NOT backfill).
+    s_skip = wiki_sync.wiki_sync(conn, [root], ts="2026-05-31T11:00:00Z")
+    assert s_skip["skipped"] == 1
+    assert conn.execute(
+        "SELECT bm25_text FROM unified_index WHERE slug='longpage'"
+    ).fetchone()["bm25_text"] is None
+
+    # rebuild=True forces re-population in one pass -> bm25_text now full body.
+    s_rebuild = wiki_sync.wiki_sync(conn, [root], rebuild=True,
+                                    ts="2026-05-31T12:00:00Z")
+    assert s_rebuild["upserted"] == 1
+    assert s_rebuild["skipped"] == 0
+    row = {r["slug"]: r for r in _index_rows(conn)}["longpage"]
+    assert "quokkasaurus" in row["bm25_text"]
     conn.close()
 
 

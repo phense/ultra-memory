@@ -1,0 +1,11 @@
+-- SP-6 #6 (D11) — engine BM25 full-body fix. Additive, non-destructive: a single
+-- ADD COLUMN, no DROP/RENAME, so a restore/replay against an already-shaped DB is
+-- idempotent (db.py tolerates a re-applied ADD COLUMN — "duplicate column name").
+--
+-- unified_index.snippet stays the ~400-char DISPLAY preview (correct recall UX).
+-- bm25_text holds the FULL collapsed page body so the knowledge-side BM25 document
+-- (unified_query._knowledge_doc_text) matches wiki_query's full-text BM25 — closing
+-- the SP-5 parity tail-divergence (a query term in a page's back half was invisible
+-- to the engine's snippet-capped BM25 document). Populated by wiki_sync; NULL on
+-- un-migrated / pre-fix rows, where _knowledge_doc_text falls back to snippet.
+ALTER TABLE unified_index ADD COLUMN bm25_text TEXT;

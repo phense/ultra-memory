@@ -11,6 +11,13 @@ from ultra_memory import db
 
 MIG = Path(__file__).resolve().parent.parent / "ultra_memory" / "migrations"
 
+# The latest migration version on disk. `db.migrate` applies the FULL set and
+# returns the highest version, so a "fresh DB" lands here (>=4 once 0004 exists);
+# 0004-specific assertions below check the 0004 SCHEMA is present, not that 4 is
+# the latest. Derived (not hardcoded) so a new migration NNNN does not break these.
+_LATEST = max(int(p.name.split("_", 1)[0]) for p in MIG.glob("*.sql")
+              if p.name.split("_", 1)[0].isdigit())
+
 _NEW_MEMORIES_COLS = ("topic", "created_by", "outcome_weight")
 _NEW_LINKS_COLS = ("src_type", "dst_type")
 _NEW_TABLES = ("unified_index", "knowledge_pins", "agent_topic_bindings")
@@ -33,7 +40,7 @@ def _indexes(conn):
 def test_fresh_db_lands_at_v4_with_all_additive_schema(tmp_path):
     conn = db.connect(tmp_path / "m.db")
     version = db.migrate(conn, MIG)
-    assert version == 4
+    assert version == _LATEST  # full set applied; 0004 schema asserted below
 
     mcols = _cols(conn, "memories")
     for c in _NEW_MEMORIES_COLS:
@@ -76,13 +83,14 @@ def test_meta_schema_version_mirrors_user_version_at_v4(tmp_path):
     uv = conn.execute("PRAGMA user_version").fetchone()[0]
     mv = conn.execute(
         "SELECT value FROM meta WHERE key='schema_version'").fetchone()[0]
-    assert v == uv == 4
-    assert int(mv) == 4
+    assert v == uv == _LATEST
+    assert int(mv) == _LATEST
     conn.close()
 
 
 def test_db_stopped_at_v3_upgrades_cleanly_to_v4(tmp_path):
-    """A DB that exists at v3 (only 0001-0003 applied) must take ONLY 0004 next."""
+    """A DB that exists at v3 (only 0001-0003 applied) takes 0004+ next and lands
+    with the 0004 schema present (the full forward set is applied)."""
     conn = db.connect(tmp_path / "m.db")
     conn.execute("PRAGMA user_version=0")
     # Apply 0001-0003 only.
@@ -93,7 +101,7 @@ def test_db_stopped_at_v3_upgrades_cleanly_to_v4(tmp_path):
     assert "topic" not in _cols(conn, "memories")  # precondition: genuinely v3-shaped
 
     v = db.migrate(conn, MIG)
-    assert v == 4
+    assert v == _LATEST
     assert "topic" in _cols(conn, "memories")
     assert "unified_index" in _tables(conn)
     conn.close()
@@ -103,8 +111,8 @@ def test_reapply_is_noop(tmp_path):
     conn = db.connect(tmp_path / "m.db")
     v1 = db.migrate(conn, MIG)
     v2 = db.migrate(conn, MIG)  # replay
-    assert v1 == v2 == 4
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert v1 == v2 == _LATEST
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST
     conn.close()
 
 
@@ -112,9 +120,9 @@ def test_replay_tolerant_after_simulated_crash(tmp_path):
     """Columns already present but user_version regressed (crash between apply and
     bump) must re-run cleanly (idempotent ADD COLUMN), not 'duplicate column name'."""
     conn = db.connect(tmp_path / "m.db")
-    assert db.migrate(conn, MIG) == 4
-    conn.execute("PRAGMA user_version=3")  # simulate crash mid-0004
+    assert db.migrate(conn, MIG) == _LATEST
+    conn.execute("PRAGMA user_version=3")  # simulate crash mid-migration set
     again = db.migrate(conn, MIG)
-    assert again == 4
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert again == _LATEST
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST
     conn.close()

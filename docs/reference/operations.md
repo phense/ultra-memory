@@ -28,6 +28,7 @@ Engine env seams the wrapper / consumer can also set (SP-3):
 | `ULTRA_MEMORY_WIKI_ROOTS` | `os.pathsep`- or comma-separated Expert-Knowledge root paths. Read by `maintain.run` → `wiki_sync`. **Unset ⇒ `wiki_sync` is skipped** and a pure-memory deployment is byte-identically unaffected. |
 | `ULTRA_MEMORY_CALLER_TOPIC` | Comma/`:`/`;`-separated topic list — the **topic** axis of the access wall (the interim source until SP-0 spike #7 resolves per-subagent identity). Fail-closed: unset + no `agent_topic_bindings` row ⇒ the empty topic set. |
 | `ULTRA_MEMORY_AGENT_NAME` | Agent name for the `agent_topic_bindings` lookup (`topic_scope_from_env`). |
+| `ULTRA_MEMORY_REBUILD_INDEX` | `=1` ⇒ `maintain` forces a one-pass re-population of every `unified_index` row regardless of `content_sha256` (the SP-6 `bm25_text` backfill, equivalent to `maintain --rebuild`). Implies force (bypasses the throttle). |
 
 `/memory-setup` builds the runtime venv under `${CLAUDE_PLUGIN_DATA}/venv`,
 optionally imports a legacy memory dir **once**, stamps the DB ready (the
@@ -93,6 +94,14 @@ error lands as `result["wiki_sync"]["error"]` and never blocks). The return then
 carries a `wiki_sync` summary `{upserted, skipped, pruned, embedded, errors}`
 beside `{pruned, exported, skipped}`. With no roots configured the sync is skipped
 entirely.
+
+**SP-6 — `--rebuild` one-pass backfill.** `python -m ultra_memory.maintain --rebuild`
+(or `ULTRA_MEMORY_REBUILD_INDEX=1`) forces every `unified_index` row to re-populate
+regardless of `content_sha256` — the backfill for `unified_index.bm25_text` (the
+full-body BM25 column added in migration `0005`) on rows written by the pre-SP-6
+`wiki_sync`. A rebuild implies force (else the ~20h throttle would skip the run it
+was invoked to perform). A normal nightly sync repopulates `bm25_text` lazily on the
+next content change of each page.
 
 ## Topic backfill (gated) {#topic-backfill-gated}
 
