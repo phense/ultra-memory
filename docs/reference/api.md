@@ -76,6 +76,25 @@ Every public function. The caller owns connections and supplies timestamps.
   (`status='redirect'`, `supersedes=canonical`). Raises `KeyError` if absent.
 - `delete(conn, *, id, reason, tier, ts)` — soft tombstone (`status='deleted'`).
   `tier` ∈ {`durable`, `volatile`}; `ValueError` otherwise, `KeyError` if absent.
+- `set_outcome_weight(conn, *, id, weight, ts, reason="outcome aggregate")` —
+  **SP-7 generic support.** Set `memories.outcome_weight = weight` (the **first
+  writer** of the migration-0004 column; until now read-only/inert at its `1.0`
+  default in unified ranking). SP-7's deterministic EWMA aggregate writes its
+  regression signal through here (sub-`1.0` demotes a unit's recall rank, `>1.0`
+  promotes it); the engine neither computes nor bounds the weight. `KeyError` if
+  absent. Audited; spooled + replayed.
+- `set_status(conn, *, id, status, ts, reason)` — **SP-7 generic support.** Set
+  `memories.status = status`, validated against `_KNOWN_STATUSES` =
+  `('active','redirect','deleted','quarantined','reverted')` — SP-7 **adds**
+  `'quarantined'` (a contradictory pair demoted pending adjudication) and
+  `'reverted'` (a regressed auto-edited unit rolled back). A row in **any**
+  non-`'active'` status drops out of recall by default (`query_memories`
+  `include_statuses=('active',)`, `unified_recall`, the rehydrate gist's
+  `status='active'` filters) — so a flip removes the unit from recall with **no
+  recall-query change**. `ValueError` on an unknown status, `KeyError` if absent.
+  **Generic:** enforces NO "protected row" policy — the SP-7 safety wall
+  ("never auto-touch a human/pinned unit") is the **consumer's** job. Audited;
+  spooled + replayed.
 - `WriteSpooled` — raised when a write is spooled after retry exhaustion.
 - `_write_txn(conn, work, *, spool=None, retries=5, base_delay=0.05,
   sleep=time.sleep)` — the retry/spool transaction wrapper all writers use.
