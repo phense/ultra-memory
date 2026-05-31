@@ -1,0 +1,20 @@
+{
+  "name": "ultra-memory",
+  "version": "0.0.1",
+  "description": "Project-agnostic agent-memory engine + read-only knowledge MCP for Claude Code. SQLite-canonical volatile memory with a single audited write gateway, OAuth-only LLM chokepoint, session checkpoint/rehydration hooks, and a type-scoped knowledge_query MCP tool. Code-only and content-free — your data/config stay private in the consumer project.",
+  "author": {
+    "name": "Peter Hense"
+  },
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "agent-memory",
+    "knowledge-base",
+    "mcp",
+    "sqlite",
+    "session-continuity",
+    "rag-alternative",
+    "claude-code"
+  ],
+  "category": "productivity"
+}

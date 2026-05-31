@@ -19,14 +19,17 @@ as a local plugin. This `docs/` tree is split by reading intent:
 ## Status (2026-05-31)
 
 The **memory engine + import/export + session hooks are built and tested**
-(Plans 1–4; the test suite is green, 150 tests). The **read-only `knowledge` MCP
+(Plans 1–4; the test suite is green, 151 tests). The **read-only `knowledge` MCP
 core is built and tested** (`ultra_memory/knowledge_mcp.py`: type-scoped recall —
 untrusted callers get `project`/`reference` only, never `user`/`feedback` — plus
 read-path `strip_secrets`, access-log audit, the `knowledge_query` tool, and a
 config-driven stdio `main()`; the embedder needs the `retrieval` extra at launch).
-Still future: **MCP reachability wiring + 3-path verification, slash-command verbs,
-the live one-time bootstrap import, and plugin packaging/publish** (Plans 5–8).
-Treat anything described here as "future" until its plan lands.
+**Plugin packaging scaffolded:** `.claude-plugin/plugin.json` + `marketplace.json`
+manifests, `LICENSE` (MIT), `config.example`, and a `test_no_hardcoded_paths` guard
+enforcing the project-agnostic invariant (§3.1). Still future: **MCP reachability
+wiring + 3-path verification, slash-command verbs, the live one-time bootstrap
+import, and the (opt-in, publish-last) GitHub publish** (Plans 5–8). Treat anything
+described here as "future" until its plan lands.
 
 A full adversarial audit of the engine ran on 2026-05-30 (verdict
 `go-after-fixes`); all findings — 4 critical, 1 high, 7 medium, 11 low + 1 nit —

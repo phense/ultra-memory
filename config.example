@@ -1,0 +1,42 @@
+# ultra-memory — example consumer configuration (env vars).
+#
+# ultra-memory ships NO paths or content. Each consumer project sets these in its
+# own environment (e.g. a sourced .config file, the cron wrapper, or the plugin's
+# hook/MCP launch env). Copy, fill in your absolute paths, and source it. Keep the
+# live DB and any filled-in copy OUT of the plugin repo — they are the consumer's
+# private data (publish-public / data-private, spec §3.1).
+
+# --- Storage (REQUIRED) ---------------------------------------------------------
+# Canonical SQLite memory DB. The knowledge MCP and the hooks read this; the engine
+# resolves it from config, NEVER from cwd (the MCP-launcher-ignores-cwd trap).
+export ULTRA_MEMORY_DB="/abs/path/to/consumer/data/memory.db"
+
+# Legacy harness memory dir the one-time bootstrap import reads (the *.md files +
+# MEMORY.md index). Used by memory_import; not needed once the DB is canonical.
+export ULTRA_MEMORY_HARNESS_DIR="/abs/path/to/.claude/projects/<slug>/memory"
+
+# Optional: the consumer's LLM-Wiki dir, if the wiki gateway is co-located.
+export ULTRA_MEMORY_WIKI_DIR="/abs/path/to/consumer/wiki"
+
+# --- knowledge MCP: caller privilege class --------------------------------------
+# Fail-closed: anything other than an explicit trusted class is treated as the
+# untrusted "subagent" (recall limited to project/reference; never user/feedback).
+# Set to "orchestrator" only on the trusted top-level session's MCP instance.
+export ULTRA_MEMORY_CALLER_CLASS="subagent"
+
+# --- Session hooks --------------------------------------------------------------
+# Cron/subagent role marker: when set, the session hooks no-op (non-interactive run).
+# Leave UNSET for an interactive orchestrator session.
+# export ULTRA_MEMORY_AGENT_ROLE="cron"
+
+# Hook mode: 1 = shadow (log only, no injection), 0 = live (inject the rehydrate gist).
+export ULTRA_MEMORY_SHADOW="0"
+
+# SessionStart rehydration gist budget (chars). Bounds the no-LLM gist size.
+export ULTRA_MEMORY_REHYDRATE_BUDGET="2000"
+
+# --- Models (have sensible built-in defaults; override only to change them) ------
+# Embedding model + dim for retrieval_core (default: BAAI/bge-small-en-v1.5, 384).
+# export ULTRA_MEMORY_EMBED_MODEL="BAAI/bge-small-en-v1.5"
+# Off-session LLM model for any claude-CLI chokepoint use (OAuth only, never the API).
+# export ULTRA_MEMORY_MODEL="claude-sonnet-4-6"
