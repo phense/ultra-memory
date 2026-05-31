@@ -19,16 +19,22 @@ as a local plugin. This `docs/` tree is split by reading intent:
 ## Status (2026-05-31)
 
 The **memory engine + import/export + session hooks are built and tested**
-(Plans 1–4; the test suite is green, 151 tests). The **read-only `knowledge` MCP
+(Plans 1–4; the test suite is green, 167 tests). The **read-only `knowledge` MCP
 core is built and tested** (`ultra_memory/knowledge_mcp.py`: type-scoped recall —
 untrusted callers get `project`/`reference` only, never `user`/`feedback` — plus
 read-path `strip_secrets`, access-log audit, the `knowledge_query` tool, and a
 config-driven stdio `main()`; the embedder needs the `retrieval` extra at launch).
-**Plugin packaging scaffolded:** `.claude-plugin/plugin.json` + `marketplace.json`
-manifests, `LICENSE` (MIT), `config.example`, and a `test_no_hardcoded_paths` guard
-enforcing the project-agnostic invariant (§3.1). Still future: **MCP reachability
-wiring + 3-path verification, slash-command verbs, the live one-time bootstrap
-import, and the (opt-in, publish-last) GitHub publish** (Plans 5–8). Treat anything
+The **human-correction path is built**: `memory_lib.set_pinned`/`set_verified`, the
+`memory_inbox` importer (directive lines → DB, file cleared, free-text preserved),
+the `memory_cli` (recall/pin/verify/edit/inbox), and the five `commands/memory-*.md`
+slash commands. **Plugin packaging scaffolded:** `.claude-plugin/plugin.json` +
+`marketplace.json` manifests, `LICENSE` (MIT), `config.example`, and a
+`test_no_hardcoded_paths` guard enforcing the project-agnostic invariant (§3.1).
+Still future (needs a live cutover / settings authorization): **MCP reachability
+wiring + 3-path verification, the live one-time DB-canonical write-path cutover (the
+slash commands write to the DB; making the DB the canonical store retiring the
+harness `*.md` writes is the remaining flip), and the (opt-in, publish-last) GitHub
+publish** (Plans 5–8). Treat anything
 described here as "future" until its plan lands.
 
 A full adversarial audit of the engine ran on 2026-05-30 (verdict

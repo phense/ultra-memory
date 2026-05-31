@@ -241,3 +241,31 @@ def delete(conn, *, id, reason, tier, ts):
 
     _write_txn(conn, work, spool={
         "op": "delete", "id": id, "reason": reason, "tier": tier, "ts": ts})
+
+
+def set_pinned(conn, *, id, pinned, ts, reason="manual pin"):
+    """Set/clear a memory's pinned flag. Pinned memories are injected into every
+    SessionStart rehydration gist, so this is human-settable (spec §14). Audited."""
+    def work():
+        prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
+        if prior is None:
+            raise KeyError(f"set_pinned: no memory with id {id!r}")
+        conn.execute("UPDATE memories SET pinned=? WHERE id=?", (1 if pinned else 0, id))
+        _audit(conn, op="pin" if pinned else "unpin", target_kind="memory",
+               target_id=id, reason=reason, prior=dict(prior), ts=ts)
+
+    _write_txn(conn, work, spool={
+        "op": "set_pinned", "id": id, "pinned": bool(pinned), "ts": ts, "reason": reason})
+
+
+def set_verified(conn, *, id, ts, reason="manual verify"):
+    """Stamp last_verified=ts (a human reconfirmed the memory is still true). Audited."""
+    def work():
+        prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
+        if prior is None:
+            raise KeyError(f"set_verified: no memory with id {id!r}")
+        conn.execute("UPDATE memories SET last_verified=? WHERE id=?", (ts, id))
+        _audit(conn, op="verify", target_kind="memory", target_id=id,
+               reason=reason, prior=dict(prior), ts=ts)
+
+    _write_txn(conn, work, spool={"op": "set_verified", "id": id, "ts": ts, "reason": reason})
