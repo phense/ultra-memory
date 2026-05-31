@@ -463,6 +463,80 @@ def set_verified(conn, *, id, ts, reason="manual verify"):
 
 
 # ---------------------------------------------------------------------------
+# SP-7 GENERIC engine support (the substrate the Trading-side aggressive
+# self-improvement loop COMPOSES — never the loop itself). These two primitives
+# are PROJECT-AGNOSTIC: they name no Trading concept and enforce NO "protected
+# row" policy (the SP-7 wall — "human/pinned is immutable" — lives wholly in the
+# CONSUMER, which decides WHICH rows to call these on). The engine just provides
+# the audited/spooled/replayable write surface, mirroring set_pinned/set_verified.
+# ---------------------------------------------------------------------------
+
+
+def set_outcome_weight(conn, *, id, weight, ts, reason="outcome aggregate"):
+    """Set `memories.outcome_weight = weight` (FIRST writer of the 0004 column —
+    until now it was read-only/inert at its 1.0 default in unified ranking). SP-7's
+    deterministic EWMA outcome aggregate writes its regression signal through here;
+    a sub-1.0 weight demotes a unit's recall rank, a >1.0 weight promotes it. The
+    engine does NOT compute or bound the weight (that is the consumer's aggregate);
+    it just persists whatever it is handed. Audited; spooled + replayable like every
+    other write."""
+    def work():
+        prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
+        if prior is None:
+            raise KeyError(f"set_outcome_weight: no memory with id {id!r}")
+        conn.execute("UPDATE memories SET outcome_weight=? WHERE id=?", (weight, id))
+        _audit(conn, op="outcome_weight", target_kind="memory", target_id=id,
+               reason=reason, prior=dict(prior), ts=ts)
+
+    _write_txn(conn, work, spool={
+        "op": "set_outcome_weight", "id": id, "weight": weight, "ts": ts,
+        "reason": reason})
+
+
+# The status lifecycle the engine knows. SP-7 ADDS 'quarantined' (a contradictory
+# pair the loop demotes pending human adjudication) and 'reverted' (a regressed
+# auto-edited unit rolled back) to the pre-existing active/redirect/deleted. A row
+# in ANY non-'active' status is excluded from recall by default (query_memories'
+# include_statuses=('active',) + the rehydrate gist's status='active' filters), so
+# a flip-to-quarantined/reverted drops the unit out of recall AUTOMATICALLY — no
+# recall-query change. GENERIC: no "protected row" check here (the consumer's wall).
+_KNOWN_STATUSES = ("active", "redirect", "deleted", "quarantined", "reverted")
+
+
+def set_status(conn, *, id, status, ts, reason):
+    """Set `memories.status = status`, validated against `_KNOWN_STATUSES`. Lets the
+    SP-7 consumer demote a contradictory pair to 'quarantined' and a regressed unit
+    to 'reverted' — both of which then drop out of recall by default (see
+    `_KNOWN_STATUSES`). Raises ValueError on an unknown status value (a typo must not
+    silently park a row in a status nothing filters on).
+
+    GENERIC by design: it enforces NO "protected row" policy — it will flip ANY id's
+    status, including a human/pinned row. The SP-7 safety wall ("never auto-touch a
+    human-authored or pinned unit") is the CONSUMER's responsibility; the engine is
+    the dumb, audited write surface. Audited; spooled + replayable.
+
+    (`consolidate`/`delete` keep their own dedicated verbs — they set side fields too,
+    `supersedes` resp. a tiered tombstone reason — so this is for the pure
+    status flips, principally the new quarantined/reverted demotions.)"""
+    if status not in _KNOWN_STATUSES:
+        raise ValueError(
+            f"set_status: unknown status {status!r} "
+            f"(expected one of {_KNOWN_STATUSES})")
+
+    def work():
+        prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
+        if prior is None:
+            raise KeyError(f"set_status: no memory with id {id!r}")
+        conn.execute("UPDATE memories SET status=?, updated_at=? WHERE id=?",
+                     (status, ts, id))
+        _audit(conn, op="set_status", target_kind="memory", target_id=id,
+               reason=reason, prior=dict(prior), ts=ts)
+
+    _write_txn(conn, work, spool={
+        "op": "set_status", "id": id, "status": status, "ts": ts, "reason": reason})
+
+
+# ---------------------------------------------------------------------------
 # The `links` cross-store edge spine (SP-3 Stage 3, D5/D6). `record_link` is the
 # FIRST writer the `links` table ever gets (north-star Risk §14.8: defined + read
 # via memory_query._links_for, but never written). The edge KEY is
@@ -630,6 +704,7 @@ def replay_spool(conn, *, spool_dir=None):
         "record_access": record_access, "consolidate": consolidate, "delete": delete,
         "set_pinned": set_pinned, "set_verified": set_verified,
         "backfill_topic": backfill_topic, "record_link": record_link,
+        "set_outcome_weight": set_outcome_weight, "set_status": set_status,
     }
     for f in sorted(target.glob("*.json")):
         try:
