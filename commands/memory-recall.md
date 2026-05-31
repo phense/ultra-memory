@@ -6,7 +6,8 @@ Recall memories matching: **$ARGUMENTS**
 Run (needs `ULTRA_MEMORY_DB` set and the `retrieval` extra installed for the embedder):
 
 ```bash
-uv run --directory "${CLAUDE_PLUGIN_ROOT}" python -m ultra_memory.memory_cli recall --query "$ARGUMENTS" --top-k 5
+uv run --directory "$CLAUDE_PLUGIN_ROOT" --python "$CLAUDE_PLUGIN_DATA/venv/bin/python" \
+  python -m ultra_memory.memory_cli recall --query "$ARGUMENTS" --top-k 5
 ```
 
 Then summarize the returned JSON `results` for the user — each hit's `title` + `snippet` + `score`, cited by its `id`. Flag any hit marked `"stale": true` as possibly outdated. This is the human/orchestrator read path; subagents recall through the read-scoped `knowledge` MCP instead.

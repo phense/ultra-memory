@@ -11,7 +11,8 @@ Edit the memory: **$ARGUMENTS** (an id, plus the correction the user described).
    ```
 2. Apply it through the gateway (type/title/all other fields are preserved; only the body changes):
    ```bash
-   uv run --directory "${CLAUDE_PLUGIN_ROOT}" python -m ultra_memory.memory_cli edit --id "<id>" --from-file "$tmp"
+   uv run --directory "$CLAUDE_PLUGIN_ROOT" --python "$CLAUDE_PLUGIN_DATA/venv/bin/python" \
+     python -m ultra_memory.memory_cli edit --id "<id>" --from-file "$tmp"
    rm -f "$tmp"
    ```
 

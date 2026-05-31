@@ -6,8 +6,10 @@ Pin/unpin the memory: **$ARGUMENTS** (an id, optionally followed by the word `un
 Decide the flag from the argument, then run ONE of:
 
 ```bash
-uv run --directory "${CLAUDE_PLUGIN_ROOT}" python -m ultra_memory.memory_cli pin --id "<id>"
-uv run --directory "${CLAUDE_PLUGIN_ROOT}" python -m ultra_memory.memory_cli pin --id "<id>" --unpin
+uv run --directory "$CLAUDE_PLUGIN_ROOT" --python "$CLAUDE_PLUGIN_DATA/venv/bin/python" \
+  python -m ultra_memory.memory_cli pin --id "<id>"
+uv run --directory "$CLAUDE_PLUGIN_ROOT" --python "$CLAUDE_PLUGIN_DATA/venv/bin/python" \
+  python -m ultra_memory.memory_cli pin --id "<id>" --unpin
 ```
 
 (Needs `ULTRA_MEMORY_DB` set.) Confirm the result line to the user. Pinning is the human-settable knob that controls SessionStart injection — use it deliberately.
