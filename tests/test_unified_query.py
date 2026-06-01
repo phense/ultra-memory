@@ -378,12 +378,18 @@ def test_fence5b_best_rank_no_double_count():
 # ---------------------------------------------------------------------------
 
 def test_knowledge_doc_text_uses_bm25_text_full_body():
-    row = {"title": "T", "snippet": "short preview", "frontmatter": "{}",
+    row = {"title": "T",
+           "snippet": "short preview",
+           "frontmatter": '{"tags": ["frontmatteronlyterm"]}',
            "bm25_text": "the full collapsed body with a back-half quokkasaurus term"}
     doc = unified_query._knowledge_doc_text(row)
     assert "quokkasaurus" in doc          # the full body is the BM25 document
     assert "short preview" not in doc     # snippet is NOT used when bm25_text exists
-    assert "T" in doc and "{}" in doc     # title + frontmatter still present
+    assert "T" in doc                     # title still present (high-signal)
+    # SP-6 stage-3 parity fix: the frontmatter is DROPPED from the BM25 document so a
+    # frontmatter-only tag/type term cannot produce a spurious tag-match hit — this
+    # aligns the engine's BM25 document with wiki_query's rendered-body BM25.
+    assert "frontmatteronlyterm" not in doc
 
 
 def test_knowledge_doc_text_falls_back_to_snippet_when_bm25_text_null():
@@ -412,6 +418,48 @@ def test_knowledge_candidates_ranks_back_half_term_via_bm25_text(tmp_path):
     bm25_ranked, _embed_ranked, by_slug = unified_query._knowledge_candidates(
         conn, "quokkasaurus", agent_topics={"trading"}, embedder=None, dim=3)
     assert "longpage" in bm25_ranked
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# SP-6 stage-3 parity fix — the BM25 document is title + body only; a query term
+# that matches ONLY a page's frontmatter (tags/type) must NOT produce a spurious
+# tag-match hit (the SP-5 parity divergence that forced θ_OVERLAP down to 0.50).
+# ---------------------------------------------------------------------------
+
+def test_knowledge_candidates_frontmatter_only_term_does_not_hit(tmp_path):
+    """A query term present ONLY in a page's frontmatter (here the tag value
+    'macro', absent from title + body) must NOT surface the page as a knowledge
+    candidate — before the fix the frontmatter was part of the BM25 document, so
+    'macro' produced a spurious near-zero-relevance tail hit, diverging from
+    Trading's wiki_query (which BM25s the rendered body, not the frontmatter)."""
+    conn = _db(tmp_path)
+    # The frontmatter (built by _add_knowledge) carries page_type/title only, so we
+    # seed the tag-only term via a body whose RENDERED text omits it: the term lives
+    # purely in the JSON frontmatter, never in title/snippet/bm25_text.
+    fm = json.dumps({"type": "concept", "title": "Carry Trade",
+                     "tags": ["macro"]}, sort_keys=True)
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute(
+        "INSERT INTO unified_index (slug, topic, page_type, title, snippet, "
+        "frontmatter, path, content_sha256, updated_at, bm25_text) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("kn_carry", "trading", "concept", "Carry Trade",
+         "funding currency interest-rate differential",
+         fm, "/wiki/trading/kn_carry.md", "sha-kn_carry",
+         "2026-05-01T00:00:00",
+         "the carry trade captures the funding currency interest-rate differential"))
+    conn.execute("COMMIT")
+
+    bm25_ranked, _embed, _by = unified_query._knowledge_candidates(
+        conn, "macro", agent_topics={"trading"}, embedder=None, dim=3)
+    # 'macro' is only in the frontmatter tags -> no BM25 hit after the fix.
+    assert "kn_carry" not in bm25_ranked
+
+    # Counterpart: a term in the title/body still ranks the page normally.
+    bm25_body, _e2, _b2 = unified_query._knowledge_candidates(
+        conn, "funding currency", agent_topics={"trading"}, embedder=None, dim=3)
+    assert "kn_carry" in bm25_body
     conn.close()
 
 

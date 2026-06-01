@@ -215,12 +215,21 @@ best-rank-per-backend RRF, weighted by `outcome_weight` (inert 1.0). No LLM.
 > memory-store byte-identity (below) *is* enforced here.
 >
 > **SP-6 (D11) — BM25 document is the FULL body.** `_knowledge_doc_text(row)`
-> indexes `title + bm25_text + frontmatter`, where `bm25_text` is the full
-> collapsed page body (migration `0005`), **not** the ~400-char `snippet`. This
-> matches `wiki_query`'s full-text BM25 so a query term in a page's back half
-> ranks — closing the SP-5 parity tail-divergence (the SP-5 test loosened θ to
-> tolerate the old snippet-cap). Falls back to `snippet` for `NULL`/pre-0005 rows
-> (back-compat). The ranking math is unchanged (BM25 `b=0.75` length-norm).
+> indexes `title + bm25_text` (the **frontmatter is dropped** — SP-6 stage-3 parity
+> fix; see below), where `bm25_text` is the full collapsed page body (migration
+> `0005`), **not** the ~400-char `snippet`. This matches `wiki_query`'s full-text
+> BM25 so a query term in a page's back half ranks — closing the SP-5 parity
+> tail-divergence (the SP-5 test loosened θ to tolerate the old snippet-cap). Falls
+> back to `snippet` for `NULL`/pre-0005 rows (back-compat). The ranking math is
+> unchanged (BM25 `b=0.75` length-norm).
+>
+> **SP-6 stage-3 parity fix — frontmatter dropped from the BM25 document.** The page
+> `frontmatter` was part of the document, so a query term that matched ONLY a
+> `tags:`/`type:` value (e.g. `"macro"` in `tags: [..., macro]`) produced a spurious
+> near-zero-relevance tail hit, diverging from `wiki_query` (which BM25s the RENDERED
+> body, not the frontmatter). The document is now `title + body` only; the high-signal
+> `title` stays, the frontmatter noise is gone. Embedding side + ranking math
+> unchanged.
 
 - `unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
   top_k=5, dim=EMBED_DIM, now_ts=None, ts=None, audit=True) -> [dict]` — resolve
