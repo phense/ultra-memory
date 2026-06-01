@@ -112,6 +112,53 @@ def test_record_access_nonmemory_only_logs(tmp_path):
     conn.close()
 
 
+def test_record_access_writes_session_id(tmp_path):
+    """SP-8 substrate: record_access threads an optional session_id into the new
+    access_log column; it stays NULL when the kwarg is omitted (backward-compatible)."""
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00")
+    memory_lib.record_access(conn, target_kind="memory", target_id="m1",
+                             ts="2026-05-30T10:05:00", session_id="S-abc")
+    memory_lib.record_access(conn, target_kind="memory", target_id="m1",
+                             ts="2026-05-30T10:06:00")  # no session_id -> NULL
+    rows = conn.execute(
+        "SELECT session_id FROM access_log WHERE target_id='m1' ORDER BY id"
+    ).fetchall()
+    assert rows[0]["session_id"] == "S-abc"
+    assert rows[1]["session_id"] is None
+    conn.close()
+
+
+def test_record_access_spools_and_replays_session_id(tmp_path):
+    """SP-8 substrate: a record_access spool record carries session_id, and
+    replay_spool re-applies it into the column (the SQLITE_BUSY-casualty path)."""
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00")
+    spool = memory_lib._spool_dir(conn)
+    spool.mkdir(parents=True, exist_ok=True)
+    rec = {"op": "record_access", "target_kind": "memory", "target_id": "m1",
+           "ts": "2026-05-30T10:07:00", "context": "unified_recall:subagent",
+           "session_id": "S-spooled"}
+    (spool / "rec.json").write_text(json.dumps(rec), encoding="utf-8")
+    summary = memory_lib.replay_spool(conn)
+    assert summary["replayed"] == 1 and summary["failed"] == 0
+    row = conn.execute(
+        "SELECT session_id FROM access_log WHERE target_id='m1'").fetchone()
+    assert row["session_id"] == "S-spooled"
+    conn.close()
+
+
+def test_session_id_from_env_reads_var(tmp_path):
+    """SP-8 substrate: session_id_from_env returns the stripped
+    ULTRA_MEMORY_SESSION_ID, or None when unset/blank (generic, no Trading concept)."""
+    assert memory_lib.session_id_from_env({}) is None
+    assert memory_lib.session_id_from_env({"ULTRA_MEMORY_SESSION_ID": "  "}) is None
+    assert memory_lib.session_id_from_env(
+        {"ULTRA_MEMORY_SESSION_ID": "  S-99 "}) == "S-99"
+
+
 def test_consolidate_redirects_without_deleting(tmp_path):
     conn = _db(tmp_path)
     memory_lib.save_memory(conn, id="dup", type="reference", title="t", body="b",

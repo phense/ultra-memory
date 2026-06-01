@@ -551,3 +551,59 @@ def test_unified_recall_audits_each_hit(tmp_path):
     ).fetchone()["c"]
     assert n >= 2  # at least the memory + the knowledge hit
     conn.close()
+
+
+def test_unified_recall_threads_session_id_from_env(tmp_path, monkeypatch):
+    """SP-8 substrate: when ULTRA_MEMORY_SESSION_ID is set, each audited recall hit
+    carries it on the access_log row (the recalled-by-session substrate)."""
+    conn = _db(tmp_path)
+    _save(conn, id="m1", type="reference", title="rate", body="rate note",
+          topic="trading")
+    _add_knowledge(conn, slug="kn1", topic="trading", title="Rates",
+                   snippet="rate curve note")
+    emb = _fake_embedder({"rate": [1.0, 0.0, 0.0]})
+    monkeypatch.setenv("ULTRA_MEMORY_SESSION_ID", "SESS-42")
+    unified_query.unified_recall(
+        conn, "rate", caller_class="subagent", agent_topics={"trading"},
+        embedder=emb, dim=3, top_k=5, now_ts="2026-05-02T00:00:00",
+        ts="2026-05-02T00:00:00")
+    rows = conn.execute("SELECT session_id FROM access_log").fetchall()
+    assert rows and all(r["session_id"] == "SESS-42" for r in rows)
+    conn.close()
+
+
+def test_unified_recall_session_id_null_when_env_unset(tmp_path, monkeypatch):
+    """SP-8 substrate, graceful-None: no ULTRA_MEMORY_SESSION_ID -> the access is
+    logged with NULL session_id (harmless, no attribution) and the recall never errors."""
+    conn = _db(tmp_path)
+    _save(conn, id="m1", type="reference", title="rate", body="rate note",
+          topic="trading")
+    _add_knowledge(conn, slug="kn1", topic="trading", title="Rates",
+                   snippet="rate curve note")
+    emb = _fake_embedder({"rate": [1.0, 0.0, 0.0]})
+    monkeypatch.delenv("ULTRA_MEMORY_SESSION_ID", raising=False)
+    out = unified_query.unified_recall(
+        conn, "rate", caller_class="subagent", agent_topics={"trading"},
+        embedder=emb, dim=3, top_k=5, now_ts="2026-05-02T00:00:00",
+        ts="2026-05-02T00:00:00")
+    assert out  # recall still works
+    rows = conn.execute("SELECT session_id FROM access_log").fetchall()
+    assert rows and all(r["session_id"] is None for r in rows)
+    conn.close()
+
+
+def test_unified_recall_memory_only_threads_session_id(tmp_path, monkeypatch):
+    """SP-8 substrate: the memory-only byte-identity path also threads the session id
+    (it goes through the same _audit_hits funnel)."""
+    conn = _db(tmp_path)
+    _save(conn, id="m1", type="reference", title="rate", body="rate note",
+          topic="trading")
+    emb = _fake_embedder({"rate": [1.0, 0.0, 0.0]})
+    monkeypatch.setenv("ULTRA_MEMORY_SESSION_ID", "SESS-MO")
+    unified_query.unified_recall(
+        conn, "rate", caller_class="subagent", agent_topics={"trading"},
+        embedder=emb, dim=3, top_k=5, now_ts="2026-05-02T00:00:00",
+        ts="2026-05-02T00:00:00")
+    rows = conn.execute("SELECT session_id FROM access_log").fetchall()
+    assert rows and all(r["session_id"] == "SESS-MO" for r in rows)
+    conn.close()

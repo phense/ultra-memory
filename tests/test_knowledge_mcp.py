@@ -169,6 +169,40 @@ def test_caller_class_from_env_fails_closed():
         {"ULTRA_MEMORY_CALLER_CLASS": "  owner "}) == "owner"
 
 
+def test_knowledge_recall_threads_session_id_from_env(tmp_path, monkeypatch):
+    """SP-8 substrate: the knowledge MCP recall site stamps the env session id onto
+    each audited access_log row; unset env -> NULL session_id (graceful, no error)."""
+    conn = _db(tmp_path)
+    _save(conn, id="proj", type="project", title="p", body="proj fact")
+    monkeypatch.setenv("ULTRA_MEMORY_SESSION_ID", "K-SESS")
+    out = knowledge_mcp.knowledge_recall(
+        conn, "proj", caller_class="subagent", embedder=_flat_embedder(), dim=3,
+        now_ts="2026-05-02T00:00:00", ts="2026-05-02T00:00:00")
+    assert out
+    rows = conn.execute("SELECT session_id FROM access_log").fetchall()
+    assert rows and all(r["session_id"] == "K-SESS" for r in rows)
+    # unset -> NULL, still no error
+    monkeypatch.delenv("ULTRA_MEMORY_SESSION_ID", raising=False)
+    conn.execute("DELETE FROM access_log")
+    knowledge_mcp.knowledge_recall(
+        conn, "proj", caller_class="subagent", embedder=_flat_embedder(), dim=3,
+        now_ts="2026-05-02T00:01:00", ts="2026-05-02T00:01:00")
+    rows2 = conn.execute("SELECT session_id FROM access_log").fetchall()
+    assert rows2 and all(r["session_id"] is None for r in rows2)
+    conn.close()
+
+
+def test_session_id_from_env_mirrors_caller_class_pattern():
+    """SP-8 substrate: session_id_from_env is the generic env-read mirror of
+    caller_class_from_env — stripped ULTRA_MEMORY_SESSION_ID or None. Exposed from
+    knowledge_mcp next to caller_class_from_env (re-export of memory_lib's canonical)."""
+    assert knowledge_mcp.session_id_from_env({}) is None
+    assert knowledge_mcp.session_id_from_env(
+        {"ULTRA_MEMORY_SESSION_ID": ""}) is None
+    assert knowledge_mcp.session_id_from_env(
+        {"ULTRA_MEMORY_SESSION_ID": " S-1 "}) == "S-1"
+
+
 def test_db_path_from_env_required(tmp_path):
     """The DB path comes from config (ULTRA_MEMORY_DB), never cwd. Missing → raises."""
     import pytest

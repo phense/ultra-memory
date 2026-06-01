@@ -67,12 +67,18 @@ def knowledge_recall(conn, query, *, caller_class, embedder, top_k=5, dim=None,
         if len(out) >= top_k:
             break
     # Audit every recall with the caller's identity so exfiltration is traceable.
+    # SP-8 substrate (§5.1): also thread the GENERIC session id (env, graceful-None)
+    # onto each row, so a later attribution step can join recall → session outcome.
+    # Unset env → NULL session_id → harmless (no attribution possible), never errors.
     audit_ts = ts or now_ts
     if audit and audit_ts:
+        import os
+        session_id = session_id_from_env(os.environ)
         for item in out:
             memory_lib.record_access(
                 conn, target_kind="memory", target_id=item["id"],
-                ts=audit_ts, context=f"knowledge_recall:{caller_class}")
+                ts=audit_ts, context=f"knowledge_recall:{caller_class}",
+                session_id=session_id)
     return out
 
 
@@ -141,6 +147,13 @@ def caller_class_from_env(env):
     is the untrusted 'subagent' (SAFE_TYPES only)."""
     cc = (env.get("ULTRA_MEMORY_CALLER_CLASS") or "").strip()
     return cc or "subagent"
+
+
+# SP-8 substrate (§5.1): the generic session-id env read, sibling of
+# `caller_class_from_env`. The canonical implementation lives in `memory_lib` (the
+# lowest layer, where `record_access` consumes it — no import cycle); re-exported
+# here so the recall path's env-dimension reads sit side by side.
+session_id_from_env = memory_lib.session_id_from_env
 
 
 def db_path_from_env(env):

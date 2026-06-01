@@ -439,7 +439,13 @@ def _audit_hits(conn, results, *, caller_class, ts, now_ts, audit, memory_only):
     audit_ts = ts or now_ts
     if not (audit and audit_ts):
         return
+    import os
+
     from . import memory_lib
+    # SP-8 substrate (§5.1): thread the GENERIC session id (env, graceful-None) onto
+    # every audited recall row, so a later attribution step can ask "which session
+    # recalled this unit?". Unset env → NULL → harmless (no attribution), never errors.
+    session_id = memory_lib.session_id_from_env(os.environ)
     for item in results:
         if memory_only or item.get("source_kind") == "memory":
             tk, tid = "memory", item["id"]
@@ -448,7 +454,7 @@ def _audit_hits(conn, results, *, caller_class, ts, now_ts, audit, memory_only):
         try:
             memory_lib.record_access(
                 conn, target_kind=tk, target_id=tid, ts=audit_ts,
-                context=f"unified_recall:{caller_class}")
+                context=f"unified_recall:{caller_class}", session_id=session_id)
         except Exception:
             pass
 

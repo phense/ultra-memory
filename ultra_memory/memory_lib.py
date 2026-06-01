@@ -320,12 +320,27 @@ def record_session_event(conn, *, session_id, kind, title, ts,
     return key
 
 
-def record_access(conn, *, target_kind, target_id, ts, context=None):
-    """Append-only access log + atomic access_count increment (memory targets only)."""
+def session_id_from_env(env):
+    """SP-8 substrate (§5.1): the GENERIC session-id env read, the exact mirror of
+    `knowledge_mcp.caller_class_from_env`. Returns the stripped
+    `ULTRA_MEMORY_SESSION_ID` or None (unset/blank). Project-agnostic — the engine
+    learns *a* session id string, never that it is "Trading"."""
+    sid = (env.get("ULTRA_MEMORY_SESSION_ID") or "").strip()
+    return sid or None
+
+
+def record_access(conn, *, target_kind, target_id, ts, context=None, session_id=None):
+    """Append-only access log + atomic access_count increment (memory targets only).
+
+    `session_id` (SP-8 substrate, §5.1) records WHICH SESSION recalled this unit — a
+    generic opaque string (NULL when the caller didn't supply one = the pre-cutover /
+    no-attribution state). It is the harmless substrate the usage-outcome attribution
+    needs; it has NO ranking effect here."""
     def work():
         conn.execute(
-            "INSERT INTO access_log (target_kind, target_id, ts, context) VALUES (?,?,?,?)",
-            (target_kind, target_id, ts, context),
+            "INSERT INTO access_log (target_kind, target_id, ts, context, session_id) "
+            "VALUES (?,?,?,?,?)",
+            (target_kind, target_id, ts, context, session_id),
         )
         if target_kind == "memory":
             conn.execute(
@@ -336,7 +351,7 @@ def record_access(conn, *, target_kind, target_id, ts, context=None):
 
     _write_txn(conn, work, spool={
         "op": "record_access", "target_kind": target_kind, "target_id": target_id,
-        "ts": ts, "context": context})
+        "ts": ts, "context": context, "session_id": session_id})
 
 
 def consolidate(conn, *, loser_id, canonical_id, reason, ts):

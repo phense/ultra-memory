@@ -81,6 +81,23 @@ def test_migrate_recovers_from_half_applied_migration(tmp_path):
     conn.close()
 
 
+def test_migrate_0006_adds_access_log_session_id(tmp_path):
+    """SP-8 substrate: migration 0006 adds a nullable session_id column to
+    access_log (additive, idempotent). A fresh DB reaches >=6 with the column
+    present; re-running is a no-op."""
+    conn = db.connect(tmp_path / "m.db")
+    v = db.migrate(conn, MIG)
+    assert v >= 6
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(access_log)")}
+    assert "session_id" in cols
+    # idempotent re-run
+    again = db.migrate(conn, MIG)
+    assert again == v
+    cols2 = {r[1] for r in conn.execute("PRAGMA table_info(access_log)")}
+    assert "session_id" in cols2
+    conn.close()
+
+
 def test_migrate_failed_migration_rolls_back_fully(tmp_path):
     """C3: a migration that fails partway must leave NEITHER a partial schema
     change NOR a bumped version — apply + version-bump are atomic."""
