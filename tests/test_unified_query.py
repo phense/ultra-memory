@@ -634,3 +634,111 @@ def test_unified_recall_memory_only_threads_session_id(tmp_path, monkeypatch):
     rows = conn.execute("SELECT session_id FROM access_log").fetchall()
     assert rows and all(r["session_id"] == "SESS-MO" for r in rows)
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# SP-8 bughunt FIX 1 — READ-PATH redaction on unified_recall (defense-in-depth).
+# Mirrors knowledge_recall (knowledge_mcp.py:60,62): a secret that entered the DB
+# by a path OTHER than the save_memory / wiki_sync write chokepoint must still be
+# redacted on the caller-facing title/snippet text of EVERY result.
+# ---------------------------------------------------------------------------
+
+_SECRET = "WEBSHARE_PASSWORD=q7xkfak2lm9p"
+_SECRET_VAL = "q7xkfak2lm9p"
+
+
+def test_fix1_unified_recall_redacts_memory_title_on_read_path(tmp_path):
+    """A secret that bypassed save_memory's write-time redaction (here injected via
+    raw SQL, as a migration/import would) must be redacted in the returned memory
+    `title` — and the fused (non byte-identity) path must run it too. We seed a
+    knowledge row so the fused path (line 408), NOT the byte-identity path, runs."""
+    conn = _db(tmp_path)
+    _save(conn, id="m1", type="reference", title="placeholder", body="rrfquery body",
+          topic="trading")
+    # Inject the secret AFTER save (bypassing the write chokepoint).
+    conn.execute("UPDATE memories SET title=? WHERE id=?", (_SECRET, "m1"))
+    # Seed a knowledge row so unified_index is non-empty → the FUSED path runs.
+    _add_knowledge(conn, slug="kn1", topic="trading", title="kn one",
+                   snippet="other rrfquery content")
+    emb = _fake_embedder({"rrfquery": [1.0, 0.0, 0.0]})
+    out = unified_query.unified_recall(
+        conn, "rrfquery", caller_class="orchestrator", agent_topics=None,
+        embedder=emb, dim=3, top_k=10, now_ts="2026-05-02T00:00:00", audit=False)
+    mem = [r for r in out if r.get("source_kind") == "memory"]
+    assert mem, "expected the memory hit in the fused result"
+    assert _SECRET_VAL not in mem[0]["title"]
+    assert "[REDACTED]" in mem[0]["title"]
+    conn.close()
+
+
+def test_fix1_unified_recall_redacts_knowledge_title_and_snippet(tmp_path):
+    """A secret stored in a unified_index row (free-form Edit → wiki page → here a
+    raw insert) must be redacted in the returned knowledge `title` AND `snippet`."""
+    conn = _db(tmp_path)
+    # A memory hit so the FUSED path is exercised (knowledge title=421, snippet=423).
+    _save(conn, id="m1", type="reference", title="rrfquery mem", body="rrfquery body",
+          topic="trading")
+    _add_knowledge(conn, slug="kn1", topic="trading",
+                   title=f"page {_SECRET}",
+                   snippet=f"snippet body rrfquery {_SECRET}")
+    emb = _fake_embedder({"rrfquery": [1.0, 0.0, 0.0]})
+    out = unified_query.unified_recall(
+        conn, "rrfquery", caller_class="orchestrator", agent_topics=None,
+        embedder=emb, dim=3, top_k=10, now_ts="2026-05-02T00:00:00", audit=False)
+    kn = [r for r in out if r.get("source_kind") == "knowledge"]
+    assert kn, "expected the knowledge hit in the fused result"
+    assert _SECRET_VAL not in kn[0]["title"]
+    assert _SECRET_VAL not in kn[0]["snippet"]
+    assert "[REDACTED]" in kn[0]["title"]
+    assert "[REDACTED]" in kn[0]["snippet"]
+    conn.close()
+
+
+def test_fix3_unified_recall_subagent_drops_links_to_forbidden_type(tmp_path):
+    """SP-8 bughunt FIX 3 on the unified surface: a subagent recalling an allowed
+    project memory must NOT receive, via `links`, the id/type of a forbidden
+    feedback memory the project memory links to."""
+    conn = _db(tmp_path)
+    _save(conn, id="proj", type="project", title="proj rrfquery", body="proj body",
+          topic="trading")
+    _save(conn, id="fb", type="feedback", title="how to work", body="feedback note",
+          topic="trading")
+    memory_lib.record_link(
+        conn, src_kind="memory", src_id="proj", predicate="references",
+        dst_kind="memory", dst_id="fb", dst_type="feedback",
+        ts="2026-05-01T00:00:00")
+    emb = _fake_embedder({"rrfquery": [1.0, 0.0, 0.0]})
+    # byte-identity path (no knowledge rows) — links travel on dict(m).
+    out = unified_query.unified_recall(
+        conn, "rrfquery", caller_class="subagent", agent_topics={"trading"},
+        embedder=emb, dim=3, top_k=10, now_ts="2026-05-02T00:00:00", audit=False)
+    proj = [r for r in out if r.get("id") == "proj"]
+    assert proj, "subagent must still recall the allowed project memory"
+    assert "fb" not in {l["dst_id"] for l in proj[0]["links"]}
+    assert "feedback" not in {l["dst_type"] for l in proj[0]["links"]}
+    # Orchestrator (full recall) still sees it.
+    out2 = unified_query.unified_recall(
+        conn, "rrfquery", caller_class="orchestrator", agent_topics=None,
+        embedder=emb, dim=3, top_k=10, now_ts="2026-05-02T00:00:00", audit=False)
+    proj2 = [r for r in out2 if r.get("id") == "proj"][0]
+    assert "fb" in {l["dst_id"] for l in proj2["links"]}
+    conn.close()
+
+
+def test_fix1_unified_recall_redacts_memory_only_byte_identity_path(tmp_path):
+    """The memory-only byte-identity path (unified_index empty) returns dict(m)
+    verbatim (line 369). A secret injected post-write must STILL be redacted in the
+    returned title there too."""
+    conn = _db(tmp_path)
+    _save(conn, id="m1", type="reference", title="placeholder", body="rate note",
+          topic="trading")
+    conn.execute("UPDATE memories SET title=? WHERE id=?", (_SECRET, "m1"))
+    emb = _fake_embedder({"rate": [1.0, 0.0, 0.0]})
+    # unified_index empty → byte-identity path.
+    out = unified_query.unified_recall(
+        conn, "rate", caller_class="orchestrator", agent_topics=None,
+        embedder=emb, dim=3, top_k=5, now_ts="2026-05-02T00:00:00", audit=False)
+    assert out, "expected the memory hit on the byte-identity path"
+    assert _SECRET_VAL not in out[0]["title"]
+    assert "[REDACTED]" in out[0]["title"]
+    conn.close()

@@ -48,6 +48,7 @@ import math
 import re
 
 from . import knowledge_mcp, memory_query, retrieval_core
+from .redact_secrets import strip_secrets
 
 _RRF_K = 60
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -366,7 +367,21 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
     # top_k: same order, same fields, same scores — byte-identical. (We still audit,
     # exactly as the knowledge MCP does.) This is the FU-4 single-store fence.
     if not bm25_ranked and not embed_ranked:
-        results = [dict(m) for m in mem_results[:top_k]]
+        results = []
+        for m in mem_results[:top_k]:
+            d = dict(m)
+            # Read-path redaction (defense-in-depth), mirroring knowledge_recall
+            # (knowledge_mcp.py:60): a secret that entered the DB by a path other
+            # than the save_memory write chokepoint is still caught here. Byte-
+            # identity to query_memories holds for secret-free titles (strip_secrets
+            # is a no-op on non-credential text).
+            d["title"] = strip_secrets(d.get("title") or "")
+            # Extend the type wall to the row's edges (FIX 3): an allowed row's
+            # `links` must not leak a forbidden endpoint's id/type to a subagent.
+            if "links" in d:
+                d["links"] = knowledge_mcp.filter_links_for_caller(
+                    conn, d["links"], caller_class=caller_class)
+            results.append(d)
         _audit_hits(conn, results, caller_class=caller_class,
                     ts=ts, now_ts=now_ts, audit=audit, memory_only=True)
         return results
@@ -405,12 +420,15 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
             results.append({
                 "source_kind": "memory",
                 "id": m["id"],
-                "title": m["title"],
+                # Read-path redaction (defense-in-depth), mirroring knowledge_recall.
+                "title": strip_secrets(m["title"] or ""),
                 "type": m["type"],
                 "status": m["status"],
                 "score": score,
                 "stale": m["stale"],
-                "links": m["links"],
+                # Extend the type wall to the row's edges (FIX 3).
+                "links": knowledge_mcp.filter_links_for_caller(
+                    conn, m["links"], caller_class=caller_class),
             })
         else:
             row = kn_by_slug[key]
@@ -418,9 +436,12 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
                 "source_kind": "knowledge",
                 "slug": row["slug"],
                 "topic": row["topic"],
-                "title": row["title"],
+                # Read-path redaction (defense-in-depth): the documented free-form
+                # `Edit` exception lets a secret reach a wiki page; redact it here
+                # (and wiki_sync redacts at population), mirroring knowledge_recall.
+                "title": strip_secrets(row["title"] or ""),
                 "page_type": row["page_type"],
-                "snippet": row["snippet"],
+                "snippet": strip_secrets(row["snippet"] or ""),
                 "path": row["path"],
                 "score": score,
             })

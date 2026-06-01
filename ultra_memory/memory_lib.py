@@ -275,6 +275,15 @@ def _event_key(session_id, ts, kind, title, detail=None):
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _redact_str_list(items):
+    """Redact each STRING element of a list through `strip_secrets`, preserving
+    order, length, and any non-string element verbatim. Returns the input
+    unchanged for a falsy/None input (mirrors strip_secrets' falsy contract)."""
+    if not items:
+        return items
+    return [strip_secrets(x) if isinstance(x, str) else x for x in items]
+
+
 def record_session_event(conn, *, session_id, kind, title, ts,
                          detail=None, files=None, refs=None, session_fields=None,
                          outcome_signal=None):
@@ -297,6 +306,12 @@ def record_session_event(conn, *, session_id, kind, title, ts,
     key = _event_key(session_id, ts, kind, title, detail)
     title = strip_secrets(title)
     detail = strip_secrets(detail)
+    # `files`/`refs` are persisted text too — the module docstring guarantees ALL
+    # persisted text passes through redact_secrets first. Redact each string element
+    # (here, not only in the INSERT) so the durable spool replay also carries the
+    # redacted form. Non-string elements (if any) are left untouched.
+    files = _redact_str_list(files)
+    refs = _redact_str_list(refs)
     sf = session_fields or {}
 
     def work():

@@ -10,9 +10,14 @@ from pathlib import Path
 
 from .redact_secrets import strip_secrets
 
+# `outcome_weight` is included (SP-7/SP-8): a set_outcome_weight write is
+# SEMANTICALLY meaningful — it changes recall ranking — so a weight change MUST
+# drive a re-export, or the git-committed rollback dump goes stale and a restore
+# reverts the weight. Pure access telemetry (access_count/last_accessed/
+# last_verified) stays EXCLUDED — reinforcement churn must not drive a commit.
 _STABLE_COLS = ("id", "type", "title", "description", "index_hook", "node_type",
                 "file_slug", "sort_order", "body", "status", "supersedes",
-                "origin_session_id", "topic", "created_by")
+                "origin_session_id", "topic", "created_by", "outcome_weight")
 
 
 def _content_hash(conn):
@@ -20,9 +25,11 @@ def _content_hash(conn):
     cols = ", ".join(_STABLE_COLS)
     for row in conn.execute(f"SELECT {cols} FROM memories ORDER BY id"):
         h.update(repr(tuple(row)).encode("utf-8"))
+    # `outcome_signal` is the session_event's semantically-meaningful attribution
+    # payload (the EWMA fold's evidence) — include it so a signal change re-exports.
     for row in conn.execute(
-            "SELECT event_key, kind, title, detail FROM session_events "
-            "ORDER BY event_key"):
+            "SELECT event_key, kind, title, detail, outcome_signal "
+            "FROM session_events ORDER BY event_key"):
         h.update(repr(tuple(row)).encode("utf-8"))
     return h.hexdigest()
 

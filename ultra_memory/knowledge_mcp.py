@@ -30,6 +30,68 @@ def allowed_types_for(caller_class):
     return ALL_TYPES if caller_class in _TRUSTED else SAFE_TYPES
 
 
+def filter_links_for_caller(conn, links, *, caller_class):
+    """Apply the type wall to a memory row's `links` (the SIDEBAND past the
+    primary-row type wall). The type wall gates the PRIMARY row's type but NOT the
+    `dst_type`/`dst_id` of edges hanging off an allowed row — so a subagent
+    recalling an allowed project/reference memory that links to a user/feedback
+    memory would otherwise receive that forbidden memory's id+type.
+
+    A TRUSTED caller (orchestrator/owner) keeps ALL links unchanged. A type-scoped
+    caller (subagent/cron/unknown) keeps only edges whose BOTH endpoints
+    (src + dst, when the endpoint is a `memory`) resolve to an ALLOWED type.
+    FAIL-CLOSED: an endpoint whose type cannot be resolved (a dangling/unknown
+    memory id) → the edge is DROPPED. Non-`memory` endpoints (e.g. `knowledge`
+    wiki pages) are not type-walled and pass on that side.
+
+    Project-agnostic: resolves the endpoint type via the engine's own `memories`
+    table (`SELECT type FROM memories WHERE id=?`), no consumer import.
+    """
+    if links is None:
+        return links
+    allowed = set(allowed_types_for(caller_class))
+    # The full set ⇒ trusted: nothing to drop (and no per-edge DB hit).
+    if allowed >= set(ALL_TYPES):
+        return links
+
+    cache = {}
+
+    def _endpoint_allowed(kind, mid, declared_type):
+        # Only `memory` endpoints are type-walled (knowledge pages are not the
+        # secret-bearing user/feedback rows). A non-memory endpoint passes.
+        if kind != "memory":
+            return True
+        # Trust the live row's type over the edge's stored `*_type` (which can be
+        # stale / NULL) — re-read fail-closed, mirroring the SP-7 assert_mutable
+        # provenance discipline (the stored copy is a hint, the row is the truth).
+        if mid in cache:
+            t = cache[mid]
+        else:
+            row = conn.execute(
+                "SELECT type FROM memories WHERE id=?", (mid,)).fetchone()
+            t = row["type"] if row is not None else None
+            cache[mid] = t
+        if t is None:
+            return False  # unresolvable endpoint → fail-closed (drop)
+        return t in allowed
+
+    kept = []
+    for edge in links:
+        # `links` rows carry dst_kind/dst_id (+ dst_type); src is always this
+        # returned memory (`src_kind='memory'`), but guard the src side too if a
+        # src_kind/src_id ever travels on the edge dict.
+        if not _endpoint_allowed(edge.get("dst_kind"), edge.get("dst_id"),
+                                 edge.get("dst_type")):
+            continue
+        src_kind = edge.get("src_kind", "memory")
+        src_id = edge.get("src_id")
+        if src_id is not None and not _endpoint_allowed(
+                src_kind, src_id, edge.get("src_type")):
+            continue
+        kept.append(edge)
+    return kept
+
+
 def knowledge_recall(conn, query, *, caller_class, embedder, top_k=5, dim=None,
                      now_ts=None, ts=None, audit=True):
     """Recall memories for `query`, restricted to the caller_class's allowed types.
@@ -62,7 +124,10 @@ def knowledge_recall(conn, query, *, caller_class, embedder, top_k=5, dim=None,
             "snippet": strip_secrets(body or ""),
             "score": r["score"],
             "stale": r["stale"],
-            "links": r["links"],
+            # Extend the type wall to the row's edges: an allowed row's `links` must
+            # not leak the id/type of a forbidden user/feedback endpoint (FIX 3).
+            "links": filter_links_for_caller(
+                conn, r["links"], caller_class=caller_class),
         })
         if len(out) >= top_k:
             break
@@ -75,10 +140,17 @@ def knowledge_recall(conn, query, *, caller_class, embedder, top_k=5, dim=None,
         import os
         session_id = session_id_from_env(os.environ)
         for item in out:
-            memory_lib.record_access(
-                conn, target_kind="memory", target_id=item["id"],
-                ts=audit_ts, context=f"knowledge_recall:{caller_class}",
-                session_id=session_id)
+            # Best-effort audit (mirrors unified_query._audit_hits): record_access
+            # goes through _write_txn, which can raise (e.g. WriteSpooled under write
+            # contention) — that must NOT turn a SUCCEEDED read into a recall error
+            # on the read-only MCP. The read result survives an audit-write failure.
+            try:
+                memory_lib.record_access(
+                    conn, target_kind="memory", target_id=item["id"],
+                    ts=audit_ts, context=f"knowledge_recall:{caller_class}",
+                    session_id=session_id)
+            except Exception:
+                pass
     return out
 
 
