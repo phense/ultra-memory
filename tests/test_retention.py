@@ -1,3 +1,7 @@
+import sqlite3
+
+import pytest
+
 from ultra_memory import memory_lib, retention
 
 
@@ -88,4 +92,55 @@ def test_prune_preserves_referenced_outcome_event_but_prunes_unreferenced(tmp_pa
     # The contract JOIN the downstream EWMA fold runs still returns the evidence.
     joined = conn.execute(_CONTRACT_JOIN, ("m1",)).fetchall()
     assert [(r[0], r[1]) for r in joined] == [("2026-01-01T00:00:00Z", "trade_loss")]
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# FIX 2 — prune_session_events must route through the SAME bounded busy-retry as
+# memory_lib._write_txn. A raw BEGIN IMMEDIATE that hits a transient SQLITE_BUSY
+# (a writer holding the lock past the busy_timeout window) used to raise
+# "database is locked" immediately; it must now retry-with-backoff and succeed.
+# ---------------------------------------------------------------------------
+
+
+def _lock_holder(db_path):
+    """A 2nd connection holding the WAL write lock (BEGIN IMMEDIATE + a real write)
+    so any other writer's BEGIN IMMEDIATE gets SQLITE_BUSY until released."""
+    holder = sqlite3.connect(str(db_path))
+    holder.execute("PRAGMA journal_mode=WAL")
+    holder.execute("BEGIN IMMEDIATE")
+    holder.execute(
+        "INSERT INTO meta (key, value) VALUES ('lockprobe','1') "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    return holder
+
+
+def test_prune_retries_one_busy_then_succeeds(tmp_path, monkeypatch):
+    """FIX 2: a single transient SQLITE_BUSY on prune's BEGIN IMMEDIATE is retried
+    (after the lock releases during a backoff sleep) and the prune SUCCEEDS, instead
+    of raising 'database is locked'."""
+    db_path = tmp_path / "m.db"
+    conn = memory_lib.open_memory_db(str(db_path))
+    memory_lib.record_session_event(conn, session_id="s1", kind="task_done",
+                                    title="Old thing", ts="2026-01-01T00:00:00Z")
+    # Surface BUSY at once instead of waiting out the 30s busy_timeout.
+    conn.execute("PRAGMA busy_timeout=0")
+
+    holder = _lock_holder(db_path)
+    # Release the held lock on the FIRST backoff sleep so attempt #2 wins.
+    state = {"released": False}
+
+    def release_then_sleep(_secs):
+        if not state["released"]:
+            holder.rollback()
+            holder.close()
+            state["released"] = True
+
+    monkeypatch.setattr(memory_lib.time, "sleep", release_then_sleep)
+
+    deleted = retention.prune_session_events(conn, keep_days=30,
+                                             ts="2026-05-30T12:00:00Z")
+    assert state["released"], "the retry path must have been exercised (a sleep fired)"
+    assert deleted == 1
+    assert conn.execute("SELECT COUNT(*) FROM session_events").fetchone()[0] == 0
     conn.close()

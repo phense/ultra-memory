@@ -84,6 +84,25 @@ survives while raw rows stay bounded. Retention window: `maintain._KEEP_DAYS`
 (90d default); export dir defaults to `<db-dir>/memory_export/views`
 (override with `ULTRA_MEMORY_EXPORT_DIR`).
 
+**`maintain.run` is the write-spool drainer.** Before pruning/exporting, `maintain.run`
+calls `memory_lib.replay_spool(conn)` on its own connection — the single, serialized
+nightly entry is a safe single drainer (no concurrent double-apply of the
+non-idempotent `record_access` increment). This re-applies any busy-casualty write
+left in `<db-dir>/memory_spool/` (e.g. a Stop-hook `record_session_event` lost to a
+transient `SQLITE_BUSY`), so a spooled write self-heals on the next maintenance pass
+instead of rotting. The drain is the **only** production caller of `replay_spool`; the
+return carries a `spool_replay` summary `{replayed, failed, errors}`. Fail-open: a
+replay error is logged and maintenance continues into prune/export (it never aborts).
+
+**Bounded busy-retry for maintenance writes.** `retention.prune_session_events` and
+`maintain._set_meta` route their `BEGIN IMMEDIATE` through the same shared bounded
+retry-with-backoff discipline as the `memory_lib` write path
+(`memory_lib._with_immediate_retry`, the loop extracted from `_write_txn`). A transient
+`SQLITE_BUSY` from a writer holding the lock past the `busy_timeout` window is retried,
+not raised immediately. No spool is used for these (idempotent maintenance writes — a
+retry is enough); a final exhaustion still rolls back and is caught by `maintain.run`'s
+broad fail-open `try/except`.
+
 **SP-3 — `wiki_sync` inside the same throttle.** When `ULTRA_MEMORY_WIKI_ROOTS`
 is set, `maintain.run` also mirrors the Expert-Knowledge pages into `unified_index`
 (and embeds their `title+snippet` into the shared `embeddings` cache as
@@ -199,6 +218,13 @@ unknown/corrupt record rather than dropping it. Returns `{replayed, failed, erro
 The loud `WriteSpooled` failure still ensures the original loss is visible, not
 silent. (Hands-off operation should also wire `WriteSpooled` to an alert — see the
 spec's observability section.)
+
+**The drainer is `maintain.run`** (see *Maintenance* above): it calls `replay_spool`
+on its own connection at the top of every (non-throttled) run. Because maintenance is
+the single serialized nightly entry, it is a safe single drainer — no other writer
+double-applies a non-idempotent op concurrently. This is the only production caller of
+`replay_spool`, so a spooled busy-casualty write self-heals on the next maintenance
+pass rather than persisting indefinitely in `memory_spool/`.
 
 ## Redaction policy
 

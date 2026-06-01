@@ -391,9 +391,14 @@ def test_maintain_run_no_wiki_roots_is_byte_identical(tmp_path, monkeypatch):
     out = tmp_path / "export"
     res = maintain.run(conn, out_dir=str(out), ts="2026-05-31T12:00:00Z",
                        keep_days=90, force=True)
-    # Same keys/values as today (no wiki_sync summary added when roots are unset).
-    assert res == {"pruned": 0, "exported": True, "skipped": False}
+    # No wiki_sync summary added when roots are unset (the central no-wiki guarantee).
+    # The unconditional `spool_replay` summary (a no-op drain here) is the only other
+    # key — the wiki side of the contract is byte-identical to pre-Stage-5.
+    assert res["pruned"] == 0
+    assert res["exported"] is True
+    assert res["skipped"] is False
     assert "wiki_sync" not in res
+    assert res["spool_replay"] == {"replayed": 0, "failed": 0, "errors": []}
     # unified_index untouched.
     assert conn.execute("SELECT COUNT(*) FROM unified_index").fetchone()[0] == 0
     conn.close()
