@@ -10,8 +10,15 @@ from . import retrieval_core as rc
 
 _DEFAULT_STATUSES = ("active",)
 _TITLE_BOOST = 0.5
-_ACCESS_BOOST = 0.02      # per access, bounded
-_ACCESS_CAP = 10
+# NOTE (R4 #8 — self-reinforcing-loop fix): the recall-driven access_count popularity
+# boost was REMOVED from the relevance score. Every recall (incl. the warm auto-audit
+# path) bumps memories.access_count; feeding that back into the query ranking made a
+# frequently-recalled-but-marginal memory rank ever higher and lock out a genuinely-more-
+# relevant one (recall -> access_count -> rank -> recall). Relevance now ranks on cosine +
+# title-match + strength - staleness only (outcome_weight is applied at the fusion layer).
+# access_count is RETAINED for the SessionStart Hot-gist's ambient ordering (rehydrate.py),
+# which is not a recall-feedback ranking. Reintroduce a NON-feedback popularity signal
+# (e.g. explicit-recall-only) here if desired — Peter's call.
 _STALE_PENALTY = 0.2
 
 
@@ -146,7 +153,8 @@ def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
         if _title_hit(r["title"], query):
             score += _TITLE_BOOST
         score *= (r["strength"] if r["strength"] is not None else 1.0)
-        score += _ACCESS_BOOST * min(r["access_count"] or 0, _ACCESS_CAP)
+        # (R4 #8) NO access_count term here — see the constants note: recall must not
+        # feed its own ranking (the self-reinforcing relevance loop).
         age = _days_between(now_ts, r["updated_at"])
         stale = age > staleness_days
         if stale:

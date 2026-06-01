@@ -121,16 +121,39 @@ def test_query_empty_corpus_returns_empty(tmp_path):
     conn.close()
 
 
-def test_access_and_strength_boost_changes_order(tmp_path):
+def test_recall_access_does_not_reorder_ranking(tmp_path):
+    """R4 #8 — the self-reinforcing recall loop is BROKEN: recalling/accessing a memory
+    must NOT raise its own relevance ranking (recall -> access_count -> rank -> recall).
+    Two equally-relevant memories stay in their cosine/insertion tie-order no matter how
+    many times one is accessed; access_count no longer feeds the query score."""
     conn = _db(tmp_path)
     _save(conn, id="a", title="a", body="a doc")
     _save(conn, id="b", title="b", body="b doc")
-    # Identical embeddings → tie broken by access boost (b accessed more).
     emb = _fake_embedder({"a doc": [1.0, 0.0, 0.0], "b doc": [1.0, 0.0, 0.0],
                           "q": [1.0, 0.0, 0.0]})
-    for _ in range(5):
+    baseline = memory_query.query_memories(conn, "q", embedder=emb, dim=3,
+                                           now_ts="2026-05-02T00:00:00")
+    # Hammer b's access_count — under the old (buggy) boost this would float b to #1.
+    for _ in range(50):
         memory_lib.record_access(conn, target_kind="memory", target_id="b",
                                  ts="2026-05-02T00:00:00")
+    after = memory_query.query_memories(conn, "q", embedder=emb, dim=3,
+                                        now_ts="2026-05-02T00:00:00")
+    assert [r["id"] for r in after] == [r["id"] for r in baseline], (
+        "access_count must not reorder relevance ranking (loop broken)")
+    conn.close()
+
+
+def test_strength_multiplier_still_boosts_ranking(tmp_path):
+    """The strength multiplier (a non-recall-feedback signal) STILL affects ranking —
+    only the recall-driven access_count boost was removed by the R4 #8 loop fix."""
+    conn = _db(tmp_path)
+    _save(conn, id="a", title="a", body="a doc")
+    _save(conn, id="b", title="b", body="b doc")
+    emb = _fake_embedder({"a doc": [1.0, 0.0, 0.0], "b doc": [1.0, 0.0, 0.0],
+                          "q": [1.0, 0.0, 0.0]})
+    # Raise b's strength → b outranks a (strength is multiplicative, not recall-fed).
+    conn.execute("UPDATE memories SET strength=2.0 WHERE id='b'")
     out = memory_query.query_memories(conn, "q", embedder=emb, dim=3,
                                       now_ts="2026-05-02T00:00:00")
     assert out[0]["id"] == "b"
