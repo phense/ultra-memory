@@ -121,8 +121,17 @@ Every public function. The caller owns connections and supplies timestamps.
   ("never auto-touch a human/pinned unit") is the **consumer's** job. Audited;
   spooled + replayed.
 - `WriteSpooled` — raised when a write is spooled after retry exhaustion.
+- `_with_immediate_retry(conn, work, *, retries=5, base_delay=0.05, sleep=None)` —
+  the shared `BEGIN IMMEDIATE`/COMMIT bounded retry-with-backoff loop (§6 discipline).
+  `work()` may return a value (returned on success); on exhaustion raises
+  `_RetryExhausted` (the last busy error attached) so each caller picks its own
+  exhaustion policy. `sleep` is resolved at CALL time (default = live `time.sleep`), so
+  a `monkeypatch.setattr(memory_lib.time, "sleep", ...)` reaches the backoff even for
+  callers that don't expose a sleep param. Reused by `retention.prune_session_events`
+  and `maintain._set_meta` (the maintenance-write busy-retry).
 - `_write_txn(conn, work, *, spool=None, retries=5, base_delay=0.05,
-  sleep=time.sleep)` — the retry/spool transaction wrapper all writers use.
+  sleep=None)` — the retry/spool transaction wrapper all `memory_lib` writers use:
+  `_with_immediate_retry` plus a durable spool + loud `WriteSpooled` on exhaustion.
   (Internal, but documented because it is the §6 discipline.)
 
 ## `retrieval_core`
@@ -354,7 +363,10 @@ downstream consumer (Trading-side, not the engine) folds those edges into an EWM
 - `prune_session_events(conn, *, keep_days, ts) -> int` — roll `session_events`
   older than `keep_days` (relative to `ts`) into the owning `sessions.summary`
   (one digest line per event), then delete the rows in one `BEGIN IMMEDIATE`
-  transaction. Returns the count deleted; 0 (no-op) when nothing is old enough.
+  transaction routed through `memory_lib._with_immediate_retry` (the same bounded
+  busy-retry as the `memory_lib` write path — a transient `SQLITE_BUSY` is retried,
+  not raised immediately; no spool, idempotent maintenance write). Returns the count
+  deleted; 0 (no-op) when nothing is old enough.
   Bounds the table where the real growth is (spec §8 D11). **SP-8 bughunt:** an
   event still referenced by an SP-8 attribution edge (`links` row with
   `src_kind='session_event'`, predicate in `_ATTRIBUTION_PREDICATES` =
@@ -373,10 +385,16 @@ downstream consumer (Trading-side, not the engine) folds those edges into an EWM
   `wiki_roots=` (explicit) or the `ULTRA_MEMORY_WIKI_ROOTS` env seam
   (`os.pathsep`- or comma-separated). With **no roots** (a pure-memory deployment)
   the sync is skipped entirely and the return is byte-identical to pre-SP-3
-  (`{pruned, exported, skipped}`); with roots, the dict also carries a `wiki_sync`
-  summary (or `{"error": …}` — fail-open, never blocks). The embedder defaults to
-  the lazy fastembed one, degrading to `None` (rows still upsert) if the extra is
-  absent.
+  (`{pruned, exported, skipped, spool_replay}`); with roots, the dict also carries a
+  `wiki_sync` summary (or `{"error": …}` — fail-open, never blocks). The embedder
+  defaults to the lazy fastembed one, degrading to `None` (rows still upsert) if the
+  extra is absent. **r2 bughunt — write-spool drainer:** before prune/export, `run`
+  calls `memory_lib.replay_spool(conn)` on its own connection (the single serialized
+  drainer — no concurrent double-apply of the non-idempotent `record_access`), so a
+  busy-casualty write self-heals; the result carries a `spool_replay` summary
+  `{replayed, failed, errors}`. Fail-open: a replay error is logged and maintenance
+  continues. `_set_meta` (the `last_maintenance` stamp) routes through
+  `memory_lib._with_immediate_retry` (the same bounded busy-retry as the write path).
 
 ## `knowledge_mcp` (read-only MCP)
 

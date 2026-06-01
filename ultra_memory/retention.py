@@ -3,6 +3,8 @@ summary, then delete them. The summary keeps a durable digest; raw rows are
 bounded so session_events (where the real growth is) cannot grow unboundedly."""
 import datetime
 
+from . import memory_lib
+
 # Bound the rolled digest so sessions.summary can't grow unboundedly across runs.
 _SUMMARY_MAX_LINES = 200
 
@@ -39,15 +41,20 @@ def prune_session_events(conn, *, keep_days, ts):
     )
     # Snapshot + roll-up + delete all run inside ONE BEGIN IMMEDIATE so a row
     # inserted between selecting and deleting can't be deleted-without-archiving.
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    # Route through the engine's shared bounded busy-retry discipline (the same loop
+    # memory_lib._write_txn uses) so a transient SQLITE_BUSY from a writer holding the
+    # lock past the busy_timeout window is retried-with-backoff, not raised at once.
+    # work() is re-runnable: every attempt re-selects from scratch on a fresh txn
+    # (the prior attempt was rolled back), so the snapshot can't go stale. No spool —
+    # this is an idempotent maintenance write; a final exhaustion still raises (caught
+    # by maintain.run's broad try/except, preserving the existing fail-open behavior).
+    def work():
         old = conn.execute(
             "SELECT id, session_id, ts, kind, title FROM session_events "
             f"WHERE ts < ? AND {not_referenced} ORDER BY session_id, ts",
             (cutoff, *_ATTRIBUTION_PREDICATES)
         ).fetchall()
         if not old:
-            conn.execute("COMMIT")
             return 0
         by_session = {}
         for _id, sid, ets, kind, title in old:
@@ -65,9 +72,6 @@ def prune_session_events(conn, *, keep_days, ts):
         cur = conn.execute(
             f"DELETE FROM session_events WHERE ts < ? AND {not_referenced}",
             (cutoff, *_ATTRIBUTION_PREDICATES))
-        deleted = cur.rowcount
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
-    return deleted
+        return cur.rowcount
+
+    return memory_lib._with_immediate_retry(conn, work)

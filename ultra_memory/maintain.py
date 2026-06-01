@@ -35,15 +35,17 @@ def _get_meta(conn, key):
 
 
 def _set_meta(conn, key, value):
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    # Route through the engine's shared bounded busy-retry discipline (the same loop
+    # memory_lib._write_txn uses) so a transient SQLITE_BUSY from a writer holding the
+    # lock past the busy_timeout window is retried-with-backoff, not raised at once. No
+    # spool — this is an idempotent maintenance write; a final exhaustion still raises
+    # (caught by maintain.run's broad try/except, preserving fail-open behavior).
+    def work():
         conn.execute(
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
+
+    memory_lib._with_immediate_retry(conn, work)
 
 
 def _hours_between(earlier_z, later_z):
@@ -99,9 +101,22 @@ def run(conn, *, out_dir, ts=None, keep_days=_KEEP_DAYS, force=False,
                 return {"pruned": 0, "exported": False, "skipped": True}
         except ValueError:
             pass  # unparseable stamp -> proceed (self-heal)
+    # Drain the durable write-spool FIRST, on maintain's own connection. maintain.run
+    # is the serialized nightly entry, so it is a safe SINGLE drainer (no concurrent
+    # double-apply of the non-idempotent record_access increment). replay_spool
+    # re-applies each spooled write and unlinks its file on success; this is the ONLY
+    # production caller of replay_spool, so a busy-casualty write (e.g. a Stop-hook
+    # record_session_event lost to SQLITE_BUSY) self-heals here instead of rotting in
+    # memory_spool/. Fail-open: a replay error logs one line + continues into
+    # prune/export — never aborts maintenance (mirrors the wiki_sync seam below).
+    try:
+        result_replay = memory_lib.replay_spool(conn)
+    except Exception as exc:  # fail-open: a replay error never blocks maintenance
+        result_replay = {"error": str(exc)}
     pruned = retention.prune_session_events(conn, keep_days=keep_days, ts=ts)
     exported = memory_export.export_memory(conn, out_dir, ts=ts)
-    result = {"pruned": pruned, "exported": bool(exported), "skipped": False}
+    result = {"pruned": pruned, "exported": bool(exported), "skipped": False,
+              "spool_replay": result_replay}
 
     # SP-3 Stage 5 — wiki_sync, inside the throttle, fail-open. Skipped entirely
     # when no roots are configured (pure-memory deployments stay unaffected).

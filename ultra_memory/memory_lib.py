@@ -65,19 +65,37 @@ def _safe_rollback(conn):
         pass
 
 
-def _write_txn(conn, work, *, spool=None, retries=5, base_delay=0.05, sleep=time.sleep):
+class _RetryExhausted(Exception):
+    """Internal: BEGIN IMMEDIATE stayed SQLITE_BUSY across every bounded retry. Carries
+    the last busy error so callers can decide their own exhaustion policy (spool +
+    WriteSpooled for the memory write path; plain re-raise for maintenance writes)."""
+
+    def __init__(self, last):
+        self.last = last
+        super().__init__(str(last))
+
+
+def _with_immediate_retry(conn, work, *, retries=5, base_delay=0.05, sleep=None):
     """Run work() inside BEGIN IMMEDIATE/COMMIT with bounded retry-with-backoff on
-    SQLITE_BUSY (spec §6). work() must be re-runnable (it re-executes from scratch
-    each attempt; the prior attempt was rolled back). A non-busy error surfaces
-    immediately. On retry exhaustion the op is spooled durably and WriteSpooled is
-    raised loudly — never a silent drop."""
+    SQLITE_BUSY (spec §6) — the shared single-writer retry discipline. work() must be
+    re-runnable (it re-executes from scratch each attempt; the prior attempt was
+    rolled back) and may return a value (returned to the caller on success). A
+    non-busy error surfaces immediately. On retry exhaustion raises `_RetryExhausted`
+    (the last busy error attached) — the caller chooses its exhaustion policy.
+
+    `sleep` is resolved at CALL time (default = the live `time.sleep`) so a
+    `monkeypatch.setattr(memory_lib.time, "sleep", ...)` reaches the backoff even for
+    callers (retention.prune_session_events, maintain._set_meta) that don't expose an
+    injectable sleep param — the previous import-time default-binding did not."""
+    if sleep is None:
+        sleep = time.sleep
     last = None
     for attempt in range(retries):
         try:
             conn.execute("BEGIN IMMEDIATE")
-            work()
+            result = work()
             conn.execute("COMMIT")
-            return
+            return result
         except sqlite3.OperationalError as exc:
             _safe_rollback(conn)
             if not _is_busy(exc):
@@ -87,11 +105,25 @@ def _write_txn(conn, work, *, spool=None, retries=5, base_delay=0.05, sleep=time
         except Exception:
             _safe_rollback(conn)
             raise
-    _spool(conn, spool)
-    raise WriteSpooled(
-        f"write failed after {retries} retries (database busy); spooled for replay: "
-        f"{(spool or {}).get('op', '?')}"
-    ) from last
+    raise _RetryExhausted(last)
+
+
+def _write_txn(conn, work, *, spool=None, retries=5, base_delay=0.05, sleep=None):
+    """Run work() inside BEGIN IMMEDIATE/COMMIT with bounded retry-with-backoff on
+    SQLITE_BUSY (spec §6). work() must be re-runnable (it re-executes from scratch
+    each attempt; the prior attempt was rolled back). A non-busy error surfaces
+    immediately. On retry exhaustion the op is spooled durably and WriteSpooled is
+    raised loudly — never a silent drop. `sleep` defaults to the live `time.sleep`
+    (resolved at call time by `_with_immediate_retry`)."""
+    try:
+        _with_immediate_retry(conn, work, retries=retries, base_delay=base_delay,
+                              sleep=sleep)
+    except _RetryExhausted as exhausted:
+        _spool(conn, spool)
+        raise WriteSpooled(
+            f"write failed after {retries} retries (database busy); spooled for "
+            f"replay: {(spool or {}).get('op', '?')}"
+        ) from exhausted.last
 
 
 def open_memory_db(path, migrations_dir=_MIGRATIONS):

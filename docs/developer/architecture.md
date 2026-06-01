@@ -64,12 +64,21 @@ the canonical DB and retires the `remember` plugin.
 
 - **Single-writer discipline.** Each write opens its own short-lived transaction
   (`BEGIN IMMEDIATE` … `COMMIT`), wrapped by `_write_txn`, which:
-  - retries on `SQLITE_BUSY`/`database is locked` with exponential backoff,
+  - retries on `SQLITE_BUSY`/`database is locked` with exponential backoff
+    (the shared `_with_immediate_retry` loop),
   - rolls back defensively only when a transaction is actually active (no
     double-ROLLBACK masking the real error),
   - surfaces non-busy errors immediately,
   - on retry exhaustion spools the operation to `<db_dir>/memory_spool/<hash>.json`
     and raises `WriteSpooled` **loudly** — never a silent drop.
+- The retry loop is extracted as `_with_immediate_retry` so the **maintenance
+  writes** — `retention.prune_session_events` and `maintain._set_meta` — share the
+  same bounded busy-retry instead of a bare `BEGIN IMMEDIATE` that raised on the first
+  transient lock. They use no spool (idempotent maintenance writes; a final exhaustion
+  rolls back and is caught by `maintain.run`'s fail-open `try/except`).
+- **Spool drain.** `maintain.run` is the single serialized production caller of
+  `replay_spool` (top of run, on its own connection), so a busy-casualty write
+  self-heals on the next maintenance pass instead of rotting in `memory_spool/`.
 - `record_access` uses an atomic `access_count = access_count + 1` (no
   read-modify-write → no lost updates; verified by a 20-thread test).
 - `record_session_event` is idempotent via a content-addressed `event_key`.
