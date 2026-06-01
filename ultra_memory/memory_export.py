@@ -95,14 +95,26 @@ def export_memory(conn, out_dir, *, ts, snapshot=True):
         index_lines.append(f"- [{row['title']}]({slug}.md){hook}")
     view_files["MEMORY.md"] = "\n".join(index_lines) + "\n"
 
-    # Snapshot FIRST: a failure here must not touch the prior dump/views.
+    # Snapshot FIRST: a failure here must not touch the prior dump/views — OR the
+    # prior snapshot. VACUUM INTO a tmp path then os.replace (mirroring the dump swap
+    # below): VACUUM INTO refuses to overwrite an existing file (hence the tmp must be
+    # removed first), but writing the tmp and swapping atomically means a VACUUM
+    # failure AFTER the unlink (disk-full / I/O error / SIGTERM) leaves the PRIOR good
+    # snapshot intact instead of destroying it (R3 bughunt FIX 2).
     if snapshot:
         snap = out_dir / "memory.snapshot.db"
-        if snap.exists():
-            snap.unlink()
+        tmp_snap = out_dir / "memory.snapshot.db.tmp"
+        tmp_snap.unlink(missing_ok=True)  # VACUUM INTO won't overwrite a stale tmp
         # VACUUM INTO does not accept a bound parameter in sqlite3 — escaped literal.
-        safe = str(snap).replace("'", "''")
-        conn.execute(f"VACUUM INTO '{safe}'")
+        safe = str(tmp_snap).replace("'", "''")
+        try:
+            conn.execute(f"VACUUM INTO '{safe}'")
+            os.replace(tmp_snap, snap)
+        except Exception:
+            # Never leave a torn temp snapshot behind on any failure (VACUUM or the
+            # swap); the prior memory.snapshot.db is untouched.
+            tmp_snap.unlink(missing_ok=True)
+            raise
 
     views = out_dir / "views"
     views.mkdir(parents=True, exist_ok=True)
@@ -188,5 +200,12 @@ def export_learnings_projection(conn, path, *, skill_tag, title=None):
 
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(content)
+    # Atomic write (R3 bughunt FIX 3): the projection is GIT-TRACKED and Stage 3
+    # commits whatever is on disk. Path.write_text truncates-then-writes, so a
+    # SIGKILL/crash mid-write would leave a torn projection to be committed. Write to
+    # a sibling `.tmp` then os.replace into place — all-or-nothing under SIGKILL,
+    # mirroring the export dump's atomic swap.
+    tmp = out.with_name(out.name + ".tmp")
+    tmp.write_text(content)
+    os.replace(tmp, out)
     return len(rows)

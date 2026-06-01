@@ -57,8 +57,16 @@ def filter_links_for_caller(conn, links, *, caller_class):
     cache = {}
 
     def _endpoint_allowed(kind, mid, declared_type):
-        # Only `memory` endpoints are type-walled (knowledge pages are not the
-        # secret-bearing user/feedback rows). A non-memory endpoint passes.
+        # FAIL-CLOSED on an ambiguous endpoint kind (R3 bughunt FIX 5): ONLY an
+        # EXPLICIT 'knowledge' kind bypasses the type wall (knowledge wiki pages are
+        # not the secret-bearing user/feedback rows). A None / missing / unknown kind
+        # must NOT be treated as a safe non-memory endpoint and blindly kept — that
+        # leaked a forbidden user/feedback dst_id to a type-scoped subagent. Treat any
+        # non-'knowledge' kind as a memory endpoint, so it is resolved via the
+        # live-row re-read below (which fail-closes on an unresolvable id).
+        if kind not in ("memory", "knowledge"):
+            kind = "memory"
+        # Only `memory` endpoints are type-walled. A 'knowledge' endpoint passes.
         if kind != "memory":
             return True
         # Trust the live row's type over the edge's stored `*_type` (which can be

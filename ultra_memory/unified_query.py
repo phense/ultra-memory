@@ -16,6 +16,11 @@ forbids the engine importing ANYTHING from Trading. We therefore do NOT import
 
   • Memory side    → the engine's own `memory_query.query_memories(include_types=…)`,
                      then filter to `topic ∈ agent_topics OR topic IS NULL`.
+                     NOTE (asymmetry, R3 FIX 1): the memory side ranks by
+                     embedding-cosine ONLY — it has NO BM25-only fallback, so it
+                     REQUIRES a real `embedder`. `embedder=None` raises a clear
+                     ValueError on any non-empty store. Only the KNOWLEDGE side
+                     (below) degrades to BM25-only when `embedder is None`.
   • Knowledge side → a NEW GENERIC ranker over the `unified_index` rows whose
                      `topic ∈ agent_topics`:
                        (a) a small generic BM25 over each row's text
@@ -297,6 +302,14 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
     scoped by (type × topic), fused with FU-4 best-rank-per-backend RRF, weighted by
     `outcome_weight` (inert 1.0 until §7a). No LLM. See module docstring (D-S6).
 
+    EMBEDDER (asymmetry, R3 FIX 1): the KNOWLEDGE backend degrades to BM25-only when
+    `embedder is None` (fail-open — the `--extra mcp` env may lack fastembed). The
+    MEMORY backend does NOT: it ranks by embedding-cosine only and has NO BM25-only
+    fallback, so `embedder=None` raises a clear ValueError from `query_memories` for
+    ANY non-empty in-scope memory set. The `embedder=None` default is therefore only
+    valid for a knowledge-only / empty-memory recall; a real recall over memories
+    must pass a real embedder.
+
     Scope (D10, fail-closed):
       • `allowed_types = allowed_types_for(caller_class)` (the existing type wall).
       • `agent_topics`: a set of topic strings ⇒ the caller is topic-scoped; `None`
@@ -312,6 +325,18 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
     asserts this directly.
     """
     allowed_types = sorted(allowed_types_for_caller(caller_class))
+
+    # Normalize the SCOPED-caller's topic set (R3 bughunt FIX 4): drop None / empty
+    # string elements. A None element would otherwise pass `topic=None` to
+    # query_memories — which applies NO topic filter and returns EVERY topiced row
+    # (the all-topics/orchestrator behavior), a scope WIDENING that violates the
+    # "a partial binding sees LESS, never more" privilege invariant; a mixed set like
+    # {None,'trading'} would also crash sorted() on the None. After this, a {None}/{''}
+    # set collapses to the empty fail-closed set (only NULL-topic rows), and a mixed
+    # set scopes to its real topics only. The orchestrator all-topics sentinel
+    # (`agent_topics is None`) is untouched — only the set (scoped) case is filtered.
+    if agent_topics is not None:
+        agent_topics = {t for t in agent_topics if t}
 
     # --- Memory backend (engine-native; the byte-identity store) ----------------
     # A topic-scoped caller filters to `topic ∈ agent_topics OR topic IS NULL`;
