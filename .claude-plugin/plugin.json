@@ -20,21 +20,25 @@
   "userConfig": {
     "data_db_path": {
       "type": "file",
+      "title": "Canonical memory.db path",
       "required": true,
       "description": "Absolute path to the consumer's canonical memory.db (the knowledge MCP + hooks read this)."
     },
     "caller_class": {
       "type": "string",
+      "title": "Knowledge-MCP caller class",
       "default": "subagent",
       "description": "Privilege class for knowledge-MCP recall. Fail-closed: 'subagent' => project/reference facts only. Set 'orchestrator' only on a trusted top-level instance."
     },
     "rehydrate_budget": {
       "type": "number",
+      "title": "Rehydration gist budget (chars)",
       "default": 2000,
       "description": "Character budget for the SessionStart rehydration gist."
     },
     "oauth_token": {
       "type": "string",
+      "title": "Claude OAuth token (optional)",
       "sensitive": true,
       "required": false,
       "description": "OAuth token, NEVER an ANTHROPIC_API_KEY. Only needed if a consumer runs LLM maintenance; the memory maintenance slice (prune+export) does not use it."
