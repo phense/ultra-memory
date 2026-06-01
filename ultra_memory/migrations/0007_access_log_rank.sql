@@ -1,0 +1,13 @@
+-- SP-8 substrate — record the fused RANK of each recall hit. Additive,
+-- non-destructive: a single ADD COLUMN, no DROP/RENAME, so a restore/replay
+-- against an already-shaped DB is idempotent (db.py tolerates a re-applied ADD
+-- COLUMN — "duplicate column name"). The column is nullable: NULL = a pre-0007
+-- row OR any non-recall access (only the audited recall path threads a rank);
+-- never a wrong value.
+--
+-- `rank` is the 1-based position of the unit in the FULL fused result list at
+-- recall time (rank=1 = the top hit, counting BOTH memory and knowledge hits, so
+-- it is the overall-relevance signal). It is recorded at recall time only and has
+-- NO behavioral effect on its own — it is the harmless substrate a later top-k
+-- attribution policy needs to know how prominently a recalled unit was surfaced.
+ALTER TABLE access_log ADD COLUMN rank INTEGER;
