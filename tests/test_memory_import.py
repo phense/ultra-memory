@@ -221,6 +221,35 @@ def test_import_uses_file_mtime_for_timestamps(tmp_path):
     conn.close()
 
 
+def test_import_stores_updated_at_in_canonical_utc(tmp_path):
+    """Round-4 FIX 5: the import path must store updated_at/created_at in the
+    canonical tz-aware UTC `%Y-%m-%dT%H:%M:%SZ` format (the engine's
+    maintain/retention convention), NOT a naive-local isoformat (19 chars, no
+    offset). A naive-local ts vs an aware-UTC ts compare off by the local offset
+    in the raw-string ORDER BYs the rehydrate gist uses."""
+    import datetime as _dt
+    import os
+    import re
+
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    f = mem / "old_note.md"
+    _write(f, "old-note", "reference", "d", "Body.")
+    old = _dt.datetime(2026, 1, 1, 12, 0, 0, tzinfo=_dt.timezone.utc).timestamp()
+    os.utime(f, (old, old))
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    mi.import_memory_dir(conn, mem, index_path=None, ts="2026-05-30T10:00:00")
+    row = conn.execute(
+        "SELECT created_at, updated_at FROM memories WHERE id='old-note'").fetchone()
+    # Canonical: ends with 'Z', no '+00:00' offset, no microseconds.
+    canonical = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+    assert canonical.match(row["updated_at"]), row["updated_at"]
+    assert canonical.match(row["created_at"]), row["created_at"]
+    # Still reflects the FILE's age (mtime), 2026-01-01 UTC.
+    assert row["updated_at"].startswith("2026-01-01")
+    conn.close()
+
+
 def test_import_persists_file_slug_and_sort_order(tmp_path):
     """C1: the underscore filename slug is NOT derivable from name: (which drops
     prefixes, e.g. feedback_email_routing.md → name: email-routing). It must be

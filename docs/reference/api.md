@@ -189,7 +189,12 @@ Every public function. The caller owns connections and supplies timestamps.
 - `import_memory_dir(conn, memory_dir, *, index_path=None, ts) -> count` — glob
   `*.md` (excluding `MEMORY.md`), upsert each; set `file_slug`=stem,
   `sort_order`=index position, `created_at`/`updated_at`=file mtime, and (SP-3 D16)
-  `created_by='import'`. Idempotent.
+  `created_by='import'`. Idempotent. **Round-4 FIX 5:** the mtime is stored as
+  tz-aware UTC `%Y-%m-%dT%H:%M:%SZ` (the engine's canonical timestamp format,
+  matching maintain/retention/checkpoint/rehydrate) — NOT the former naive-local
+  isoformat (19 chars, no offset). The naive-local stamp, sorted as a raw SQLite
+  STRING against the CLI/save path's aware-UTC stamps, compared off by the local
+  UTC offset and corrupted the rehydrate gist's `ORDER BY updated_at` recency.
 - `import_today_file(conn, text, *, day) -> (count, warnings)` — parse `## HH:MM` /
   `## HH:MM[-–—]HH:MM | …` blocks + non-time `## ` headers (captured at midnight
   with a warning) into `legacy-<day>` session events; dedupe within the run so
@@ -490,13 +495,36 @@ Shared, fail-open, no-LLM, no-write helpers for the session hooks.
 - `build_gist(conn, *, budget_chars=2000) -> str` — pure-SQL, no-LLM gist:
   pinned rules + "where we left off" (last `sessions.summary`, else recent
   events) + open follow-ups + hot memories + a pull-on-demand pointer; truncated
-  to `budget_chars` (spec §9.2). **SP-3 (D7):** the `## Pinned rules` section now
+  to `budget_chars` (spec §9.2). **SP-3 (D7):** the `## Pinned rules` section
   unions **memory pins** (`memories.pinned`, capped at 12) with **knowledge pins**
-  (`knowledge_pins WHERE pinned=1`, display title from `unified_index`, slug
-  fallback). Byte-identity guarantee: with zero `knowledge_pins` rows (Trading's
-  current state) the gist is unchanged — the knowledge block is appended only when
-  at least one knowledge pin exists, and the `unified_index` title lookup is
-  fail-open (a pre-Stage-5 DB still renders the slug).
+  (`knowledge_pins WHERE pinned=1`, display title from `unified_index`). With zero
+  surviving `knowledge_pins` rows (Trading's current state) the gist is unchanged.
+  **Round-4 hardening:**
+  - **FIX 1 — structure-injection sanitize.** Every field rendered into the gist
+    (pin title + body head, hot title, follow-up title, the session summary, the
+    knowledge-pin label) is passed through `_one_line(s)` — `" ".join(s.split())`
+    collapses every whitespace run (newlines, tabs, control whitespace) to one
+    line and caps length (`_FIELD_MAX=200`; summary 500). So no stored field can
+    forge a counterfeit `## …` header or `- …` list LINE inside the trusted
+    SessionStart context — the injected text survives only as inline prose.
+    (`save_memory` does not strip newlines from titles; only the body's first
+    line was previously defended.)
+  - **FIX 2 — pinned rules survive budget pressure.** `## Pinned rules` is
+    rendered FIRST and is EXEMPT from the budget tail-cut: under budget pressure
+    a *later* section is trimmed before any pinned rule, and if the 12-line cap
+    forces a pinned rule out it is named with an explicit `(…N more pinned rules
+    omitted)` marker — never silently lost. If the pinned section alone meets/
+    exceeds `budget_chars`, the later sections are dropped entirely.
+  - **FIX 3 — no pinned/hot duplication.** The hot-memory query carries
+    `AND pinned=0`, so a pinned unit is not re-listed under `## Hot memories`.
+  - **FIX 4 — stale knowledge-pin skip.** `_knowledge_pin_lines` INNER-joins
+    `unified_index` (via `WHERE EXISTS`): a pin whose page was deleted (no mirror
+    row) is SKIPPED rather than emitting a bare-slug "rule". The slug-fallback
+    title is KEPT only for a page that EXISTS but has an empty title.
+  - **FIX 5 — deterministic ordering.** The pins / hot ORDER BYs carry a stable
+    secondary `id` tie-break (`ORDER BY updated_at DESC, id` and `ORDER BY
+    access_count DESC, updated_at DESC, id`), so equal-timestamp rows (e.g. a
+    bootstrap import stamping same-mtime files identically) sort deterministically.
 - `run(payload, *, db_path, shadow, ts, shadow_out=None, budget_chars=2000) -> dict`
   — shadow mode writes the gist to `shadow_out` and returns `{}` (no injection);
   live mode returns `{"hookSpecificOutput": {"hookEventName": "SessionStart",

@@ -5,7 +5,7 @@ memory_lib single-writer path (spec §6). Real-data import runs at bootstrap
 (§7.4) behind meta.import_complete; this module is unit-tested on fixtures.
 """
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import memory_lib
@@ -95,7 +95,13 @@ def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
         idx = index.get(slug, {})
         # The file's real age (mtime) drives the §8 staleness signal; without it a
         # bootstrap import stamps every memory with the import moment.
-        mtime = datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
+        # FIX 5 (r4): store as tz-aware UTC `%Y-%m-%dT%H:%M:%SZ` — the engine's
+        # canonical timestamp format (maintain/retention/checkpoint/rehydrate). A
+        # naive-local isoformat (no offset) sorted as a raw SQLite STRING against
+        # the CLI/save path's aware-UTC stamps compared off by the local UTC
+        # offset, corrupting the rehydrate gist's `ORDER BY updated_at` recency.
+        mtime = datetime.fromtimestamp(
+            path.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         memory_lib.save_memory(
             conn, id=name, type=meta.get("type", "reference"),
             title=idx.get("title") or name, body=body, ts=ts,

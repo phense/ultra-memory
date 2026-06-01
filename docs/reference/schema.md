@@ -44,7 +44,7 @@ The durable typed notes.
 | `node_type` | TEXT | default `'memory'` |
 | `file_slug` | TEXT | the harness FILENAME stem (underscored); drives export filename + MEMORY.md links — **not** derivable from `id` |
 | `sort_order` | INTEGER | the `MEMORY.md` line index → preserves curated order on export |
-| `created_at`, `updated_at` | TEXT | ISO; import sets these from file mtime (drives staleness) |
+| `created_at`, `updated_at` | TEXT | canonical tz-aware UTC `%Y-%m-%dT%H:%M:%SZ` (r4 FIX 5 — import sets these from file mtime in this format, matching the CLI/save + maintain/retention paths, so raw-string `ORDER BY` is chronological; drives staleness) |
 | `last_verified`, `valid_until` | TEXT | reserved |
 | `strength` | REAL | default 1.0; multiplies relevance |
 | `access_count` | INTEGER | derived; atomically incremented by `record_access` |
