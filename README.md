@@ -46,8 +46,16 @@ The full command surface (`/memory-recall`, `/memory-pin`, `/memory-verify`,
 self-healing maintenance, and the fail-open behavior are documented in
 [`docs/reference/operations.md`](docs/reference/operations.md).
 
-**Requirements:** `uv` on PATH; Python 3.13; first `/memory-setup` downloads the
-embedder model (~bge-small, cached afterward).
+**Requirements (both required to function):** `uv` and `git` on PATH.
+- `uv` provisions the Python 3.13 runtime (the engine is pure Python 3.13 +
+  SQLite — no other binary is shelled).
+- `git` is the rollback/safety model — the deterministic export
+  (`memory.dump.sql` + snapshot + views) is *the sole git-committed rollback
+  artifact* and the wiki/maintenance lifecycle is archive-never-delete *via
+  git*; without git there is no restore net. `/memory-setup` preflights both
+  (`setup.REQUIRED_TOOLS`) and aborts if either is missing.
+
+First `/memory-setup` downloads the embedder model (~bge-small, cached afterward).
 
 **Contributing:** TDD is mandatory and `docs/` are kept in lockstep with the code.
 A warn-only doc-discipline hook ships under `.githooks/`; enable it once per clone

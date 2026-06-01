@@ -3,7 +3,21 @@ description: Bootstrap the ultra-memory plugin in this project — build the run
 ---
 Set up the ultra-memory runtime. Idempotent — re-running only repairs what is missing.
 
-**Prerequisite:** `uv` on PATH. The first run downloads the embedder model (~bge-small); this is cached afterward.
+**Prerequisites (both required to function):** `uv` and `git` on PATH.
+- `uv` provisions the Python 3.13 runtime venv (the engine is pure Python 3.13 + SQLite — no other binary is shelled).
+- `git` is the rollback/safety model: the deterministic export (`memory.dump.sql` + VACUUM snapshot + markdown views) is *the sole git-committed rollback artifact*, and the wiki/maintenance lifecycle is archive-never-delete *via git*. Without git there is no restore net.
+
+The first run downloads the embedder model (~bge-small); this is cached afterward.
+
+0. **Preflight — abort early if a required tool is missing** (the venv does not exist yet, so check the shell PATH directly; this mirrors `setup.REQUIRED_TOOLS` / `setup.missing_prerequisites`):
+   ```bash
+   missing=""
+   for tool in uv git; do command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"; done
+   if [ -n "$missing" ]; then
+     echo "ultra-memory: missing required tool(s):$missing — install them and re-run /memory-setup" >&2
+     exit 1
+   fi
+   ```
 
 1. **Build the venv under `$CLAUDE_PLUGIN_DATA/venv` (survives plugin updates) if missing:**
    ```bash

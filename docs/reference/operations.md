@@ -45,8 +45,20 @@ Engine env seams the wrapper / consumer can also set (SP-3):
 `/memory-setup` builds the runtime venv under `${CLAUDE_PLUGIN_DATA}/venv`,
 optionally imports a legacy memory dir **once**, stamps the DB ready (the
 `import_complete` gate, below), and sanity-checks. First run downloads the embedder
-model (~bge-small, cached afterward) — `uv` on PATH and Python 3.13 are
-prerequisites.
+model (~bge-small, cached afterward).
+
+**Prerequisites (both required, preflighted by `/memory-setup`):** `uv` and `git`
+on PATH — declared as `setup.REQUIRED_TOOLS`; `setup.missing_prerequisites()` is
+the testable mirror and the command's step-0 shell preflight aborts if either is
+missing.
+- `uv` provisions the Python 3.13 runtime + extras. The engine is pure
+  Python 3.13 + SQLite — **no other binary is shelled**.
+- `git` is the **rollback/safety model**, not a runtime call: the deterministic
+  export (`memory.dump.sql` + VACUUM snapshot + views) is *the sole git-committed
+  rollback artifact* (see [Rollback](#rollback) / [Export artifacts](#export-artifacts-datamemory_export)),
+  and the wiki/maintenance lifecycle is archive-never-delete *via git*. Without
+  git the engine still runs, but there is no restore net — so it is a hard
+  prerequisite.
 
 ## Command surface
 
