@@ -167,8 +167,11 @@ Every public function. The caller owns connections and supplies timestamps.
 - `query_memories(conn, query, *, embedder, top_k=5, dim=EMBED_DIM,
   include_statuses=("active",), include_types=None, now_ts=None,
   staleness_days=90, topic=None) -> [dict]` — cosine rank + word-bounded title
-  boost (+0.5), then ×strength, +bounded access boost, −staleness penalty (sets
-  `stale`); attaches 1-hop `links`. Returns dicts with `id, title, type, status,
+  boost (+0.5), then ×strength, −staleness penalty (sets
+  `stale`); attaches 1-hop `links`. (R4 #8: the recall-driven access_count popularity
+  boost was REMOVED from this score — feeding a recall-incremented counter back into the
+  ranking was a self-reinforcing relevance loop. access_count is retained for the Hot-gist
+  ambient ordering, not for relevance ranking.) Returns dicts with `id, title, type, status,
   score, stale, links`. No LLM. `include_types` scopes candidates in SQL **before**
   ranking. `topic` (SP-3 D11), when given, scopes to `topic = ? OR topic IS NULL`
   — a topiced caller still sees cross-topic (`NULL`) operational rows, and an
