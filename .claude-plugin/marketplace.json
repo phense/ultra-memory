@@ -3,7 +3,7 @@
   "owner": { "name": "Peter Hense" },
   "metadata": {
     "description": "Project-agnostic agent-memory engine + read-only knowledge MCP for Claude Code (local plugin).",
-    "version": "0.0.1"
+    "version": "0.0.2"
   },
   "plugins": [
     {
