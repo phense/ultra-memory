@@ -20,7 +20,7 @@ def _cols(conn, table):
 def test_fresh_db_lands_at_v5_with_bm25_text(tmp_path):
     conn = db.connect(tmp_path / "m.db")
     version = db.migrate(conn, MIG)
-    assert version == 5
+    assert version >= 5  # 0005 applied (terminal version may be later, e.g. 0006)
     assert "bm25_text" in _cols(conn, "unified_index")
     # The 0004 columns are still there (additive, non-destructive).
     assert "snippet" in _cols(conn, "unified_index")
@@ -34,8 +34,8 @@ def test_meta_schema_version_mirrors_user_version_at_v5(tmp_path):
     uv = conn.execute("PRAGMA user_version").fetchone()[0]
     mv = conn.execute(
         "SELECT value FROM meta WHERE key='schema_version'").fetchone()[0]
-    assert v == uv == 5
-    assert int(mv) == 5
+    assert v == uv >= 5  # terminal version (>=5; 0006 bumps it further)
+    assert int(mv) == uv
     conn.close()
 
 
@@ -56,7 +56,7 @@ def test_db_stopped_at_v4_upgrades_cleanly_to_v5_rows_intact(tmp_path):
     conn.execute("COMMIT")
 
     v = db.migrate(conn, MIG)
-    assert v == 5
+    assert v >= 5  # 0005 (and any later additive migration) applied from v4
     assert "bm25_text" in _cols(conn, "unified_index")
     row = conn.execute(
         "SELECT slug, title, snippet, bm25_text FROM unified_index "
@@ -71,8 +71,8 @@ def test_reapply_is_noop(tmp_path):
     conn = db.connect(tmp_path / "m.db")
     v1 = db.migrate(conn, MIG)
     v2 = db.migrate(conn, MIG)  # replay
-    assert v1 == v2 == 5
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert v1 == v2 >= 5
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == v2
     conn.close()
 
 
@@ -80,9 +80,10 @@ def test_replay_tolerant_after_simulated_crash(tmp_path):
     """bm25_text already present but user_version regressed (crash between apply
     and bump) must re-run cleanly (idempotent ADD COLUMN), not 'duplicate column'."""
     conn = db.connect(tmp_path / "m.db")
-    assert db.migrate(conn, MIG) == 5
+    terminal = db.migrate(conn, MIG)
+    assert terminal >= 5
     conn.execute("PRAGMA user_version=4")  # simulate crash mid-0005
     again = db.migrate(conn, MIG)
-    assert again == 5
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert again == terminal
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == terminal
     conn.close()

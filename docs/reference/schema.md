@@ -16,6 +16,7 @@ Version is tracked by `PRAGMA user_version` and mirrored in `meta.schema_version
 | `0003_harness_slug.sql` | 3 | `memories.file_slug`, `memories.sort_order` |
 | `0004_cross_store_fabric.sql` | 4 | SP-3 cross-store fabric: `memories.topic`/`created_by`/`outcome_weight`, `session_events.outcome_signal`, `links.src_type`/`dst_type`; new tables `unified_index`, `knowledge_pins`, `agent_topic_bindings`; index `idx_unified_topic`, `idx_links_dst` |
 | `0005_unified_index_bm25_text.sql` | 5 | SP-6 BM25 full-body fix (D11): `unified_index.bm25_text` — the FULL collapsed page body for the knowledge-side BM25 document (`snippet` stays the ~400-char display preview) |
+| `0006_access_log_session_id.sql` | 6 | SP-8 substrate (§5.1): `access_log.session_id` — a generic opaque string recording *which session* recalled a unit (the harmless logging substrate the usage-outcome attribution joins on; `NULL` = not attributable) |
 
 The runner (`db.migrate`) applies each pending file's statements + the version bump
 in one transaction; `ADD COLUMN` replay is tolerated (idempotent).
@@ -81,7 +82,10 @@ invariant is enforced loudly.
 
 ### `access_log`
 Append-only reinforcement source of truth: `id`, `target_kind`, `target_id`,
-`ts`, `context`.
+`ts`, `context`, plus **(0006)** `session_id` — a generic opaque string recording
+*which session* recalled the target (SP-8 substrate). `NULL` on pre-0006 rows and
+whenever the recall caller supplied no session id; harmless (logging only, no
+ranking effect) — it is the substrate a later usage-outcome attribution joins on.
 
 ### `links`
 The **cross-store edge spine** (SP-3 D5/D6): `src_kind`, `src_id`, `predicate`,

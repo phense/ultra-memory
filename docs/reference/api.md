@@ -70,8 +70,16 @@ Every public function. The caller owns connections and supplies timestamps.
   hint; it is **payload, excluded from `event_key`**, so events differing only in
   the signal still dedupe (first write wins). Inert by default (`NULL`); spooled +
   replayed.
-- `record_access(conn, *, target_kind, target_id, ts, context=None)` — append to
-  `access_log` + atomic `access_count += 1` for memory targets.
+- `record_access(conn, *, target_kind, target_id, ts, context=None, session_id=None)`
+  — append to `access_log` + atomic `access_count += 1` for memory targets.
+  `session_id` (SP-8 substrate) is an optional **generic opaque** string recording
+  *which session* recalled the target; `NULL` when unsupplied (= the pre-cutover /
+  not-attributable state). No ranking effect — it is the substrate a later
+  usage-outcome attribution joins on. Spooled + replayed.
+- `session_id_from_env(env) -> str | None` — the generic session-id env read, the
+  exact mirror of `caller_class_from_env`: stripped `ULTRA_MEMORY_SESSION_ID` or
+  `None`. Project-agnostic (the engine learns *a* session id, never that it is
+  "Trading"). Re-exported from `knowledge_mcp` next to `caller_class_from_env`.
 - `consolidate(conn, *, loser_id, canonical_id, reason, ts)` — redirect-stub
   (`status='redirect'`, `supersedes=canonical`). Raises `KeyError` if absent.
 - `delete(conn, *, id, reason, tier, ts)` — soft tombstone (`status='deleted'`).
@@ -295,6 +303,11 @@ best-rank-per-backend RRF, weighted by `outcome_weight` (inert 1.0). No LLM.
 - `allowed_types_for(caller_class)` / `caller_class_from_env(env)` — the **type**
   axis of the access wall (unchanged): trusted (`orchestrator`/`owner`) → all types;
   else `SAFE_TYPES` = `(project, reference)`, fail-closed.
+- `session_id_from_env(env)` — re-export of `memory_lib.session_id_from_env` (SP-8
+  substrate), sitting next to `caller_class_from_env` so the recall path's two
+  env-read dimensions (caller-class + session-id) are side by side. Both recall
+  sites (`knowledge_recall`, `unified_query._audit_hits`) thread the result into
+  `record_access(session_id=…)`; unset env → `NULL` → no attribution, never errors.
 - `run_query_tool(arguments, *, conn, embedder, caller_class, dim=None, now_ts=None,
   ts=None, agent_topics=_NO_TOPIC_ARG)` — the MCP tool handler. **Additive SP-3
   routing:** when `agent_topics` is supplied (a set, or the orchestrator's `None`

@@ -1,0 +1,12 @@
+-- SP-8 substrate (§5.1) — session-thread the recall. Additive, non-destructive: a
+-- single ADD COLUMN, no DROP/RENAME, so a restore/replay against an already-shaped
+-- DB is idempotent (db.py tolerates a re-applied ADD COLUMN — "duplicate column
+-- name"). Backward-compatible: pre-cutover access_log rows have session_id NULL =
+-- "not attributable" (per the SP-8 §1.3 non-goal), never a wrong attribution.
+--
+-- The column records WHICH SESSION recalled which unit; it is a generic opaque
+-- string (any consumer's session id, read engine-side from the ULTRA_MEMORY_SESSION_ID
+-- env var — no Trading concept). It is the harmless substrate the Trading-side
+-- usage-outcome attribution (record_link 'informed_by' + the EWMA fold) needs; this
+-- migration logs the session only and has NO ranking effect.
+ALTER TABLE access_log ADD COLUMN session_id TEXT;
