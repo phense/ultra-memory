@@ -11,6 +11,7 @@ Example `.ultra-memory/config.toml`:
     [maintenance]
     briefings_dir = "briefings"        # audit/digest dir, relative to the project
     probe_corpus  = "tests/fixtures/skill_trigger_probes.json"
+    wiki_gateway  = "scripts/wiki_lib.py"   # consumer wiki write gateway (None → no wiki)
     topics        = ["trading"]
     model         = "claude-sonnet-4-6"
 
@@ -53,6 +54,7 @@ class MaintenanceConfig:
     wiki_roots: list[Path] = field(default_factory=list)
     briefings_dir: Path | None = None          # None → no audit/digest writes
     probe_corpus: Path | None = None           # None → the skill-loop holds (no corpus)
+    wiki_gateway: Path | None = None           # None → no wiki (wiki-write beats degrade)
     topics: list[str] = field(default_factory=list)
     model: str = _DEFAULT_MODEL
     beats: dict = field(default_factory=lambda: dict(_DEFAULT_BEATS))
@@ -105,6 +107,7 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
     # env overrides win over the file; the file wins over the hard default.
     briefings = env.get("ULTRA_MEMORY_BRIEFINGS_DIR") or raw.get("briefings_dir")
     corpus = env.get("ULTRA_MEMORY_PROBE_CORPUS") or raw.get("probe_corpus")
+    gateway = env.get("ULTRA_MEMORY_WIKI_GATEWAY") or raw.get("wiki_gateway")
     model = env.get("ULTRA_MEMORY_MODEL") or raw.get("model") or _DEFAULT_MODEL
     topics = raw.get("topics") if isinstance(raw.get("topics"), list) else []
 
@@ -126,6 +129,7 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
         wiki_roots=_resolve_wiki_roots(env),
         briefings_dir=_abs(project_dir, briefings),
         probe_corpus=_abs(project_dir, corpus),
+        wiki_gateway=_abs(project_dir, gateway),
         topics=[str(t) for t in topics],
         model=str(model),
         beats=beats,

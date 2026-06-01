@@ -9,6 +9,7 @@ def test_defaults_no_file_no_env(tmp_path):
     assert isinstance(cfg, MaintenanceConfig)
     assert cfg.db_path == Path.home() / ".ultra-knowledge" / "memory.db"
     assert cfg.wiki_roots == [] and cfg.briefings_dir is None and cfg.probe_corpus is None
+    assert cfg.wiki_gateway is None            # no wiki by default → wiki-write beats degrade
     assert cfg.topics == [] and cfg.model == "claude-sonnet-4-6"
     # autonomous posture: beats default ON
     assert cfg.beat_enabled("consolidate") and cfg.beat_enabled("aggressive")
@@ -22,6 +23,7 @@ def test_toml_file_loaded_and_relative_paths_resolved(tmp_path):
         '[maintenance]\n'
         'briefings_dir = "briefings"\n'
         'probe_corpus = "tests/fixtures/probes.json"\n'
+        'wiki_gateway = "scripts/wiki_lib.py"\n'
         'topics = ["trading", "programming"]\n'
         'model = "claude-opus-4-8"\n'
         '[maintenance.beats]\n'
@@ -32,6 +34,7 @@ def test_toml_file_loaded_and_relative_paths_resolved(tmp_path):
     cfg = load_config(project_dir=tmp_path, env={})
     assert cfg.briefings_dir == tmp_path / "briefings"           # relative → resolved
     assert cfg.probe_corpus == tmp_path / "tests" / "fixtures" / "probes.json"
+    assert cfg.wiki_gateway == tmp_path / "scripts" / "wiki_lib.py"   # relative → resolved
     assert cfg.topics == ["trading", "programming"]
     assert cfg.model == "claude-opus-4-8"
     assert cfg.beat_enabled("aggressive") is False               # gated off by the consumer

@@ -25,6 +25,20 @@ from ultra_memory import memory_lib
 BEAT_ORDER = ("consolidate", "aggressive", "synthesize")
 
 
+def default_registry() -> dict:
+    """The migrated beats, keyed by name. A beat absent here is skipped
+    ('unregistered') — so an un-migrated beat is a no-op until it lands. Imported
+    lazily so the orchestrator module stays cheap and cycle-free."""
+    registry: dict = {}
+    try:
+        from ultra_memory.maintenance import consolidate
+        registry["consolidate"] = consolidate.beat
+    except Exception:  # a beat module that fails to import must not wedge the rest
+        pass
+    # aggressive / synthesize register here as each cluster is migrated.
+    return registry
+
+
 def _now_z() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -76,17 +90,25 @@ class PipelineResult:
     results: dict = field(default_factory=dict)   # beat -> its return value
 
 
-def run_pipeline(conn, config, *, registry, ts=None, env=None, force=False,
-                 log=lambda _m: None) -> PipelineResult:
+def run_pipeline(conn, config, *, registry=None, ts=None, env=None, force=False,
+                 only=None, log=lambda _m: None) -> PipelineResult:
     """Run the due+enabled Tier-2 beats once. NEVER raises (fail-open per beat).
 
-    `registry` maps a beat name to `callable(conn, config, ts, env)`. A beat absent
-    from the registry is skipped ('unregistered') — so an un-migrated beat is a no-op.
-    `force=True` ignores the throttle clock (the on-demand path)."""
+    `registry` maps a beat name to `callable(conn, config, ts, env)`; defaults to
+    `default_registry()` (the migrated beats). A beat absent from the registry is
+    skipped ('unregistered') — so an un-migrated beat is a no-op. `force=True`
+    ignores the throttle clock (the on-demand path). `only` (a set/list of beat
+    names) restricts the run to those beats (the per-beat CLI path)."""
+    if registry is None:
+        registry = default_registry()
     now_z = ts or _now_z()
     res = PipelineResult()
+    only_set = set(only) if only else None
     for beat in BEAT_ORDER:
         try:
+            if only_set is not None and beat not in only_set:
+                res.skipped[beat] = "not-selected"
+                continue
             if not config.beat_enabled(beat):
                 res.skipped[beat] = "disabled"
                 continue
