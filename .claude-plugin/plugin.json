@@ -21,8 +21,9 @@
     "data_db_path": {
       "type": "file",
       "title": "Canonical memory.db path",
-      "required": true,
-      "description": "Absolute path to the consumer's canonical memory.db (the knowledge MCP + hooks read this)."
+      "required": false,
+      "default": "",
+      "description": "Optional override. Leave empty to auto-derive: <project>/data/memory.db (project/local install), or ~/.ultra-memory/memory.db (user-scope)."
     },
     "caller_class": {
       "type": "string",

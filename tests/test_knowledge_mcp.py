@@ -370,15 +370,30 @@ def test_fix3_recall_survives_audit_write_failure(tmp_path, monkeypatch):
     conn.close()
 
 
-def test_db_path_from_env_required(tmp_path):
-    """The DB path comes from config (ULTRA_MEMORY_DB), never cwd. Missing → raises."""
-    import pytest
+def test_db_path_from_env_derives_default(tmp_path):
+    """Zero-config: the DB path DERIVES a default instead of raising — explicit
+    override wins, else <CLAUDE_PROJECT_DIR>/data/memory.db, else the user-global
+    fallback. NEVER cwd (the original safety property is preserved)."""
+    from pathlib import Path
     p = tmp_path / "memory.db"
+    # (i) explicit ULTRA_MEMORY_DB wins outright.
     assert knowledge_mcp.db_path_from_env({"ULTRA_MEMORY_DB": str(p)}) == p
-    with pytest.raises(knowledge_mcp.ConfigError):
-        knowledge_mcp.db_path_from_env({})
-    with pytest.raises(knowledge_mcp.ConfigError):
-        knowledge_mcp.db_path_from_env({"ULTRA_MEMORY_DB": "   "})
+    # (ii) unset + CLAUDE_PROJECT_DIR → <project>/data/memory.db.
+    assert knowledge_mcp.db_path_from_env(
+        {"CLAUDE_PROJECT_DIR": "/x"}) == Path("/x") / "data" / "memory.db"
+    # (iv) blank ULTRA_MEMORY_DB is treated as unset (falls through to the project dir).
+    assert knowledge_mcp.db_path_from_env(
+        {"ULTRA_MEMORY_DB": "   ", "CLAUDE_PROJECT_DIR": "/x"}) == (
+            Path("/x") / "data" / "memory.db")
+    # blank CLAUDE_PROJECT_DIR is also treated as unset → user-global fallback.
+    assert knowledge_mcp.db_path_from_env(
+        {"CLAUDE_PROJECT_DIR": "  "}) == Path.home() / ".ultra-memory" / "memory.db"
+    # (iii) unset + no project dir → ~/.ultra-memory/memory.db (user-global).
+    assert knowledge_mcp.db_path_from_env({}) == (
+        Path.home() / ".ultra-memory" / "memory.db")
+    # The safety property: NO resolution branch returns a cwd-relative path.
+    for env in ({}, {"CLAUDE_PROJECT_DIR": "/x"}, {"ULTRA_MEMORY_DB": str(p)}):
+        assert knowledge_mcp.db_path_from_env(env).is_absolute()
 
 
 def test_knowledge_tools_declares_query_tool():

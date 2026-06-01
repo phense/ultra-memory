@@ -247,15 +247,27 @@ session_id_from_env = memory_lib.session_id_from_env
 
 
 def db_path_from_env(env):
-    """Resolve the memory.db path from config (ULTRA_MEMORY_DB), NEVER cwd. Blank
-    or missing → ConfigError (the server must not silently open a wrong/empty db)."""
+    """Resolve the memory.db path from config, DERIVING a zero-config default — NEVER
+    cwd (the safety property: a wrong/empty db next to the process is never opened).
+
+    Resolution order:
+      1. ``ULTRA_MEMORY_DB`` (the explicit override), if set + non-blank.
+      2. else ``CLAUDE_PROJECT_DIR``/data/memory.db (the project's canonical location),
+         if CLAUDE_PROJECT_DIR is set + non-blank.
+      3. else ``~/.ultra-memory/memory.db`` (the user-global fallback).
+
+    The path is only RESOLVED, never created here — ``open_memory_db`` downstream does
+    the create+migrate, and an empty store recalls nothing gracefully. Blank values are
+    treated as unset (fall through). The ``ConfigError`` class is kept for callers that
+    reference it, but this resolver no longer raises (zero-config install)."""
     from pathlib import Path
     raw = (env.get("ULTRA_MEMORY_DB") or "").strip()
-    if not raw:
-        raise ConfigError(
-            "ULTRA_MEMORY_DB is not set; the knowledge MCP needs an explicit memory.db path "
-            "(paths via config, not cwd).")
-    return Path(raw)
+    if raw:
+        return Path(raw)
+    project_dir = (env.get("CLAUDE_PROJECT_DIR") or "").strip()
+    if project_dir:
+        return Path(project_dir) / "data" / "memory.db"
+    return Path.home() / ".ultra-memory" / "memory.db"
 
 
 def lazy_embedder(factory=None):

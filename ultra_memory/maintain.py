@@ -148,7 +148,12 @@ def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     rebuild = ("--rebuild" in args) or (
         os.environ.get("ULTRA_MEMORY_REBUILD_INDEX", "") == "1")
-    db = os.environ.get("ULTRA_MEMORY_DB", "")
+    # Zero-config-consistent with the knowledge MCP + session hooks: explicit
+    # ULTRA_MEMORY_DB wins, else <CLAUDE_PROJECT_DIR>/data/memory.db, else
+    # ~/.ultra-memory/memory.db (never cwd). A derived path that does not exist yet
+    # → no-op (fail-open): maintain only runs over an existing, ready store.
+    from ultra_memory.knowledge_mcp import db_path_from_env
+    db = str(db_path_from_env(os.environ))
     if not db or not Path(db).is_file():
         return 0
     out_dir = os.environ.get("ULTRA_MEMORY_EXPORT_DIR") or str(

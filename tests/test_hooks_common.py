@@ -56,3 +56,33 @@ def test_session_id_prefers_payload():
 def test_session_id_falls_back_to_transcript_stem():
     sid = common.session_id_of({}, "/x/uuid-zzz.jsonl")
     assert sid == "uuid-zzz"
+
+
+def test_resolve_db_path_matches_engine_derivation(monkeypatch):
+    """Zero-config consistency: the hooks resolve the DB path the SAME way the
+    knowledge MCP does (knowledge_mcp.db_path_from_env) — explicit override wins,
+    else <CLAUDE_PROJECT_DIR>/data/memory.db, else ~/.ultra-memory/memory.db. Returns
+    a str (hooks feed it to db_ready / open_memory_db)."""
+    from pathlib import Path
+    # explicit override wins
+    monkeypatch.setenv("ULTRA_MEMORY_DB", "/explicit/m.db")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", "/proj")
+    assert common.resolve_db_path() == "/explicit/m.db"
+    # unset (blank) override + CLAUDE_PROJECT_DIR → <project>/data/memory.db
+    monkeypatch.setenv("ULTRA_MEMORY_DB", "")
+    assert common.resolve_db_path() == str(Path("/proj") / "data" / "memory.db")
+    # no override + no project dir → user-global fallback
+    monkeypatch.delenv("ULTRA_MEMORY_DB", raising=False)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    assert common.resolve_db_path() == str(
+        Path.home() / ".ultra-memory" / "memory.db")
+
+
+def test_resolve_db_path_never_cwd_relative(monkeypatch):
+    """Safety property carried through the hooks: never a cwd-relative path."""
+    from pathlib import Path
+    monkeypatch.delenv("ULTRA_MEMORY_DB", raising=False)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    assert Path(common.resolve_db_path()).is_absolute()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", "/proj")
+    assert Path(common.resolve_db_path()).is_absolute()

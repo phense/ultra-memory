@@ -8,15 +8,27 @@ rollback, the write spool, redaction, the embedding cache, migrations).
 ## Install + bootstrap
 
 Install and configure are documented in the README's "Install as a plugin"
-section. In short: `/plugin install`, set the one required `userConfig` value
-`data_db_path` (absolute path to the consumer's canonical `memory.db`), then run
-`/memory-setup` and restart Claude Code so the `knowledge` MCP registers.
+section. In short (**zero-config**): `/plugin install` prompts for nothing required,
+then run `/memory-setup` and restart Claude Code so the `knowledge` MCP registers.
+The DB path auto-derives (resolution order below); set `data_db_path` only to override.
+
+**DB-path resolution (single source of truth — `knowledge_mcp.db_path_from_env`).** The
+MCP, all three session hooks (via `hooks/common.resolve_db_path`), and `maintain` all
+resolve the `memory.db` path the SAME way, NEVER cwd: (1) explicit `ULTRA_MEMORY_DB` (the
+`data_db_path` override, threaded through `${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH}`) if set;
+else (2) `${CLAUDE_PROJECT_DIR}/data/memory.db` (project/local install); else (3)
+`~/.ultra-memory/memory.db` (user scope). The `.mcp.json` env carries bash-default
+fallbacks (`${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH:-${CLAUDE_PROJECT_DIR}/data/memory.db}`,
+`${CLAUDE_PLUGIN_OPTION_CALLER_CLASS:-subagent}`) so both env vars ALWAYS resolve — Claude
+Code rejects an MCP server whose env references an unset `${CLAUDE_PLUGIN_OPTION_*}`, and it
+does not inject manifest defaults; the engine derivation is belt-and-suspenders for the
+user-scope case where `CLAUDE_PROJECT_DIR` may be empty.
 
 `userConfig` keys (from `.claude-plugin/plugin.json`):
 
 | Key | Required | Default | Purpose |
 |---|---|---|---|
-| `data_db_path` | yes | — | Absolute path to the consumer's canonical `memory.db`; the MCP + hooks read this. |
+| `data_db_path` | no | `""` (auto-derive) | Optional override. Empty ⇒ derive `<project>/data/memory.db`, else `~/.ultra-memory/memory.db`. Set an absolute path to point at a `memory.db` elsewhere. |
 | `caller_class` | no | `subagent` | MCP recall privilege class (the **type** axis). Fail-closed: `subagent` ⇒ `project`/`reference` only. |
 | `rehydrate_budget` | no | `2000` | Character budget for the SessionStart rehydration gist. |
 | `oauth_token` | no | — | OAuth token, NEVER an `ANTHROPIC_API_KEY`. Only for LLM maintenance; the prune+export slice does not use it. |
@@ -57,15 +69,23 @@ agents which to use; this is the operator-facing list.
 - `.mcp.json` (plugin root) → the read-only `knowledge` MCP, launched from
   `${CLAUDE_PLUGIN_DATA}/venv/bin/python`. Env (`ULTRA_MEMORY_DB`,
   `ULTRA_MEMORY_CALLER_CLASS`) comes from the userConfig→`CLAUDE_PLUGIN_OPTION_*`
-  bridge. `knowledge_mcp.caller_class_from_env` fail-closes to `subagent`, so the
-  MCP is safe even if `${...}` substitution does not occur on a given Claude Code
-  version (the SP-0 P1-D1 uncertainty).
+  bridge **with bash-default fallbacks** so both ALWAYS resolve (zero-config —
+  Claude Code rejects a server whose env references an unset `${CLAUDE_PLUGIN_OPTION_*}`,
+  and it does not inject manifest defaults): `ULTRA_MEMORY_DB` falls back to
+  `${CLAUDE_PROJECT_DIR}/data/memory.db` and `ULTRA_MEMORY_CALLER_CLASS` to `subagent`.
+  `knowledge_mcp.db_path_from_env` then DERIVES the same default (belt-and-suspenders for
+  the user-scope case where `CLAUDE_PROJECT_DIR` is empty), and
+  `knowledge_mcp.caller_class_from_env` fail-closes to `subagent`, so the MCP is safe even
+  if `${...}` substitution does not occur on a given Claude Code version (the SP-0 P1-D1
+  uncertainty).
 - `hooks/hooks.json` → `hooks/um-hook.cmd {rehydrate|maintain|checkpoint}`,
   wired as SessionStart (rehydrate sync + maintain async) and Stop (checkpoint).
   The wrapper resolves all env explicitly (P1-D1, deterministic — no reliance on
   `${user_config.*}` substitution) and is **fail-open**: a missing venv or any
   error exits 0 so a session is never blocked. It exports `ULTRA_MEMORY_SHADOW=0`
-  for live gist injection (the engine default is shadow=1).
+  for live gist injection (the engine default is shadow=1). The hooks share the MCP's
+  DB-path derivation (via `hooks/common.resolve_db_path` → `knowledge_mcp.db_path_from_env`),
+  so a zero-config install resolves the same `memory.db` for the MCP and all three hooks.
 
 ## The `import_complete` gate
 

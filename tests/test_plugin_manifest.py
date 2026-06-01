@@ -49,12 +49,26 @@ def test_userconfig_fields_have_valid_type_and_description():
         )
 
 
-def test_required_data_db_path_field_present():
-    """The knowledge MCP + hooks cannot run without the consumer's memory.db path."""
+def test_data_db_path_field_is_optional_zero_config():
+    """Zero-config install (2026-06-01): data_db_path is now OPTIONAL — leaving it
+    empty auto-derives <project>/data/memory.db (or ~/.ultra-memory/memory.db at
+    user scope), so `/plugin install` prompts nothing required. The field stays a
+    declared userConfig key (with title + description), just not `required: True`."""
     uc = _manifest()["userConfig"]
-    assert "data_db_path" in uc and uc["data_db_path"].get("required") is True, (
-        "data_db_path must be a required userConfig field"
+    assert "data_db_path" in uc, "data_db_path must stay a declared userConfig key"
+    assert uc["data_db_path"].get("required") is not True, (
+        "data_db_path must NOT be required (zero-config install)"
     )
+
+
+def test_no_userconfig_field_is_required_zero_config():
+    """The whole point of zero-config: NO userConfig field is `required: True`, so
+    the installer prompts for nothing mandatory."""
+    uc = _manifest()["userConfig"]
+    for name, field in uc.items():
+        assert field.get("required") is not True, (
+            f"userConfig.{name} must not be required (zero-config install)"
+        )
 
 
 def test_marketplace_json_is_valid_and_points_at_this_plugin():

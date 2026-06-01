@@ -214,7 +214,9 @@ def main(stdin, stdout):
     import datetime
     import os
     payload = common.read_payload(stdin)
-    db_path = os.environ.get("ULTRA_MEMORY_DB", "")
+    # Zero-config-consistent with the knowledge MCP: explicit ULTRA_MEMORY_DB wins,
+    # else <CLAUDE_PROJECT_DIR>/data/memory.db, else ~/.ultra-memory/memory.db (never cwd).
+    db_path = common.resolve_db_path()
     shadow = os.environ.get("ULTRA_MEMORY_SHADOW", "1") == "1"
     shadow_out = os.environ.get("ULTRA_MEMORY_SHADOW_OUT") or None
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

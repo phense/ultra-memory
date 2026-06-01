@@ -22,6 +22,16 @@ def agent_role_optout(payload=None):
     return False
 
 
+def resolve_db_path(env=None):
+    """Resolve the memory.db path the SAME way the knowledge MCP does, so the whole
+    plugin is zero-config-consistent: explicit ``ULTRA_MEMORY_DB`` wins, else
+    ``<CLAUDE_PROJECT_DIR>/data/memory.db``, else ``~/.ultra-memory/memory.db`` — never
+    cwd. Delegates to the single engine resolver (``knowledge_mcp.db_path_from_env``).
+    Returns a ``str`` (hooks feed it to ``db_ready`` / ``open_memory_db``)."""
+    from ..knowledge_mcp import db_path_from_env
+    return str(db_path_from_env(env if env is not None else os.environ))
+
+
 def db_ready(db_path):
     """True only when the schema is present AND the one-time import is complete.
 

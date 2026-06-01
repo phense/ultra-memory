@@ -4,8 +4,8 @@
       "command": "${CLAUDE_PLUGIN_DATA}/venv/bin/python",
       "args": ["-m", "ultra_memory.knowledge_mcp"],
       "env": {
-        "ULTRA_MEMORY_DB": "${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH}",
-        "ULTRA_MEMORY_CALLER_CLASS": "${CLAUDE_PLUGIN_OPTION_CALLER_CLASS}"
+        "ULTRA_MEMORY_DB": "${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH:-${CLAUDE_PROJECT_DIR}/data/memory.db}",
+        "ULTRA_MEMORY_CALLER_CLASS": "${CLAUDE_PLUGIN_OPTION_CALLER_CLASS:-subagent}"
       }
     }
   }

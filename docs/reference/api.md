@@ -457,6 +457,16 @@ downstream consumer (Trading-side, not the engine) folds those edges into an EWM
 - `allowed_types_for(caller_class)` / `caller_class_from_env(env)` — the **type**
   axis of the access wall (unchanged): trusted (`orchestrator`/`owner`) → all types;
   else `SAFE_TYPES` = `(project, reference)`, fail-closed.
+- `db_path_from_env(env) -> Path` — the single source of truth for resolving the
+  `memory.db` path (the MCP, all three session hooks via `hooks/common.resolve_db_path`,
+  and `maintain` route through it, so a zero-config install opens the same DB everywhere).
+  Resolution order, **NEVER cwd**: (1) explicit `ULTRA_MEMORY_DB` if set + non-blank →
+  `Path(it)`; else (2) `${CLAUDE_PROJECT_DIR}/data/memory.db` if `CLAUDE_PROJECT_DIR` is
+  set + non-blank; else (3) `~/.ultra-memory/memory.db` (user-global). Blank values are
+  treated as unset (fall through). It only RESOLVES — `open_memory_db` downstream does the
+  create+migrate, and an empty store recalls nothing gracefully. **Zero-config change
+  (2026-06-01):** it no longer raises — `ConfigError` is kept for callers that reference
+  it but this resolver derives a default instead.
 - `filter_links_for_caller(conn, links, *, caller_class)` — **SP-8 bughunt.** Extends
   the type wall from the PRIMARY row to its **edges**: for a type-scoped caller it
   drops any `links` edge whose `memory` endpoint resolves (via `SELECT type FROM
@@ -500,6 +510,12 @@ Shared, fail-open, no-LLM, no-write helpers for the session hooks.
   env `ULTRA_MEMORY_AGENT_ROLE` is non-empty (cron/subagent wrappers set it), or
   a SessionStart `payload["source"]` is not in `INTERACTIVE_SOURCES`
   (`{startup, resume, clear, compact}`).
+- `resolve_db_path(env=None) -> str` — resolve the `memory.db` path the SAME way the
+  knowledge MCP does (delegates to `knowledge_mcp.db_path_from_env`), so the whole plugin
+  is zero-config-consistent: explicit `ULTRA_MEMORY_DB`, else
+  `${CLAUDE_PROJECT_DIR}/data/memory.db`, else `~/.ultra-memory/memory.db` — never cwd.
+  Returns a `str` (hooks feed it to `db_ready` / `open_memory_db`). Used by all three hook
+  `main()` shells.
 - `db_ready(db_path) -> bool` — True only when the schema is present AND
   `meta.import_complete == '1'`. Any error / missing file → False (fail-open to
   the legacy path, spec §7.4).
@@ -520,8 +536,10 @@ Shared, fail-open, no-LLM, no-write helpers for the session hooks.
   (idempotent on `event_key`). Always returns `{}` (NEVER blocks). No-ops on:
   `stop_hook_active`, role opt-out, DB not ready, missing transcript, or no
   material work.
-- `main(stdin, stdout) -> int` — CLI shell: read payload, `ULTRA_MEMORY_DB` from
-  env, stamp `ts`, run, write any output. Exit 0.
+- `main(stdin, stdout) -> int` — CLI shell: read payload, resolve the DB path via
+  `common.resolve_db_path()` (zero-config: explicit `ULTRA_MEMORY_DB`, else
+  `${CLAUDE_PROJECT_DIR}/data/memory.db`, else `~/.ultra-memory/memory.db` — never cwd),
+  stamp `ts`, run, write any output. Exit 0.
 
 ## `hooks.rehydrate` (SessionStart hook)
 
@@ -566,6 +584,6 @@ Shared, fail-open, no-LLM, no-write helpers for the session hooks.
 - `_budget_from_env() -> int` — resolve the gist char budget from
   `ULTRA_MEMORY_REHYDRATE_BUDGET` (consumer-tunable); default `2000`. Empty,
   non-numeric, or non-positive values fail-soft back to `2000`.
-- `main(stdin, stdout) -> int` — CLI shell; `ULTRA_MEMORY_DB`,
-  `ULTRA_MEMORY_SHADOW` (default `"1"`), `ULTRA_MEMORY_SHADOW_OUT`, and
-  `ULTRA_MEMORY_REHYDRATE_BUDGET` (default `2000`) from env.
+- `main(stdin, stdout) -> int` — CLI shell; DB path via `common.resolve_db_path()`
+  (zero-config derivation — see `db_path_from_env`), `ULTRA_MEMORY_SHADOW` (default `"1"`),
+  `ULTRA_MEMORY_SHADOW_OUT`, and `ULTRA_MEMORY_REHYDRATE_BUDGET` (default `2000`) from env.
