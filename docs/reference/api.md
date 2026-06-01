@@ -296,6 +296,27 @@ best-rank-per-backend RRF, weighted by `outcome_weight` (inert 1.0). No LLM.
 > body, not the frontmatter). The document is now `title + body` only; the high-signal
 > `title` stays, the frontmatter noise is gone. Embedding side + ranking math
 > unchanged.
+>
+> **R4 bug-hunt — two PERF-only fixes (results byte-identical, no ranking change).**
+> (1) **Chunked embedding fetch (was N+1).** `_knowledge_candidates`'s embed backend
+> fetched knowledge vectors with one `SELECT … FROM embeddings WHERE target_id=?` per
+> slug — ~1223 per-row round-trips per recall at the designed mirror scale. It now
+> issues one batched `… target_id IN (<≤500 placeholders>)` query per chunk
+> (`_EMBED_FETCH_CHUNK=500`, safely under SQLite's 999-variable limit with the
+> `model_name` param), i.e. `ceil(N/500)` round-trips. The `cached` dict is rebuilt in
+> `by_slug` (unified_index row) order so `cosine_search`'s score-tie order is unchanged;
+> a slug with no cached vector or a dim-mismatch is skipped exactly as before.
+> (2) **Fingerprinted BM25 corpus cache (was: re-tokenize every call).** `_bm25_rank`
+> re-tokenized all docs + recomputed `df`/`avgdl` on every call (the consolidation drain
+> runs it up to 50× per weekly run → ~50× full-corpus re-tokenizations). The
+> query-INDEPENDENT corpus stats (tokenized docs, lengths, avgdl) are now memoized on a
+> **stable sha1 content fingerprint** of the docs (`_bm25_corpus_stats`, single-entry
+> cache): an unchanged corpus is tokenized once; any doc edit/add/remove changes the
+> fingerprint → recompute (never stale). The fingerprint is sha1 over a canonical
+> `(doc_id, text)` serialization — **not** `PYTHONHASHSEED`-salted `hash()` — so the
+> cache key is process-stable and correctness never depends on the hash seed. The
+> query-dependent `df` + scoring still run every call; scores are byte-identical.
+> `_bm25_cache_clear()` resets the cache (test/safety hook; no behavioral effect).
 
 - `unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
   top_k=5, dim=EMBED_DIM, now_ts=None, ts=None, audit=True) -> [dict]` — resolve
@@ -335,8 +356,10 @@ best-rank-per-backend RRF, weighted by `outcome_weight` (inert 1.0). No LLM.
   `agent_topic_bindings` rows for the agent name. No binding from either source ⇒
   the **empty set** (degraded mode is safe — sees less, never more). A
   binding-lookup error never widens scope.
-- Generic IR helpers (internal, no Trading specifics): `_bm25_rank`, `_rrf_score`,
-  `_best_rank_rrf`, `_knowledge_candidates`. `allowed_types_for_caller` delegates to
+- Generic IR helpers (internal, no Trading specifics): `_bm25_rank` (fingerprint-cached
+  corpus tokenization — R4 perf), `_bm25_corpus_stats`/`_bm25_corpus_fingerprint`/
+  `_bm25_cache_clear`, `_rrf_score`, `_best_rank_rrf`, `_knowledge_candidates` (chunked
+  embedding fetch — R4 perf). `allowed_types_for_caller` delegates to
   `knowledge_mcp.allowed_types_for` (single source of truth for the type wall).
 
 ## `attribution` *(SP-8 stage A2)*

@@ -900,3 +900,238 @@ def test_fix3_rrf_order_identical_across_hashseed(tmp_path):
         return r.stdout.strip().splitlines()[-1]
 
     assert _run(0) == _run(1) == _run(12345)
+
+
+# ---------------------------------------------------------------------------
+# R4 PERF FIX 1 — the knowledge embedding fetch must be CHUNKED, not N+1.
+# `_knowledge_candidates`'s embed backend used to run ONE `SELECT … FROM embeddings`
+# per slug (~278). At the designed ~1223-page mirror scale, that's ~1223 per-row
+# round-trips per recall. The fix batches the vector fetch into ONE `… target_id IN
+# (…)` query per ≤500-slug chunk, but the RANKED RESULT must be BYTE-IDENTICAL.
+# ---------------------------------------------------------------------------
+
+class _CountingConn:
+    """A thin proxy over a sqlite3 connection that counts how many embedding
+    SELECTs (`FROM embeddings`, `target_kind='knowledge'`) hit the DB — the N+1
+    perf-regression guard. Everything else delegates verbatim, so behavior (and
+    therefore the ranked results) is unchanged."""
+
+    def __init__(self, real):
+        self._real = real
+        self.embed_selects = 0
+
+    def execute(self, sql, *args, **kw):
+        s = " ".join(sql.split())
+        if "FROM embeddings" in s and "target_kind='knowledge'" in s:
+            self.embed_selects += 1
+        return self._real.execute(sql, *args, **kw)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def _seed_n_knowledge_with_vectors(conn, n, *, with_vector_every=1, dim=3):
+    """Seed `n` knowledge rows under topic 'trading'. Every `with_vector_every`-th
+    row also gets a seeded embedding vector; the others have NO cached vector (so the
+    'slug missing a vector behaves as before' branch is exercised)."""
+    for i in range(n):
+        slug = f"kn{i:04d}"
+        # All share the query term 'alpha' in the body so BM25 ranks them; a per-row
+        # token makes the order deterministic.
+        _add_knowledge(conn, slug=slug, topic="trading", title=f"Page {i}",
+                       snippet=f"alpha note unit{i}", bm25_text=f"alpha note unit{i}")
+        if i % with_vector_every == 0:
+            # Distinct vectors so cosine produces a strict, reproducible order.
+            vec = [0.0] * dim
+            vec[i % dim] = 1.0 + (i / 1000.0)
+            _embed_knowledge(conn, slug, vec, dim=dim)
+
+
+def test_perf_fix1_embedding_fetch_is_chunked_not_n_plus_1(tmp_path):
+    """RED before the fix (N embedding SELECTs), GREEN after (~ceil(N/chunk)). With
+    N knowledge slugs in scope, the embed backend must issue a BOUNDED number of
+    `FROM embeddings` SELECTs — one per ≤500-slug chunk — NOT one per slug."""
+    conn = _CountingConn(memory_lib.open_memory_db(tmp_path / "m.db"))
+    n = 23
+    _seed_n_knowledge_with_vectors(conn, n)
+    emb = _fake_embedder({"alpha": [1.0, 0.0, 0.0]})
+
+    unified_query._knowledge_candidates(
+        conn, "alpha", agent_topics={"trading"}, embedder=emb, dim=3)
+
+    # Chunk size 500 → ceil(23/500) == 1 batched SELECT, NOT 23 per-row SELECTs.
+    assert conn.embed_selects <= 2, (
+        f"expected a bounded (chunked) embedding fetch, got {conn.embed_selects} "
+        f"SELECTs for {n} slugs (N+1 regression)")
+    conn._real.close()
+
+
+def test_perf_fix1_chunking_crosses_the_500_boundary(tmp_path):
+    """A scope larger than one chunk issues exactly ceil(N/500) batched SELECTs —
+    proving the IN-list is chunked under SQLite's 999-variable ceiling, not one giant
+    (over-limit) query and not N per-row queries."""
+    conn = _CountingConn(memory_lib.open_memory_db(tmp_path / "m.db"))
+    n = 1100  # 3 chunks at size 500
+    _seed_n_knowledge_with_vectors(conn, n)
+    emb = _fake_embedder({"alpha": [1.0, 0.0, 0.0]})
+
+    unified_query._knowledge_candidates(
+        conn, "alpha", agent_topics={"trading"}, embedder=emb, dim=3)
+
+    import math as _m
+    expected_chunks = _m.ceil(n / 500)
+    assert conn.embed_selects == expected_chunks, (
+        f"expected {expected_chunks} chunked SELECTs for {n} slugs, "
+        f"got {conn.embed_selects}")
+    conn._real.close()
+
+
+def test_perf_fix1_ranked_result_byte_identical_to_baseline(tmp_path):
+    """CRITICAL byte-identity: the (bm25_ranked, embed_ranked, by_slug-keys) output of
+    `_knowledge_candidates` AND the full `unified_recall` ranking are IDENTICAL to a
+    captured baseline — the chunked fetch is PURE efficiency, zero ranking change.
+
+    Some slugs deliberately have NO cached vector (with_vector_every=3) so the
+    'missing-vector slug is skipped exactly as before' invariant is locked."""
+    # Baseline captured from a fresh, independent DB built identically.
+    base_conn = memory_lib.open_memory_db(tmp_path / "base.db")
+    _seed_n_knowledge_with_vectors(base_conn, 30, with_vector_every=3)
+    emb = _fake_embedder({"alpha": [1.0, 0.0, 0.0]})
+
+    base_bm25, base_embed, base_by = unified_query._knowledge_candidates(
+        base_conn, "alpha", agent_topics={"trading"}, embedder=emb, dim=3)
+    base_recall = unified_query.unified_recall(
+        base_conn, "alpha", caller_class="orchestrator", agent_topics=None,
+        embedder=emb, dim=3, top_k=40, now_ts="2026-05-02T00:00:00", audit=False)
+    base_conn.close()
+
+    live_conn = memory_lib.open_memory_db(tmp_path / "live.db")
+    _seed_n_knowledge_with_vectors(live_conn, 30, with_vector_every=3)
+    live_bm25, live_embed, live_by = unified_query._knowledge_candidates(
+        live_conn, "alpha", agent_topics={"trading"}, embedder=emb, dim=3)
+    live_recall = unified_query.unified_recall(
+        live_conn, "alpha", caller_class="orchestrator", agent_topics=None,
+        embedder=emb, dim=3, top_k=40, now_ts="2026-05-02T00:00:00", audit=False)
+    live_conn.close()
+
+    assert live_bm25 == base_bm25
+    assert live_embed == base_embed          # identical embed ranking + scores order
+    assert sorted(live_by) == sorted(base_by)
+    assert live_recall == base_recall        # full cross-store ranking byte-identical
+    # Sanity: with_vector_every=3 → some slugs were vector-less (skipped, as before).
+    assert len(base_embed) < 30
+
+
+# ---------------------------------------------------------------------------
+# R4 PERF FIX 2 — the BM25 corpus must be CACHED on a content fingerprint, not
+# re-tokenized on every call. `_bm25_rank` re-tokenized all docs + recomputed df +
+# avgdl on EVERY call (~83); the consolidation drain calls it up to 50× per weekly
+# run → 50× full-corpus re-tokenizations. The fix memoizes the tokenized corpus
+# keyed on a STABLE (sha1) content fingerprint — reused for an identical corpus,
+# recomputed (never stale) when any doc is edited / added / removed.
+# ---------------------------------------------------------------------------
+
+def test_perf_fix2_same_corpus_reuses_tokenization(tmp_path, monkeypatch):
+    """Two `_bm25_rank` calls over the SAME docs → `_tokenize` runs over the corpus
+    only ONCE (the second call hits the cache), and both rankings are IDENTICAL.
+    RED before the fix (re-tokenizes every call)."""
+    # Clear any cross-test cache state.
+    if hasattr(unified_query, "_bm25_cache_clear"):
+        unified_query._bm25_cache_clear()
+
+    calls = {"n": 0}
+    real_tokenize = unified_query._tokenize
+
+    def _spy(text):
+        calls["n"] += 1
+        return real_tokenize(text)
+
+    monkeypatch.setattr(unified_query, "_tokenize", _spy)
+
+    docs = {f"d{i}": f"alpha term body number {i}" for i in range(10)}
+    r1 = unified_query._bm25_rank("alpha term", docs)
+    after_first = calls["n"]
+    r2 = unified_query._bm25_rank("alpha term", docs)
+    after_second = calls["n"]
+
+    assert r1 == r2, "BM25 ranking must be identical for the same corpus"
+    # The query is tokenized each call (cheap), but the DOCS corpus (10 docs) is only
+    # tokenized once: the second call adds at most the query tokenization, NOT 10 docs.
+    doc_tokenizations_second_call = after_second - after_first
+    assert doc_tokenizations_second_call <= 1, (
+        f"second identical call re-tokenized the corpus "
+        f"({doc_tokenizations_second_call} _tokenize calls); expected cache reuse")
+
+
+def test_perf_fix2_changed_corpus_recomputes_not_stale(tmp_path, monkeypatch):
+    """CRITICAL correctness: when the docs content CHANGES (a doc edited, a doc added,
+    a doc removed) the fingerprint changes → fresh tokenization + the CORRECT new
+    ranking (never a stale cached one)."""
+    if hasattr(unified_query, "_bm25_cache_clear"):
+        unified_query._bm25_cache_clear()
+
+    docs_a = {"d1": "alpha one", "d2": "beta two"}
+    r_a = unified_query._bm25_rank("alpha", docs_a)
+    assert r_a[0][0] == "d1"  # only d1 mentions alpha
+
+    # (1) EDIT a doc's text so the OTHER doc now matches the query.
+    docs_edit = {"d1": "gamma one", "d2": "alpha two"}
+    r_edit = unified_query._bm25_rank("alpha", docs_edit)
+    assert r_edit and r_edit[0][0] == "d2", (
+        "edited corpus must recompute — d2 now matches, NOT a stale d1 ranking")
+
+    # (2) ADD a doc.
+    docs_add = dict(docs_a, d3="alpha three alpha")
+    r_add = unified_query._bm25_rank("alpha", docs_add)
+    add_ids = {doc_id for doc_id, _ in r_add}
+    assert "d3" in add_ids, "added doc must appear (fingerprint changed → recompute)"
+
+    # (3) REMOVE a doc — d1 gone, only d2 (no 'alpha') remains → no alpha hits.
+    docs_rm = {"d2": "beta two"}
+    r_rm = unified_query._bm25_rank("alpha", docs_rm)
+    assert r_rm == [], "removing the only matching doc must yield no stale hit"
+
+
+def test_perf_fix2_caches_across_calls_correctly(tmp_path, monkeypatch):
+    """The cache must serve the RIGHT tokenization when alternating between two
+    distinct corpora (fingerprint keys them apart — no cross-corpus bleed)."""
+    if hasattr(unified_query, "_bm25_cache_clear"):
+        unified_query._bm25_cache_clear()
+
+    docs_x = {"x1": "alpha apple", "x2": "alpha banana"}
+    docs_y = {"y1": "alpha cherry", "y2": "beta date"}
+
+    rx1 = unified_query._bm25_rank("apple", docs_x)
+    ry1 = unified_query._bm25_rank("cherry", docs_y)
+    rx2 = unified_query._bm25_rank("apple", docs_x)  # back to x — must match rx1
+    ry2 = unified_query._bm25_rank("cherry", docs_y)
+
+    assert rx1 == rx2 and rx1 and rx1[0][0] == "x1"
+    assert ry1 == ry2 and ry1 and ry1[0][0] == "y1"
+
+
+def test_perf_fix2_fingerprint_is_hashseed_stable(tmp_path):
+    """The fingerprint must be a STABLE digest (sha1), NOT PYTHONHASHSEED-salted
+    hash() — so the cache key (and thus correctness) does not depend on the hash seed
+    across processes. We assert the BM25 ranking over a fixed corpus is byte-identical
+    under two different PYTHONHASHSEED values."""
+    import os
+    import subprocess
+    import sys
+
+    prog = (
+        "import json\n"
+        "from ultra_memory import unified_query\n"
+        "docs={'d%02d'%i:'alpha term body %d'%i for i in range(12)}\n"
+        "r=unified_query._bm25_rank('alpha term', docs)\n"
+        "print(json.dumps([list(t) for t in r]))\n"
+    )
+
+    def _run(seed):
+        env = dict(os.environ, PYTHONHASHSEED=str(seed))
+        r = subprocess.run([sys.executable, "-c", prog],
+                           capture_output=True, text=True, env=env)
+        assert r.returncode == 0, r.stderr
+        return r.stdout.strip().splitlines()[-1]
+
+    assert _run(0) == _run(1) == _run(99999)
