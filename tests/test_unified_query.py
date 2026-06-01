@@ -822,3 +822,81 @@ def test_fix1_unified_recall_redacts_memory_only_byte_identity_path(tmp_path):
     assert _SECRET_VAL not in out[0]["title"]
     assert "[REDACTED]" in out[0]["title"]
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# R4 FIX 3 — RRF final sort must be DETERMINISTIC across PYTHONHASHSEED.
+# `_best_rank_rrf` iterates a `set` of (kind,key) tuples (hash-seed-dependent
+# order); the final `sorted(weighted.items(), key=...)` had NO secondary tie-break,
+# so two units tying on weighted score reordered by hash seed → top_k flips.
+# ---------------------------------------------------------------------------
+
+def _two_tied_knowledge_recall(conn):
+    """Seed two knowledge units that TIE on weighted RRF score: `kn-aaa` ranks #1 in
+    the BM25 backend only, `kn-zzz` ranks #1 in the embed backend only — each earns
+    exactly 1/(k+1), an identical fused score. The deterministic total order is
+    (-score, (kind,key)) → ('knowledge','kn-aaa') before ('knowledge','kn-zzz')."""
+    # BM25 hit on the word 'alpha' lives in kn-aaa's text; embed hit lands on kn-zzz.
+    _add_knowledge(conn, slug="kn-aaa", topic="trading", title="alpha title",
+                   snippet="alpha alpha alpha", bm25_text="alpha alpha alpha")
+    _add_knowledge(conn, slug="kn-zzz", topic="trading", title="zzz title",
+                   snippet="nothing matching here", bm25_text="nothing matching here")
+    # Embed: query vec == kn-zzz's vec (cosine 1.0), kn-aaa orthogonal.
+    _embed_knowledge(conn, "kn-zzz", [1.0, 0.0, 0.0])
+    _embed_knowledge(conn, "kn-aaa", [0.0, 1.0, 0.0])
+    emb = _fake_embedder({"alpha-query": [1.0, 0.0, 0.0]})  # matches kn-zzz vec
+    return unified_query.unified_recall(
+        conn, "alpha alpha-query", caller_class="orchestrator", agent_topics=None,
+        embedder=emb, top_k=5, dim=3, audit=False)
+
+
+def test_fix3_rrf_final_sort_has_stable_tiebreak(tmp_path):
+    """The two tied knowledge units come back in the deterministic (-score, key)
+    order — kn-aaa before kn-zzz — and their scores are genuinely equal (the tie is
+    real, so only the secondary key decides the order)."""
+    conn = _db(tmp_path)
+    hits = _two_tied_knowledge_recall(conn)
+    kn = [(h["slug"], h["score"]) for h in hits if h["source_kind"] == "knowledge"]
+    assert ("kn-aaa", "kn-zzz") == tuple(s for s, _ in kn[:2])
+    # The tie is real: equal scores → only the secondary (kind,key) key orders them.
+    assert kn[0][1] == kn[1][1]
+    conn.close()
+
+
+def test_fix3_rrf_order_identical_across_hashseed(tmp_path):
+    """End-to-end: the recall order over the tied corpus is byte-identical under two
+    different PYTHONHASHSEED values (it must not depend on set-iteration order)."""
+    import os
+    import subprocess
+    import sys
+
+    db = tmp_path / "seed.db"
+    # Build the fixture DB once via an in-process conn, then close it so the
+    # subprocess opens its own connection over the same file.
+    conn = memory_lib.open_memory_db(db)
+    _two_tied_knowledge_recall(conn)
+    conn.close()
+
+    prog = (
+        "import json,sys\n"
+        "from ultra_memory import memory_lib, unified_query\n"
+        "def emb(texts):\n"
+        "    out=[]\n"
+        "    for t in texts:\n"
+        "        out.append([1.0,0.0,0.0] if 'alpha-query' in t else [0.0]*3)\n"
+        "    return out\n"
+        "conn=memory_lib.open_memory_db(sys.argv[1])\n"
+        "hits=unified_query.unified_recall(conn,'alpha alpha-query',"
+        "caller_class='orchestrator',agent_topics=None,embedder=emb,top_k=5,dim=3,"
+        "audit=False)\n"
+        "print(json.dumps([h.get('slug') or h.get('id') for h in hits]))\n"
+    )
+
+    def _run(seed):
+        env = dict(os.environ, PYTHONHASHSEED=str(seed))
+        r = subprocess.run([sys.executable, "-c", prog, str(db)],
+                           capture_output=True, text=True, env=env)
+        assert r.returncode == 0, r.stderr
+        return r.stdout.strip().splitlines()[-1]
+
+    assert _run(0) == _run(1) == _run(12345)

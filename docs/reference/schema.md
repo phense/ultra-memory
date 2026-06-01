@@ -18,6 +18,7 @@ Version is tracked by `PRAGMA user_version` and mirrored in `meta.schema_version
 | `0005_unified_index_bm25_text.sql` | 5 | SP-6 BM25 full-body fix (D11): `unified_index.bm25_text` — the FULL collapsed page body for the knowledge-side BM25 document (`snippet` stays the ~400-char display preview) |
 | `0006_access_log_session_id.sql` | 6 | SP-8 substrate (§5.1): `access_log.session_id` — a generic opaque string recording *which session* recalled a unit (the harmless logging substrate the usage-outcome attribution joins on; `NULL` = not attributable) |
 | `0007_access_log_rank.sql` | 7 | SP-8 substrate: `access_log.rank` — the 1-based position of the unit in the FULL fused recall list at recall time (rank=1 = top hit, counting both memory and knowledge hits); `NULL` on pre-0007 rows and any non-recall access; harmless (logging only, no ranking effect), feeds a later top-k attribution policy |
+| `0008_access_log_session_index.sql` | 8 | composite index `idx_access_log_session(session_id, target_kind)` — covers the session-end attribution query's equality filter (`target_kind='memory' AND session_id=?`) so it stops full-scanning the never-pruned `access_log`. Additive (CREATE INDEX IF NOT EXISTS), idempotent. (A future `access_log` retention prune is a deliberate follow-up, NOT built here.) |
 
 The runner (`db.migrate`) applies each pending file's statements + the version bump
 in one transaction; `ADD COLUMN` replay is tolerated (idempotent).
@@ -100,7 +101,10 @@ ranking effect) — it is the substrate a later usage-outcome attribution joins 
 Plus **(0007)** `rank` — the unit's 1-based position in the FULL fused recall list
 at recall time (rank=1 = top hit, counting both memory and knowledge hits). `NULL`
 on pre-0007 rows and any non-recall access; harmless (logging only, no ranking
-effect) — the signal a later top-k attribution policy reads.
+effect) — the signal a later top-k attribution policy reads. **(0008)** the
+composite `idx_access_log_session(session_id, target_kind)` indexes the session-end
+attribution lookup (`recalled_units_for_session`) so it no longer full-scans this
+never-pruned, fastest-growing table.
 
 ### `links`
 The **cross-store edge spine** (SP-3 D5/D6): `src_kind`, `src_id`, `predicate`,
@@ -169,4 +173,6 @@ table; dropping it is deferred to the SP-5 doc/schema overhaul.
 
 `idx_memories_status(status)`, `idx_session_events_session(session_id)`,
 `idx_links_src(src_kind, src_id)`, **(0004)** `idx_unified_topic(topic)`,
-`idx_links_dst(dst_kind, dst_id)` (the reverse-edge lookup `memory ← knowledge`).
+`idx_links_dst(dst_kind, dst_id)` (the reverse-edge lookup `memory ← knowledge`),
+**(0008)** `idx_access_log_session(session_id, target_kind)` (the session-end
+attribution lookup over the never-pruned `access_log`).

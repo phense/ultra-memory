@@ -435,7 +435,14 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
             w = ow if ow is not None else 1.0
         weighted[(kind, key)] = base * w
 
-    ordered = sorted(weighted.items(), key=lambda kv: kv[1], reverse=True)
+    # R4 FIX 3: a STABLE secondary key. `_best_rank_rrf` builds the rrf dict by
+    # iterating a `set` of (kind,key) tuples — PYTHONHASHSEED-dependent order — so a
+    # bare `key=score, reverse=True` reorders ties run-to-run, flipping top_k
+    # membership of the one ranked list feeding the gist + MCP. The (kind,key) tuple
+    # is unique + orderable, so (-score, key) is a deterministic TOTAL order (same
+    # pattern as the BM25 sort at line 109). Determinizes output regardless of
+    # set-iteration order; does NOT change WHICH score ranks where.
+    ordered = sorted(weighted.items(), key=lambda kv: (-kv[1], kv[0]))
 
     # --- Build result dicts -----------------------------------------------------
     results = []

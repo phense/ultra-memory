@@ -213,3 +213,77 @@ def test_one_hop_links_attached(tmp_path):
     assert links == [{"predicate": "grounded_in", "src_type": None,
                       "dst_kind": "wiki", "dst_id": "some-slug", "dst_type": None}]
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# R4 FIX 6 — query_memories must call `_links_for` (a per-row SELECT) ONLY for the
+# top_k survivors, NOT for the whole candidate set. The pre-fix loop built a result
+# dict (incl. _links_for) for EVERY matched row, then sorted + truncated at the end
+# → N link-SELECTs to return top_k.
+# ---------------------------------------------------------------------------
+
+def _seed_n_with_links(conn, n):
+    """Seed n reference memories, each carrying one cross-store link, with distinct
+    cosine scores (vec[0] = i/n so ranking is deterministic and id != rank)."""
+    emb_map = {}
+    for i in range(n):
+        mid = f"m{i:02d}"
+        # Higher i → higher cosine with the query vec [1,0,0] (vec[0] grows with i).
+        vec = [(i + 1) / n, 0.0, 0.0]
+        _save(conn, id=mid, title=f"title {i}", body=f"body {i}")
+        emb_map[f"body {i}"] = vec
+        emb_map[f"title {i}"] = vec
+        memory_lib.record_link(
+            conn, src_kind="memory", src_id=mid, predicate="relates_to",
+            dst_kind="knowledge", dst_id=f"kn-{i}", ts="2026-05-01T00:00:00")
+    emb_map["QUERY"] = [1.0, 0.0, 0.0]
+    return _fake_embedder(emb_map)
+
+
+def test_fix6_links_for_called_only_for_top_k(tmp_path, monkeypatch):
+    """With N=8 candidates and top_k=3, `_links_for` is invoked ~3 times (the
+    survivors), NOT 8 times (the full candidate set)."""
+    conn = _db(tmp_path)
+    n = 8
+    emb = _seed_n_with_links(conn, n)
+
+    calls = {"n": 0}
+    real_links_for = memory_query._links_for
+
+    def spy(conn_, mid):
+        calls["n"] += 1
+        return real_links_for(conn_, mid)
+
+    monkeypatch.setattr(memory_query, "_links_for", spy)
+    out = memory_query.query_memories(conn, "QUERY", embedder=emb, dim=3, top_k=3,
+                                      now_ts="2026-05-02T00:00:00")
+    assert len(out) == 3
+    # The link work is bounded to the top_k survivors, not the whole candidate set.
+    assert calls["n"] <= 3
+    assert calls["n"] < n
+    conn.close()
+
+
+def test_fix6_top_k_rows_and_links_identical_to_full_ranking(tmp_path):
+    """Bounding the link work must NOT change WHICH rows rank where, the returned
+    dict shape, or the links payload — the top_k output is identical to a reference
+    that ranks all then truncates."""
+    conn = _db(tmp_path)
+    n = 8
+    emb = _seed_n_with_links(conn, n)
+
+    # Reference: rank ALL (top_k=n), then truncate to 3 in the test.
+    full = memory_query.query_memories(conn, "QUERY", embedder=emb, dim=3, top_k=n,
+                                       now_ts="2026-05-02T00:00:00")
+    reference = full[:3]
+    # Actual: ask for exactly top_k=3 (the optimized path).
+    actual = memory_query.query_memories(conn, "QUERY", embedder=emb, dim=3, top_k=3,
+                                         now_ts="2026-05-02T00:00:00")
+    assert actual == reference
+    # Each survivor carries its real link (built only for the survivors).
+    for d in actual:
+        i = int(d["id"][1:])
+        assert d["links"] == [{
+            "predicate": "relates_to", "src_type": None,
+            "dst_kind": "knowledge", "dst_id": f"kn-{i}", "dst_type": None}]
+    conn.close()

@@ -33,7 +33,10 @@ Every public function. The caller owns connections and supplies timestamps.
     has no wiki dependency.
   - `created_by` (SP-3 D16) is the write's provenance: `human` (the safe-immutable
     default) / `agent` / `background_review` / `import`. Stamped on both INSERT and
-    UPDATE (an `agent` re-save stays `agent`).
+    UPDATE (an `agent` re-save stays `agent`). Provenance is **never DOWNGRADED**: a
+    re-save over an existing `human` row with a non-`human` `created_by` preserves
+    `human` (a human-owned row stays human unless a human edits it) — mirrors the
+    status/pin preservation already in place on re-save.
 - `make_keyword_router(keyword_map) -> router` — build a deterministic, **generic**,
   content-free fallback topic router from `{topic: (kw, …)}`. Whole-word match,
   map-insertion-order priority; abstains to `None` on no hit; `user`/`feedback`
@@ -457,7 +460,11 @@ downstream consumer (Trading-side, not the engine) folds those edges into an EWM
   both stores, fail-closed on the (type × topic) wall; when `agent_topics` is **not**
   supplied (the `_NO_TOPIC_ARG` sentinel — the legacy SP-1 invocation) behavior is
   unchanged (pure memory-store `knowledge_recall`), so every existing MCP test keeps
-  passing. Never raises (returns a structured `{"error": …}` payload).
+  passing. Never raises (returns a structured `{"error": …}` payload). On a recall
+  exception the client-facing payload is a **fixed generic string** (`"recall failed
+  (internal error)"`) — the raw `str(exc)` (which can embed an internal filesystem /
+  DB path that `strip_secrets` does NOT redact) is logged LOCALLY (stderr) and never
+  crosses the privilege boundary.
 
 ## `hooks.common`
 

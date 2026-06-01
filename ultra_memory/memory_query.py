@@ -133,7 +133,14 @@ def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
             f"query embedding dim {len(q_vec)} != expected {dim}; embedder/model mismatch")
     relevance = dict(rc.cosine_search(q_vec, list(vecs.items())))
 
-    results = []
+    # R4 FIX 6: compute scores over ALL candidates, sort + truncate to the top_k
+    # ids FIRST, THEN build the result dict (incl. the per-row `_links_for` SELECT)
+    # only for the survivors. The pre-fix loop did a link-SELECT for EVERY matched
+    # row before truncating — N link-SELECTs to return top_k. This bounds the
+    # per-recall link work to top_k while preserving the EXACT ranking/scoring
+    # semantics + the returned dict shape (the score is computed identically; only
+    # the link-fetch is deferred to after truncation).
+    scored = []  # (mid, score, stale)
     for mid, r in by_id.items():
         score = relevance.get(mid, 0.0)
         if _title_hit(r["title"], query):
@@ -144,6 +151,15 @@ def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
         stale = age > staleness_days
         if stale:
             score -= _STALE_PENALTY
+        scored.append((mid, score, stale))
+    # Sort desc by score. dict iteration order (by_id) is the insertion order of the
+    # SQL fetch, identical to the pre-fix `results` build order, so a stable sort on
+    # score reproduces the exact prior tie-order — byte-identical top_k.
+    scored.sort(key=lambda t: t[1], reverse=True)
+
+    results = []
+    for mid, score, stale in scored[:top_k]:
+        r = by_id[mid]
         results.append({
             "id": mid,
             "title": r["title"],
@@ -153,5 +169,4 @@ def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
             "stale": stale,
             "links": _links_for(conn, mid),
         })
-    results.sort(key=lambda d: d["score"], reverse=True)
-    return results[:top_k]
+    return results

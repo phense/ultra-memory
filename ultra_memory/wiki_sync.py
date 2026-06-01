@@ -210,25 +210,44 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts):
             embed_targets.append((slug, f"{title}\n{snippet}"))
 
     # Reconciliation: prune unified_index rows whose slug is no longer a file
-    # WITHIN the synced roots. Scope by the topics present in this call's roots so a
-    # row from an un-synced root is never touched (mirrors memory_export orphan
-    # prune, memory_export.py:102-109). A row whose topic was synced this call but
-    # whose slug vanished is an orphan.
-    synced_topics = set()
-    for root in roots:
-        for _path, topic, _slug in _iter_pages(root):
-            synced_topics.add(topic)
-    if synced_topics:
-        placeholders = ",".join("?" for _ in synced_topics)
+    # WITHIN the synced roots. Scope by the PATH-PREFIX of this call's roots — a row
+    # whose `path` sits under a synced root but whose slug was NOT seen this sync is
+    # an orphan (mirrors memory_export's path-based orphan prune). A row from an
+    # un-synced root is never touched (cross-root safety). R4 FIX 1: the prior code
+    # recomputed `synced_topics` from the CURRENT on-disk pages and gated on
+    # `topic IN (...)`; when the deleted page was the LAST page of its topic, that
+    # topic dropped out and its orphan row (a phantom pointing at a deleted file)
+    # survived forever. Scoping to the root path-prefix removes that dependence on a
+    # topic still having surviving files.
+    root_prefixes = [str(root) + "/" for root in roots]
+    if root_prefixes:
+        # `path LIKE <prefix>%` per synced root (the prefix already ends in os.sep,
+        # so a sibling root that merely shares a name-prefix is not matched). LIKE
+        # special chars (% _) do not occur in a normal filesystem path; if a root
+        # contained one it would only WIDEN the candidate set, then the seen_slugs +
+        # path-prefix membership check below still prunes correctly within roots.
+        like_clauses = " OR ".join("path LIKE ?" for _ in root_prefixes)
         existing = conn.execute(
-            f"SELECT slug FROM unified_index WHERE topic IN ({placeholders})",
-            tuple(synced_topics)).fetchall()
-        orphans = [r["slug"] for r in existing if r["slug"] not in seen_slugs]
+            f"SELECT slug, path FROM unified_index WHERE {like_clauses}",
+            tuple(p + "%" for p in root_prefixes)).fetchall()
+        orphans = [
+            r["slug"] for r in existing
+            if r["slug"] not in seen_slugs
+            and r["path"] is not None
+            and any(r["path"].startswith(p) for p in root_prefixes)]
         if orphans:
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 conn.executemany(
                     "DELETE FROM unified_index WHERE slug=?",
+                    [(s,) for s in orphans])
+                # Prune the orphaned knowledge embedding too (wiki_sync owns the
+                # knowledge-kind vectors it writes): a surviving phantom vector would
+                # let the embed backend rank a deleted page (the cosine half of the
+                # phantom). Fail-open within the same txn.
+                conn.executemany(
+                    "DELETE FROM embeddings WHERE target_kind='knowledge' "
+                    "AND target_id=?",
                     [(s,) for s in orphans])
                 conn.execute("COMMIT")
             except Exception:
