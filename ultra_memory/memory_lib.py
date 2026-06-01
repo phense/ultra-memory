@@ -333,10 +333,27 @@ def event_id_for_key(conn, event_key):
 
 def session_id_from_env(env):
     """SP-8 substrate (§5.1): the GENERIC session-id env read, the exact mirror of
-    `knowledge_mcp.caller_class_from_env`. Returns the stripped
-    `ULTRA_MEMORY_SESSION_ID` or None (unset/blank). Project-agnostic — the engine
-    learns *a* session id string, never that it is "Trading"."""
+    `knowledge_mcp.caller_class_from_env`. Returns the stripped session id, or None
+    (unset/blank). Project-agnostic — the engine learns *a* session id string, never
+    that it is "Trading".
+
+    Resolution order (SP-8 A3 — the keystone that makes the substrate non-dead):
+      1. `ULTRA_MEMORY_SESSION_ID` — the explicit override (cron / tests / a non
+         Claude-Code host that wants to set its own session key).
+      2. `CLAUDE_CODE_SESSION_ID` — the ambient session id Claude Code injects
+         natively into every tool / CLI subprocess (so an orchestrator recall threads
+         the real session with NO hook). This is the engine's *deployment platform*
+         env, not a consumer/project concept — the agnostic boundary (no wiki/Trading
+         import) is intact. `claude_cli.py` STRIPS this var for OUTBOUND claude calls
+         (anti-recursion); reading it on the inbound recall path is a distinct concern.
+
+    A stale `CLAUDE_CODE_SESSION_ID` in a long-lived process (e.g. the MCP server) only
+    orphans its access_log rows — no future Stop hook fires for an already-ended session
+    — so it under-attributes, never mis-attributes."""
     sid = (env.get("ULTRA_MEMORY_SESSION_ID") or "").strip()
+    if sid:
+        return sid
+    sid = (env.get("CLAUDE_CODE_SESSION_ID") or "").strip()
     return sid or None
 
 

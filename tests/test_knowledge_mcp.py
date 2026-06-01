@@ -181,8 +181,11 @@ def test_knowledge_recall_threads_session_id_from_env(tmp_path, monkeypatch):
     assert out
     rows = conn.execute("SELECT session_id FROM access_log").fetchall()
     assert rows and all(r["session_id"] == "K-SESS" for r in rows)
-    # unset -> NULL, still no error
+    # unset -> NULL, still no error. Clear BOTH the explicit override and the ambient
+    # CLAUDE_CODE_SESSION_ID (the SP-8 A3 fallback; present because the suite runs under
+    # Claude Code) so this exercises the truly-unset NULL path.
     monkeypatch.delenv("ULTRA_MEMORY_SESSION_ID", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     conn.execute("DELETE FROM access_log")
     knowledge_mcp.knowledge_recall(
         conn, "proj", caller_class="subagent", embedder=_flat_embedder(), dim=3,

@@ -596,7 +596,7 @@ def test_unified_recall_threads_session_id_from_env(tmp_path, monkeypatch):
 
 
 def test_unified_recall_session_id_null_when_env_unset(tmp_path, monkeypatch):
-    """SP-8 substrate, graceful-None: no ULTRA_MEMORY_SESSION_ID -> the access is
+    """SP-8 substrate, graceful-None: no session id in the env -> the access is
     logged with NULL session_id (harmless, no attribution) and the recall never errors."""
     conn = _db(tmp_path)
     _save(conn, id="m1", type="reference", title="rate", body="rate note",
@@ -604,7 +604,11 @@ def test_unified_recall_session_id_null_when_env_unset(tmp_path, monkeypatch):
     _add_knowledge(conn, slug="kn1", topic="trading", title="Rates",
                    snippet="rate curve note")
     emb = _fake_embedder({"rate": [1.0, 0.0, 0.0]})
+    # Truly-unset = NEITHER the explicit override NOR the ambient Claude-Code fallback
+    # (SP-8 A3). The suite runs under Claude Code, so CLAUDE_CODE_SESSION_ID is present
+    # in the real env and the A3 fallback would otherwise pick it up — clear both.
     monkeypatch.delenv("ULTRA_MEMORY_SESSION_ID", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     out = unified_query.unified_recall(
         conn, "rate", caller_class="subagent", agent_topics={"trading"},
         embedder=emb, dim=3, top_k=5, now_ts="2026-05-02T00:00:00",

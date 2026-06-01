@@ -178,6 +178,26 @@ def test_session_id_from_env_reads_var(tmp_path):
         {"ULTRA_MEMORY_SESSION_ID": "  S-99 "}) == "S-99"
 
 
+def test_session_id_from_env_falls_back_to_claude_code_session_id():
+    """SP-8 A3 (the keystone): with no explicit ULTRA_MEMORY_SESSION_ID, fall back to
+    the ambient CLAUDE_CODE_SESSION_ID Claude Code injects natively into tool/CLI
+    subprocesses — so an orchestrator recall threads the real session id with no hook.
+    The explicit override wins when both are set; both blank → None."""
+    # Fallback: only CLAUDE_CODE_SESSION_ID present (stripped).
+    assert memory_lib.session_id_from_env(
+        {"CLAUDE_CODE_SESSION_ID": "  cc-abc "}) == "cc-abc"
+    # Precedence: explicit override beats the ambient fallback.
+    assert memory_lib.session_id_from_env(
+        {"ULTRA_MEMORY_SESSION_ID": "explicit",
+         "CLAUDE_CODE_SESSION_ID": "ambient"}) == "explicit"
+    # A blank override falls through to the ambient fallback (not stuck on "").
+    assert memory_lib.session_id_from_env(
+        {"ULTRA_MEMORY_SESSION_ID": "   ",
+         "CLAUDE_CODE_SESSION_ID": "ambient"}) == "ambient"
+    # Both blank/absent → None.
+    assert memory_lib.session_id_from_env({"CLAUDE_CODE_SESSION_ID": "  "}) is None
+
+
 def test_event_id_for_key_resolves_recorded_event(tmp_path):
     """SP-8 A2: event_id_for_key maps the content-addressed event_key returned by
     record_session_event back to the integer session_events.id (the value the
