@@ -371,26 +371,21 @@ def test_fix3_recall_survives_audit_write_failure(tmp_path, monkeypatch):
 
 
 def test_db_path_from_env_derives_default(tmp_path):
-    """Zero-config: the DB path DERIVES a default instead of raising — explicit
-    override wins, else <CLAUDE_PROJECT_DIR>/data/memory.db, else the user-global
-    fallback. NEVER cwd (the original safety property is preserved)."""
+    """Zero-config: the DB path DERIVES the FIXED global default instead of raising —
+    explicit override wins, else ~/.ultra-knowledge/memory.db. NEVER cwd, and (since
+    2026-06-01) NEVER project-local: CLAUDE_PROJECT_DIR is no longer consulted; the
+    fabric always lives at one fixed user-path."""
     from pathlib import Path
     p = tmp_path / "memory.db"
+    GLOBAL = Path.home() / ".ultra-knowledge" / "memory.db"
     # (i) explicit ULTRA_MEMORY_DB wins outright.
     assert knowledge_mcp.db_path_from_env({"ULTRA_MEMORY_DB": str(p)}) == p
-    # (ii) unset + CLAUDE_PROJECT_DIR → <project>/data/memory.db.
-    assert knowledge_mcp.db_path_from_env(
-        {"CLAUDE_PROJECT_DIR": "/x"}) == Path("/x") / "data" / "memory.db"
-    # (iv) blank ULTRA_MEMORY_DB is treated as unset (falls through to the project dir).
-    assert knowledge_mcp.db_path_from_env(
-        {"ULTRA_MEMORY_DB": "   ", "CLAUDE_PROJECT_DIR": "/x"}) == (
-            Path("/x") / "data" / "memory.db")
-    # blank CLAUDE_PROJECT_DIR is also treated as unset → user-global fallback.
-    assert knowledge_mcp.db_path_from_env(
-        {"CLAUDE_PROJECT_DIR": "  "}) == Path.home() / ".claude" / "memory.db"
-    # (iii) unset + no project dir → ~/.claude/memory.db (user-global).
-    assert knowledge_mcp.db_path_from_env({}) == (
-        Path.home() / ".claude" / "memory.db")
+    # (ii) unset → the fixed global user-path; CLAUDE_PROJECT_DIR is IGNORED now.
+    assert knowledge_mcp.db_path_from_env({"CLAUDE_PROJECT_DIR": "/x"}) == GLOBAL
+    # (iii) blank ULTRA_MEMORY_DB is treated as unset → global.
+    assert knowledge_mcp.db_path_from_env({"ULTRA_MEMORY_DB": "   "}) == GLOBAL
+    # (iv) empty env → global.
+    assert knowledge_mcp.db_path_from_env({}) == GLOBAL
     # The safety property: NO resolution branch returns a cwd-relative path.
     for env in ({}, {"CLAUDE_PROJECT_DIR": "/x"}, {"ULTRA_MEMORY_DB": str(p)}):
         assert knowledge_mcp.db_path_from_env(env).is_absolute()

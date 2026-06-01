@@ -14,21 +14,22 @@ The DB path auto-derives (resolution order below); set `data_db_path` only to ov
 
 **DB-path resolution (single source of truth — `knowledge_mcp.db_path_from_env`).** The
 MCP, all three session hooks (via `hooks/common.resolve_db_path`), and `maintain` all
-resolve the `memory.db` path the SAME way, NEVER cwd: (1) explicit `ULTRA_MEMORY_DB` (the
-`data_db_path` override, threaded through `${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH}`) if set;
-else (2) `${CLAUDE_PROJECT_DIR}/data/memory.db` (project/local install); else (3)
-`~/.claude/memory.db` (user scope). The `.mcp.json` env carries bash-default
-fallbacks (`${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH:-${CLAUDE_PROJECT_DIR}/data/memory.db}`,
-`${CLAUDE_PLUGIN_OPTION_CALLER_CLASS:-subagent}`) so both env vars ALWAYS resolve — Claude
-Code rejects an MCP server whose env references an unset `${CLAUDE_PLUGIN_OPTION_*}`, and it
-does not inject manifest defaults; the engine derivation is belt-and-suspenders for the
-user-scope case where `CLAUDE_PROJECT_DIR` may be empty.
+resolve the `memory.db` path the SAME way, NEVER cwd, NEVER project-local: (1) explicit
+`ULTRA_MEMORY_DB` (the `data_db_path` override, threaded through
+`${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH}`) if set + non-blank; else (2) the fixed global
+`~/.ultra-knowledge/memory.db` — the single store shared by every project. The
+local-vs-project fallback (`${CLAUDE_PROJECT_DIR}/data/memory.db` → `~/.claude/memory.db`)
+was retired 2026-06-01: the fabric always lives at one fixed user-path. The `.mcp.json`
+env carries a bash-default (`${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH:-}`,
+`${CLAUDE_PLUGIN_OPTION_CALLER_CLASS:-subagent}`) so the var ALWAYS resolves — Claude
+Code rejects an MCP server whose env references an unset `${CLAUDE_PLUGIN_OPTION_*}`; an
+empty `data_db_path` ⇒ blank `ULTRA_MEMORY_DB` ⇒ the engine derives the fixed global default.
 
 `userConfig` keys (from `.claude-plugin/plugin.json`):
 
 | Key | Required | Default | Purpose |
 |---|---|---|---|
-| `data_db_path` | no | `""` (auto-derive) | Optional override. Empty ⇒ derive `<project>/data/memory.db`, else `~/.claude/memory.db`. Set an absolute path to point at a `memory.db` elsewhere. |
+| `data_db_path` | no | `""` (auto-derive) | Optional override. Empty ⇒ the fixed global `~/.ultra-knowledge/memory.db` (single store shared by every project). Set an absolute path to override that location. |
 | `caller_class` | no | `subagent` | MCP recall privilege class (the **type** axis). Fail-closed: `subagent` ⇒ `project`/`reference` only. |
 | `rehydrate_budget` | no | `2000` | Character budget for the SessionStart rehydration gist. |
 | `oauth_token` | no | — | OAuth token, NEVER an `ANTHROPIC_API_KEY`. Only for LLM maintenance; the prune+export slice does not use it. |

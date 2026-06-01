@@ -6,10 +6,12 @@
 # live DB and any filled-in copy OUT of the plugin repo — they are the consumer's
 # private data (publish-public / data-private, spec §3.1).
 
-# --- Storage (REQUIRED) ---------------------------------------------------------
+# --- Storage (OPTIONAL override) ------------------------------------------------
 # Canonical SQLite memory DB. The knowledge MCP and the hooks read this; the engine
 # resolves it from config, NEVER from cwd (the MCP-launcher-ignores-cwd trap).
-export ULTRA_MEMORY_DB="/abs/path/to/consumer/data/memory.db"
+# DEFAULT (unset): the fixed global user-path ~/.ultra-knowledge/memory.db — the single
+# store shared by every project. Set this ONLY to override that fixed location.
+export ULTRA_MEMORY_DB="$HOME/.ultra-knowledge/memory.db"
 
 # Legacy harness memory dir the one-time bootstrap import reads (the *.md files +
 # MEMORY.md index). Used by memory_import; not needed once the DB is canonical.

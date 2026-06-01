@@ -247,14 +247,15 @@ session_id_from_env = memory_lib.session_id_from_env
 
 
 def db_path_from_env(env):
-    """Resolve the memory.db path from config, DERIVING a zero-config default — NEVER
-    cwd (the safety property: a wrong/empty db next to the process is never opened).
+    """Resolve the memory.db path: an explicit override, else the FIXED global
+    user-path. NEVER cwd (the safety property: a wrong/empty db next to the process
+    is never opened), and (since 2026-06-01) NEVER a project-local path.
 
-    Resolution order:
+    Resolution order — the local-vs-project fallback was deliberately abandoned: the
+    knowledge fabric always lives at ONE fixed user-path (``~/.ultra-knowledge/``), the
+    single global store shared by every project:
       1. ``ULTRA_MEMORY_DB`` (the explicit override), if set + non-blank.
-      2. else ``CLAUDE_PROJECT_DIR``/data/memory.db (the project's canonical location),
-         if CLAUDE_PROJECT_DIR is set + non-blank.
-      3. else ``~/.claude/memory.db`` (the user-global fallback).
+      2. else ``~/.ultra-knowledge/memory.db`` (the fixed global default).
 
     The path is only RESOLVED, never created here — ``open_memory_db`` downstream does
     the create+migrate, and an empty store recalls nothing gracefully. Blank values are
@@ -264,10 +265,7 @@ def db_path_from_env(env):
     raw = (env.get("ULTRA_MEMORY_DB") or "").strip()
     if raw:
         return Path(raw)
-    project_dir = (env.get("CLAUDE_PROJECT_DIR") or "").strip()
-    if project_dir:
-        return Path(project_dir) / "data" / "memory.db"
-    return Path.home() / ".claude" / "memory.db"
+    return Path.home() / ".ultra-knowledge" / "memory.db"
 
 
 def lazy_embedder(factory=None):

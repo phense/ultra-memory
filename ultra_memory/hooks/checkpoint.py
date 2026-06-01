@@ -128,7 +128,7 @@ def run(payload, *, db_path, ts):
 
 def _db_path_from_env():
     # Zero-config-consistent with the knowledge MCP: explicit ULTRA_MEMORY_DB wins,
-    # else <CLAUDE_PROJECT_DIR>/data/memory.db, else ~/.claude/memory.db (never cwd).
+    # else the fixed global ~/.ultra-knowledge/memory.db (never cwd, never project-local).
     return common.resolve_db_path()
 
 

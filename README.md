@@ -25,10 +25,11 @@ ultra-memory is a drop-in Claude Code plugin. Into any consumer project:
    /plugin install ultra-memory@ultra-memory
    ```
 2. **Configure — nothing required (zero-config install).** The installer prompts
-   for nothing mandatory. The DB path auto-derives: `<project>/data/memory.db` for a
-   project/local install (`${CLAUDE_PROJECT_DIR}`), else `~/.claude/memory.db`
-   at user scope. Optional overrides: `data_db_path` (set an absolute path to point at
-   a `memory.db` elsewhere), `caller_class` (default `subagent`), `rehydrate_budget`
+   for nothing mandatory. The DB path auto-derives to the fixed global user-path
+   `~/.ultra-knowledge/memory.db` — the single store shared by every project (the
+   local-vs-project fallback was retired 2026-06-01: the fabric always lives at one
+   fixed user-path). Optional overrides: `data_db_path` (set an absolute path to point
+   at a `memory.db` elsewhere), `caller_class` (default `subagent`), `rehydrate_budget`
    (default `2000`), `oauth_token` (only if you run LLM maintenance — never an API key).
 3. **Bootstrap:** run `/memory-setup` (builds the runtime venv under
    `${CLAUDE_PLUGIN_DATA}/venv`, optionally imports a legacy memory dir once,

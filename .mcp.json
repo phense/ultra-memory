@@ -5,7 +5,6 @@
       "args": ["-m", "ultra_memory.knowledge_mcp"],
       "env": {
         "ULTRA_MEMORY_DB": "${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH:-}",
-        "CLAUDE_PROJECT_DIR": "${CLAUDE_PROJECT_DIR:-}",
         "ULTRA_MEMORY_CALLER_CLASS": "${CLAUDE_PLUGIN_OPTION_CALLER_CLASS:-subagent}"
       }
     }

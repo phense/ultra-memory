@@ -61,21 +61,21 @@ def test_session_id_falls_back_to_transcript_stem():
 def test_resolve_db_path_matches_engine_derivation(monkeypatch):
     """Zero-config consistency: the hooks resolve the DB path the SAME way the
     knowledge MCP does (knowledge_mcp.db_path_from_env) — explicit override wins,
-    else <CLAUDE_PROJECT_DIR>/data/memory.db, else ~/.claude/memory.db. Returns
-    a str (hooks feed it to db_ready / open_memory_db)."""
+    else the fixed global ~/.ultra-knowledge/memory.db (CLAUDE_PROJECT_DIR is no
+    longer consulted). Returns a str (hooks feed it to db_ready / open_memory_db)."""
     from pathlib import Path
+    GLOBAL = str(Path.home() / ".ultra-knowledge" / "memory.db")
     # explicit override wins
     monkeypatch.setenv("ULTRA_MEMORY_DB", "/explicit/m.db")
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", "/proj")
     assert common.resolve_db_path() == "/explicit/m.db"
-    # unset (blank) override + CLAUDE_PROJECT_DIR → <project>/data/memory.db
+    # blank override → fixed global default; CLAUDE_PROJECT_DIR is IGNORED now
     monkeypatch.setenv("ULTRA_MEMORY_DB", "")
-    assert common.resolve_db_path() == str(Path("/proj") / "data" / "memory.db")
-    # no override + no project dir → user-global fallback
+    assert common.resolve_db_path() == GLOBAL
+    # no override → fixed global default
     monkeypatch.delenv("ULTRA_MEMORY_DB", raising=False)
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
-    assert common.resolve_db_path() == str(
-        Path.home() / ".claude" / "memory.db")
+    assert common.resolve_db_path() == GLOBAL
 
 
 def test_resolve_db_path_never_cwd_relative(monkeypatch):
