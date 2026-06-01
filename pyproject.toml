@@ -8,6 +8,10 @@ dependencies = []
 [project.optional-dependencies]
 retrieval = ["fastembed>=0.3"]
 mcp = ["mcp>=1.2"]
+# The Tier-2 self-learning maintenance beats (consolidate / aggressive / synthesize):
+# PyYAML for the safety wall's frontmatter-provenance parse. Soft-imported, so the
+# beats degrade fail-CLOSED-to-safety (every unit immutable) when it is absent.
+maintenance = ["PyYAML>=6"]
 
 [dependency-groups]
 dev = ["pytest>=8"]
