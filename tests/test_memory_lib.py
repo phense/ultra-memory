@@ -178,6 +178,22 @@ def test_session_id_from_env_reads_var(tmp_path):
         {"ULTRA_MEMORY_SESSION_ID": "  S-99 "}) == "S-99"
 
 
+def test_event_id_for_key_resolves_recorded_event(tmp_path):
+    """SP-8 A2: event_id_for_key maps the content-addressed event_key returned by
+    record_session_event back to the integer session_events.id (the value the
+    'informed_by' attribution edge stores as src_id). Unknown key -> None."""
+    conn = _db(tmp_path)
+    key = memory_lib.record_session_event(
+        conn, session_id="s1", kind="skill_learning_candidate",
+        title="cand", ts="2026-05-30T10:00:00", outcome_signal="tests_passed")
+    eid = memory_lib.event_id_for_key(conn, key)
+    expect = conn.execute(
+        "SELECT id FROM session_events WHERE event_key=?", (key,)).fetchone()[0]
+    assert eid == expect and isinstance(eid, int)
+    assert memory_lib.event_id_for_key(conn, "no-such-key") is None
+    conn.close()
+
+
 def test_consolidate_redirects_without_deleting(tmp_path):
     conn = _db(tmp_path)
     memory_lib.save_memory(conn, id="dup", type="reference", title="t", body="b",

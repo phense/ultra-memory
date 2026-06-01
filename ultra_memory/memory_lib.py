@@ -320,6 +320,17 @@ def record_session_event(conn, *, session_id, kind, title, ts,
     return key
 
 
+def event_id_for_key(conn, event_key):
+    """Resolve a `session_events.event_key` (the content-addressed STRING that
+    `record_session_event` returns) -> its integer `session_events.id` — the value
+    the SP-8 `informed_by` attribution edge stores as `src_id` (so the downstream
+    `JOIN session_events se ON se.id = CAST(l.src_id AS INTEGER)` resolves). Returns
+    the int, or `None` for an unknown key. Read-only — no write, no audit."""
+    row = conn.execute(
+        "SELECT id FROM session_events WHERE event_key=?", (event_key,)).fetchone()
+    return int(row[0]) if row is not None else None
+
+
 def session_id_from_env(env):
     """SP-8 substrate (§5.1): the GENERIC session-id env read, the exact mirror of
     `knowledge_mcp.caller_class_from_env`. Returns the stripped

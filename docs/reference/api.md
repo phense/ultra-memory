@@ -70,6 +70,12 @@ Every public function. The caller owns connections and supplies timestamps.
   hint; it is **payload, excluded from `event_key`**, so events differing only in
   the signal still dedupe (first write wins). Inert by default (`NULL`); spooled +
   replayed.
+- `event_id_for_key(conn, event_key) -> int | None` — **SP-8 A2.** Resolve the
+  content-addressed `event_key` STRING that `record_session_event` returns back to
+  its integer `session_events.id` — the value the SP-8 `informed_by` attribution
+  edge stores as `src_id` (so the downstream
+  `JOIN session_events se ON se.id = CAST(l.src_id AS INTEGER)` resolves). `None`
+  for an unknown key. Read-only — no write, no audit.
 - `record_access(conn, *, target_kind, target_id, ts, context=None, session_id=None, rank=None)`
   — append to `access_log` + atomic `access_count += 1` for memory targets.
   `session_id` (SP-8 substrate) is an optional **generic opaque** string recording
@@ -264,6 +270,41 @@ best-rank-per-backend RRF, weighted by `outcome_weight` (inert 1.0). No LLM.
 - Generic IR helpers (internal, no Trading specifics): `_bm25_rank`, `_rrf_score`,
   `_best_rank_rrf`, `_knowledge_candidates`. `allowed_types_for_caller` delegates to
   `knowledge_mcp.allowed_types_for` (single source of truth for the type wall).
+
+## `attribution` *(SP-8 stage A2)*
+
+The usage-outcome **attribution join** — deterministic, **NO LLM**, project-agnostic
+(imports only stdlib + `memory_lib`; no policy config, no Trading/wiki concept). At
+session-end it JOINs the memories a session actually recalled (logged in `access_log`
+with the session id + a 1-based fused `rank` — stage A1) to that session's outcome
+`session_event` (its `outcome_signal`) by writing `informed_by` graph edges; a
+downstream consumer (Trading-side, not the engine) folds those edges into an EWMA.
+
+- `recalled_units_for_session(conn, *, session_id) -> [{'id', 'rank'}]` — the
+  session's recalled MEMORY units: one row per `access_log` entry with
+  `target_kind='memory'`, this `session_id`, and a **non-NULL `rank`** (a knowledge
+  recall, another session's recall, and a NULL-rank access are excluded). Ordered by
+  `(rank, id)`. Read-only; **fail-closed-to-empty** (a read error returns `[]`,
+  never raises).
+- `apply_attribution_policy(rows, *, policy='top_k', k=1) -> [id]` — **PURE** (no
+  DB). Selects the DISTINCT memory ids: `'all'` = every distinct id, ordered by best
+  (lowest) rank, ties by id; `'top_k'` = the `k` distinct ids with the lowest rank
+  (dedup keeping each id's best rank; ties by id; `k>=1`). An unknown policy raises
+  `ValueError` (never silently attribute-all). Rank-weighted / `scope='recall'` /
+  `'applied'` are deliberately NOT implemented (substrate doesn't exist yet).
+- `attribute_usage(conn, *, session_id, outcome_event_id, ts, policy='top_k', k=1)
+  -> int` — write an `informed_by` edge from the outcome `session_event` to each
+  policy-selected recalled memory; returns the edge count. **THE INTEGRATION
+  CONTRACT:** each edge is `record_link(src_kind='session_event',
+  src_id=str(outcome_event_id), predicate='informed_by', dst_kind='memory',
+  dst_id=<id>)`, so the consumer's
+  `JOIN session_events se ON se.id = CAST(l.src_id AS INTEGER)` resolves.
+  `outcome_event_id` is the INTEGER `session_events.id` (resolve via
+  `memory_lib.event_id_for_key` upstream); `None` ⇒ no-op (0). Idempotent
+  (`record_link` upserts on the edge key — a re-run writes no duplicate),
+  **fail-open** (any error ⇒ 0, never raises out — it runs in a session-end Stop
+  hook and must never wedge a session). The conservative default `policy='top_k',
+  k=1` attributes only the single most-relevant recall.
 
 ## `redact_secrets`
 

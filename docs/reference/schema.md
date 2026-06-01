@@ -102,7 +102,13 @@ is `(src_kind, src_id, predicate, dst_kind, dst_id)`; there is **no UNIQUE on it
 (adding one would need a destructive rebuild of the pre-existing table), so
 idempotency is enforced in code by `record_link` (SELECT-then-UPDATE-or-INSERT in
 one txn). Until SP-3 this table was **defined and read but never written**
-(north-star Risk §14.8); `record_link` (Stage 3) is its first writer.
+(north-star Risk §14.8); `record_link` (Stage 3) is its first writer. **SP-8 A2**
+adds the usage-outcome edge: an `informed_by` row with `src_kind='session_event'`,
+`src_id = str(<session_events.id>)`, `dst_kind='memory'` — written by
+`attribution.attribute_usage` to join a session's outcome event to the memories it
+recalled. The consumer reads it with
+`JOIN session_events se ON se.id = CAST(l.src_id AS INTEGER)`, so `src_id` is the
+integer id **as a string** (resolve via `memory_lib.event_id_for_key`).
 
 ### `unified_index` *(0004)*
 A **derived, rebuildable mirror** of the Expert-Knowledge (wiki) pages, kept beside
