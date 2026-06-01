@@ -166,8 +166,12 @@ idempotently re-bootstraps it.
    next run re-exports (rather than skipping on a stale hash).
 
 The content hash covers the stable projection of `memories` + `session_events`
-only — it **excludes** `access_count`/`last_accessed`/`access_log`, so reinforcement
-telemetry never drives a commit.
+only — it **excludes** `access_count`/`last_accessed`/`last_verified`/`access_log`,
+so reinforcement telemetry never drives a commit. It **includes** the
+semantically-meaningful outcome fields (`memories.outcome_weight`,
+`session_events.outcome_signal`), so an audited `set_outcome_weight` / outcome-signal
+write — which changes recall ranking / carries attribution evidence — re-exports
+rather than leaving the committed rollback dump stale (SP-8 bughunt).
 
 ## Rollback
 

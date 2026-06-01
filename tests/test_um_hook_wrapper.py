@@ -43,6 +43,13 @@ def test_resolves_db_path_into_env(tmp_path):
     )
     fake_py.chmod(0o755)
     env = dict(os.environ)
+    # The wrapper resolves SHADOW/BUDGET via shell `:-` fallbacks, so an AMBIENT
+    # ULTRA_MEMORY_SHADOW / ULTRA_MEMORY_REHYDRATE_BUDGET (or the OPTION_ form) leaks
+    # in and flakes the default assertions below. Pop them so the wrapper's documented
+    # defaults are genuinely exercised (same ambient-env class as the SESSION_ID guard).
+    for k in ("ULTRA_MEMORY_SHADOW", "ULTRA_MEMORY_REHYDRATE_BUDGET",
+              "CLAUDE_PLUGIN_OPTION_REHYDRATE_BUDGET"):
+        env.pop(k, None)
     env["CLAUDE_PLUGIN_DATA"] = str(data)
     env["CLAUDE_PLUGIN_OPTION_DATA_DB_PATH"] = "/tmp/the-consumer.db"
     env["CLAUDE_PLUGIN_OPTION_CALLER_CLASS"] = "subagent"

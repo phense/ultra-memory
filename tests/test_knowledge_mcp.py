@@ -283,6 +283,30 @@ def test_fix3_subagent_drops_link_when_endpoint_type_unresolvable(tmp_path):
     conn.close()
 
 
+# ---------------------------------------------------------------------------
+# SP-8 bughunt FIX 3 — knowledge_recall's per-hit record_access audit-write must be
+# best-effort. `record_access` goes through `_write_txn` which can raise (e.g.
+# WriteSpooled under write contention) — that must NOT turn a SUCCEEDED read into a
+# recall error on the read-only MCP. Mirrors unified_query._audit_hits' try/except.
+# ---------------------------------------------------------------------------
+
+def test_fix3_recall_survives_audit_write_failure(tmp_path, monkeypatch):
+    """A raising record_access (audit-write hiccup / WriteSpooled) must NOT propagate:
+    the read result still returns the hits, no exception, no {'error': ...}."""
+    conn = _db(tmp_path)
+    _save(conn, id="proj", type="project", title="p", body="proj fact")
+
+    def _boom(*a, **kw):
+        raise RuntimeError("write spooled / contention")
+
+    monkeypatch.setattr(memory_lib, "record_access", _boom)
+    out = knowledge_mcp.knowledge_recall(
+        conn, "proj", caller_class="subagent", embedder=_flat_embedder(), dim=3,
+        now_ts="2026-05-02T00:00:00", ts="2026-05-02T00:00:00", audit=True)
+    assert {r["id"] for r in out} == {"proj"}  # the read survives the audit failure
+    conn.close()
+
+
 def test_db_path_from_env_required(tmp_path):
     """The DB path comes from config (ULTRA_MEMORY_DB), never cwd. Missing → raises."""
     import pytest

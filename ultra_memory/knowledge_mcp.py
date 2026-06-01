@@ -140,10 +140,17 @@ def knowledge_recall(conn, query, *, caller_class, embedder, top_k=5, dim=None,
         import os
         session_id = session_id_from_env(os.environ)
         for item in out:
-            memory_lib.record_access(
-                conn, target_kind="memory", target_id=item["id"],
-                ts=audit_ts, context=f"knowledge_recall:{caller_class}",
-                session_id=session_id)
+            # Best-effort audit (mirrors unified_query._audit_hits): record_access
+            # goes through _write_txn, which can raise (e.g. WriteSpooled under write
+            # contention) — that must NOT turn a SUCCEEDED read into a recall error
+            # on the read-only MCP. The read result survives an audit-write failure.
+            try:
+                memory_lib.record_access(
+                    conn, target_kind="memory", target_id=item["id"],
+                    ts=audit_ts, context=f"knowledge_recall:{caller_class}",
+                    session_id=session_id)
+            except Exception:
+                pass
     return out
 
 

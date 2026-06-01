@@ -74,6 +74,12 @@ part of `event_key`**, so two otherwise-identical events differing only in
 `outcome_signal` still dedupe to one row (first write wins). The §7a substrate;
 **inert this cycle** — no engine writer sets it (the consumer-side capture hook
 will).
+**Retention preservation (SP-8 bughunt):** `retention.prune_session_events`
+**excludes** any event still referenced by an SP-8 attribution edge (a `links` row
+with `src_kind='session_event'` and predicate in `('validated_as',
+'superseded_by','informed_by')`) from both the roll-into-summary and the DELETE —
+such an event is the EWMA fold's evidence and its `outcome_signal` would otherwise
+be lost and the link left dangling.
 
 ### `embeddings`
 `PRIMARY KEY (target_kind, target_id, model_name)`, `dim`, `vector` (float32 BLOB

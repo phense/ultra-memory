@@ -207,3 +207,41 @@ def test_export_ignores_access_telemetry_churn(tmp_path):
                              ts="2026-05-30T12:01:00")  # telemetry only
     assert mx.export_memory(conn, out, ts="2026-05-30T12:02:00") is False  # still skipped
     conn.close()
+
+
+def test_export_reexports_when_outcome_weight_changes(tmp_path):
+    """SP-8 bughunt FIX 2: a semantically-meaningful set_outcome_weight write (it
+    affects recall ranking) MUST drive a re-export — otherwise the git-committed
+    rollback dump + snapshot go stale and a restore reverts the weight. Contrast:
+    pure access telemetry (above) is still correctly skipped."""
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00", created_by="agent")
+    out = tmp_path / "memory_export"
+    assert mx.export_memory(conn, out, ts="2026-05-30T12:00:00") is True
+    # dump initially carries the inert 1.0 default
+    assert "1.0" in (out / "memory.dump.sql").read_text()
+
+    memory_lib.set_outcome_weight(conn, id="m1", weight=0.2, ts="2026-05-30T12:01:00")
+    assert mx.export_memory(conn, out, ts="2026-05-30T12:02:00") is True  # re-exported
+
+    dump = (out / "memory.dump.sql").read_text()
+    assert "0.2" in dump  # the new weight is now persisted to the rollback artifact
+    conn.close()
+
+
+def test_export_reexports_when_outcome_signal_changes(tmp_path):
+    """FIX 2 (session_events arm): the content hash must include session_events
+    `outcome_signal`. An event differing only in outcome_signal must re-export so the
+    attribution evidence in the dump is not stale. (Idempotency key excludes
+    outcome_signal, so the SAME-key event with a signal is a fresh distinct row here.)"""
+    conn = _db(tmp_path)
+    out = tmp_path / "memory_export"
+    memory_lib.record_session_event(conn, session_id="s1", kind="task_done",
+                                    title="ev", ts="2026-05-30T10:00:00Z")
+    assert mx.export_memory(conn, out, ts="2026-05-30T12:00:00") is True
+    # Set an outcome_signal directly on the row (a distinct semantic value).
+    conn.execute("UPDATE session_events SET outcome_signal='trade_win' "
+                 "WHERE title='ev'")
+    assert mx.export_memory(conn, out, ts="2026-05-30T12:01:00") is True  # re-exported
+    conn.close()

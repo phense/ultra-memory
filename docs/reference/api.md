@@ -188,9 +188,13 @@ Every public function. The caller owns connections and supplies timestamps.
   redacted `memory.dump.sql` (carries `user_version`) → `VACUUM INTO` snapshot →
   `views/<file_slug>.md` + `views/MEMORY.md` (ordered by `sort_order`) → content
   hash last. Atomic (tmp→replace, snapshot-first). Returns False if unchanged
-  (hash excludes access telemetry). **SP-3:** the stable-column projection now
-  includes `topic` and `created_by`, so the new columns round-trip through the
-  git-tracked dump + drive the content hash.
+  (hash excludes access telemetry — `access_count`/`last_accessed`/`last_verified`
+  — so reinforcement churn never drives a commit). **SP-3:** the stable-column
+  projection includes `topic` and `created_by`. **SP-8 bughunt:** the hash also
+  covers the **semantically-meaningful** outcome fields — `memories.outcome_weight`
+  (a `set_outcome_weight` write changes recall ranking) and `session_events.
+  outcome_signal` (the attribution evidence) — so an audited weight/signal write
+  re-exports rather than going stale in the git-committed rollback dump.
 - `export_learnings_projection(conn, path, *, skill_tag, title=None) -> int`
   (SP-3 D14/D15, §7a substrate) — regenerate a Learnings-style markdown
   **projection** from the store: active `memories` whose `index_hook == skill_tag`,
@@ -351,7 +355,14 @@ downstream consumer (Trading-side, not the engine) folds those edges into an EWM
   older than `keep_days` (relative to `ts`) into the owning `sessions.summary`
   (one digest line per event), then delete the rows in one `BEGIN IMMEDIATE`
   transaction. Returns the count deleted; 0 (no-op) when nothing is old enough.
-  Bounds the table where the real growth is (spec §8 D11).
+  Bounds the table where the real growth is (spec §8 D11). **SP-8 bughunt:** an
+  event still referenced by an SP-8 attribution edge (`links` row with
+  `src_kind='session_event'`, predicate in `_ATTRIBUTION_PREDICATES` =
+  `('validated_as','superseded_by','informed_by')`) is **excluded from both the
+  roll-into-summary SELECT and the DELETE** — it is evidence the downstream EWMA
+  fold reads (`JOIN session_events se ON se.id = CAST(l.src_id AS INTEGER) … WHERE
+  se.outcome_signal IS NOT NULL`); pruning it would dangle the link and silently
+  drop `outcome_signal`. Unreferenced old events prune as before.
 
 ## `maintain`
 
@@ -386,6 +397,10 @@ downstream consumer (Trading-side, not the engine) folds those edges into an EWM
   env-read dimensions (caller-class + session-id) are side by side. Both recall
   sites (`knowledge_recall`, `unified_query._audit_hits`) thread the result into
   `record_access(session_id=…)`; unset env → `NULL` → no attribution, never errors.
+  **SP-8 bughunt:** the per-hit `record_access` audit-write in `knowledge_recall` is
+  wrapped `try/except` (best-effort, matching `_audit_hits`) — `record_access` goes
+  through `_write_txn` which can raise (e.g. `WriteSpooled` under write contention),
+  and a SUCCEEDED read must survive an audit-write failure on the read-only MCP.
 - `run_query_tool(arguments, *, conn, embedder, caller_class, dim=None, now_ts=None,
   ts=None, agent_topics=_NO_TOPIC_ARG)` — the MCP tool handler. **Additive SP-3
   routing:** when `agent_topics` is supplied (a set, or the orchestrator's `None`

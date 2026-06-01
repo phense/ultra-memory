@@ -6,6 +6,15 @@ import datetime
 # Bound the rolled digest so sessions.summary can't grow unboundedly across runs.
 _SUMMARY_MAX_LINES = 200
 
+# SP-8 attribution edges anchor on a session_event as `src` (src_kind='session_event',
+# src_id=str(session_events.id)). An event referenced by one of these predicates is
+# EVIDENCE the downstream EWMA fold reads (JOIN session_events se ON
+# se.id = CAST(l.src_id AS INTEGER) ... WHERE se.outcome_signal IS NOT NULL).
+# Pruning it (delete OR roll-and-drop, which loses outcome_signal) silently destroys
+# that evidence and leaves a dangling link — so such events are EXCLUDED from prune.
+# Module constant so the predicate set stays maintainable alongside attribution.py.
+_ATTRIBUTION_PREDICATES = ("validated_as", "superseded_by", "informed_by")
+
 
 def _cutoff(ts, keep_days):
     base = datetime.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(
@@ -17,13 +26,25 @@ def prune_session_events(conn, *, keep_days, ts):
     """Delete events older than keep_days after rolling them into sessions.summary.
     Returns the number of events deleted."""
     cutoff = _cutoff(ts, keep_days)
+    # Exclude any event still referenced by an SP-8 attribution edge (it is EVIDENCE
+    # the downstream EWMA fold reads — deleting or rolling-and-dropping it would lose
+    # outcome_signal and dangle the link). Applied to BOTH the roll SELECT and the
+    # DELETE so a preserved event is neither summarized-away nor deleted.
+    pred_ph = ",".join("?" for _ in _ATTRIBUTION_PREDICATES)
+    not_referenced = (
+        "NOT EXISTS (SELECT 1 FROM links l "
+        "WHERE l.src_kind='session_event' "
+        "AND CAST(l.src_id AS INTEGER) = session_events.id "
+        f"AND l.predicate IN ({pred_ph}))"
+    )
     # Snapshot + roll-up + delete all run inside ONE BEGIN IMMEDIATE so a row
     # inserted between selecting and deleting can't be deleted-without-archiving.
     conn.execute("BEGIN IMMEDIATE")
     try:
         old = conn.execute(
             "SELECT id, session_id, ts, kind, title FROM session_events "
-            "WHERE ts < ? ORDER BY session_id, ts", (cutoff,)
+            f"WHERE ts < ? AND {not_referenced} ORDER BY session_id, ts",
+            (cutoff, *_ATTRIBUTION_PREDICATES)
         ).fetchall()
         if not old:
             conn.execute("COMMIT")
@@ -41,7 +62,9 @@ def prune_session_events(conn, *, keep_days, ts):
                 "INSERT INTO sessions (id, summary) VALUES (?,?) "
                 "ON CONFLICT(id) DO UPDATE SET summary=excluded.summary",
                 (sid, rolled))
-        cur = conn.execute("DELETE FROM session_events WHERE ts < ?", (cutoff,))
+        cur = conn.execute(
+            f"DELETE FROM session_events WHERE ts < ? AND {not_referenced}",
+            (cutoff, *_ATTRIBUTION_PREDICATES))
         deleted = cur.rowcount
         conn.execute("COMMIT")
     except Exception:
