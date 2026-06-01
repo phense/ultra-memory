@@ -86,9 +86,14 @@ Every public function. The caller owns connections and supplies timestamps.
   logging-only — no ranking effect; the substrate a later usage-outcome / top-k
   attribution policy reads. Spooled + replayed.
 - `session_id_from_env(env) -> str | None` — the generic session-id env read, the
-  exact mirror of `caller_class_from_env`: stripped `ULTRA_MEMORY_SESSION_ID` or
-  `None`. Project-agnostic (the engine learns *a* session id, never that it is
-  "Trading"). Re-exported from `knowledge_mcp` next to `caller_class_from_env`.
+  exact mirror of `caller_class_from_env`. Resolution order (SP-8 A3): stripped
+  `ULTRA_MEMORY_SESSION_ID` (explicit override) → else stripped `CLAUDE_CODE_SESSION_ID`
+  (the ambient session id Claude Code injects natively into tool/CLI subprocesses, so an
+  orchestrator recall threads the real session with no hook) → else `None`. Reading the
+  platform `CLAUDE_CODE_SESSION_ID` is deployment-env awareness, not a project concept —
+  the agnostic boundary (no wiki/Trading import) is intact. A stale value in a long-lived
+  process (the MCP server) only orphans rows (under-attributes), never mis-attributes.
+  Re-exported from `knowledge_mcp` next to `caller_class_from_env`.
 - `consolidate(conn, *, loser_id, canonical_id, reason, ts)` — redirect-stub
   (`status='redirect'`, `supersedes=canonical`). Raises `KeyError` if absent.
 - `delete(conn, *, id, reason, tier, ts)` — soft tombstone (`status='deleted'`).
