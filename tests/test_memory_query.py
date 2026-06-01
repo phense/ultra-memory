@@ -175,6 +175,28 @@ def test_not_stale_when_recent(tmp_path):
     conn.close()
 
 
+def test_query_memories_embedder_none_raises_clear_value_error(tmp_path):
+    """R3 FIX 1: the memory backend has NO BM25-only fallback — embedding-cosine is
+    the only ranker. Passing embedder=None on a NON-empty store must raise a CLEAR
+    ValueError naming the misconfiguration, NOT the cryptic `'NoneType' object is not
+    callable` TypeError that surfaced mid-function when q_vec = embedder([query])[0]
+    ran unconditionally. (The empty-corpus early-return path is exercised separately.)"""
+    conn = _db(tmp_path)
+    _save(conn, id="m", title="m", body="m doc")
+    with pytest.raises(ValueError) as ei:
+        memory_query.query_memories(conn, "m", embedder=None, dim=3,
+                                    now_ts="2026-05-02T00:00:00")
+    msg = str(ei.value)
+    assert "embedder" in msg
+    assert "BM25" in msg  # the docstring/message is honest: no BM25-only fallback here
+    # And a real embedder still works exactly as before.
+    emb = _fake_embedder({"m doc": [1.0, 0.0, 0.0], "m": [1.0, 0.0, 0.0]})
+    out = memory_query.query_memories(conn, "m", embedder=emb, dim=3,
+                                      now_ts="2026-05-02T00:00:00")
+    assert out and out[0]["id"] == "m"
+    conn.close()
+
+
 def test_one_hop_links_attached(tmp_path):
     conn = _db(tmp_path)
     _save(conn, id="m", title="m", body="m doc")

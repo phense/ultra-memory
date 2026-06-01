@@ -187,6 +187,49 @@ def test_failed_export_preserves_prior_dump(tmp_path):
     conn.close()
 
 
+def test_failed_vacuum_preserves_prior_snapshot(tmp_path):
+    """R3 FIX 2: the snapshot must be written atomically (VACUUM INTO a tmp path then
+    os.replace). A VACUUM failure AFTER the old unconditional `snap.unlink()` left NO
+    snapshot — the prior good one was destroyed (disk-full / I/O / SIGTERM). With the
+    tmp+replace pattern the PRIOR snapshot survives any VACUUM failure."""
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="v1",
+                           ts="2026-05-30T10:00:00")
+    out = tmp_path / "exp"
+    assert mx.export_memory(conn, out, ts="2026-05-30T12:00:00") is True
+    snap = out / "memory.snapshot.db"
+    assert snap.exists()
+    first_snap_bytes = snap.read_bytes()
+
+    # Change data (forces a re-export, not a skip), then make the VACUUM INTO step
+    # raise. sqlite3.Connection.execute is read-only, so wrap the conn in a thin proxy
+    # that fails ONLY on the VACUUM-INTO statement and delegates everything else.
+    memory_lib.save_memory(conn, id="m2", type="reference", title="t2", body="v2",
+                           ts="2026-05-30T13:00:00")
+
+    class _VacuumFailingConn:
+        def __init__(self, real):
+            self._real = real
+
+        def execute(self, sql, *args, **kwargs):
+            if "VACUUM INTO" in sql:
+                raise sqlite3.OperationalError("disk I/O error during VACUUM")
+            return self._real.execute(sql, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    with pytest.raises(Exception):
+        mx.export_memory(_VacuumFailingConn(conn), out, ts="2026-05-30T14:00:00")
+
+    # The PRIOR good snapshot is intact (not destroyed by the failed VACUUM).
+    assert snap.exists(), "prior snapshot was destroyed on VACUUM failure"
+    assert snap.read_bytes() == first_snap_bytes
+    # No torn temp snapshot left behind.
+    assert list(out.glob("*.tmp")) == []
+    conn.close()
+
+
 def test_export_skips_when_unchanged(tmp_path):
     conn = _db(tmp_path)
     memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",

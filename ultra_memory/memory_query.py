@@ -109,6 +109,18 @@ def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
     if not rows:
         return []
 
+    # The memory backend ranks by embedding-cosine ONLY — there is NO BM25-only
+    # fallback (unlike the KNOWLEDGE side of unified_recall, which degrades to BM25
+    # when embedder is None). So embedder=None on a non-empty store has no honest
+    # behavior: fail with a CLEAR error here instead of letting the cryptic
+    # `'NoneType' object is not callable` TypeError surface mid-function (from
+    # get_or_embed_batch / `embedder([query])`). Returning [] silently would hide
+    # the caller's misconfiguration — a clear error is better (R3 bughunt FIX 1).
+    if embedder is None:
+        raise ValueError(
+            "query_memories requires an embedder (the memory backend has no "
+            "BM25-only fallback); pass a real embedder")
+
     by_id = {r["id"]: r for r in rows}
     # Embed all cache-misses in one batched call + one write txn (audit L7).
     vecs = rc.get_or_embed_batch(

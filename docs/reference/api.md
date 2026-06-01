@@ -170,7 +170,11 @@ Every public function. The caller owns connections and supplies timestamps.
   ranking. `topic` (SP-3 D11), when given, scopes to `topic = ? OR topic IS NULL`
   — a topiced caller still sees cross-topic (`NULL`) operational rows, and an
   un-topiced corpus stays fully visible (no retrieval regression). Topic ⟂
-  `include_types` (composed by AND).
+  `include_types` (composed by AND). **R3 bughunt:** the memory backend ranks by
+  embedding-cosine ONLY — it has **no BM25-only fallback** — so `embedder` is
+  required: `embedder=None` on a non-empty in-scope set raises a clear `ValueError`
+  (not the cryptic `'NoneType' object is not callable` it raised before). Only the
+  *knowledge* side of `unified_recall` degrades to BM25 when `embedder is None`.
 - `_links_for(conn, mid)` (internal, read path) now surfaces the SP-3
   `src_type`/`dst_type` alongside `predicate, dst_kind, dst_id`. This is the reader
   that, per north-star Risk §14.8, had never run against populated rows until
@@ -196,7 +200,12 @@ Every public function. The caller owns connections and supplies timestamps.
 - `export_memory(conn, out_dir, *, ts, snapshot=True) -> bool` — read snapshot →
   redacted `memory.dump.sql` (carries `user_version`) → `VACUUM INTO` snapshot →
   `views/<file_slug>.md` + `views/MEMORY.md` (ordered by `sort_order`) → content
-  hash last. Atomic (tmp→replace, snapshot-first). Returns False if unchanged
+  hash last. Atomic (tmp→replace, snapshot-first). **R3 bughunt:** the snapshot
+  itself is now atomic too — `VACUUM INTO memory.snapshot.db.tmp` then
+  `os.replace` into place (the prior `memory.snapshot.db` is removed only by the
+  atomic swap), so a `VACUUM` failure (disk-full / I/O / SIGTERM) after the old
+  unconditional `unlink()` no longer destroys the prior good snapshot; any failure
+  cleans up the `.tmp`. Returns False if unchanged
   (hash excludes access telemetry — `access_count`/`last_accessed`/`last_verified`
   — so reinforcement churn never drives a commit). **SP-3:** the stable-column
   projection includes `topic` and `created_by`. **SP-8 bughunt:** the hash also
@@ -211,6 +220,9 @@ Every public function. The caller owns connections and supplies timestamps.
   `skill_tag` are **consumer-supplied** (no Trading/skill literal). This is a
   read-only projection capability (the DB is the system of record); the §7a **loop
   is NOT built** — this only materializes the surface the loop will later feed.
+  **R3 bughunt:** the git-tracked projection is written **atomically** (`<path>.tmp`
+  → `os.replace`), mirroring the dump swap — a SIGKILL/crash mid-write can no longer
+  leave a torn file for Stage 3 to commit.
 
 ## `wiki_sync` *(SP-3 Stage 5)*
 
@@ -285,7 +297,17 @@ best-rank-per-backend RRF, weighted by `outcome_weight` (inert 1.0). No LLM.
   `outcome_weight`, audit each hit via `record_access`. `agent_topics`: a set ⇒
   topic-scoped; `None` ⇒ all topics (orchestrator / trusted CLI); the **empty set**
   ⇒ fail-closed (only `topic IS NULL` operational memories of allowed types, **zero
-  topiced knowledge**). **Memory-only byte-identity (§5.6 fence):** when no
+  topiced knowledge**). **R3 bughunt:** the scoped set is first normalized — `None`
+  and empty-string elements are dropped (`{t for t in agent_topics if t}`) — so a
+  `{None}`/`{''}` set collapses to the empty fail-closed set instead of passing
+  `topic=None` to `query_memories` (which applies NO filter → WIDENS to every topiced
+  row, violating "a partial binding sees LESS, never more"), and a mixed `{None,
+  'trading'}` no longer crashes `sorted()` (and scopes to `trading` only). The
+  orchestrator all-topics sentinel (`agent_topics is None`) is untouched. **Embedder
+  asymmetry (R3 bughunt):** the knowledge backends degrade to BM25 when
+  `embedder is None`, but the memory backend requires a real embedder (raises a clear
+  `ValueError`) — so the `embedder=None` default is valid only for a
+  knowledge-only / empty-memory recall. **Memory-only byte-identity (§5.6 fence):** when no
   knowledge row is in scope, the result is `query_memories`' own dicts verbatim
   (same order/fields/scores). Knowledge hits carry `source_kind='knowledge'`, `slug,
   topic, title, page_type, snippet, path, score`; memory hits carry
@@ -407,8 +429,12 @@ downstream consumer (Trading-side, not the engine) folds those edges into an EWM
   memories WHERE id=?`, trusting the live row over the edge's stored `*_type`) to a
   type outside `allowed_types_for(caller_class)` — so an allowed project/reference
   row can't leak a forbidden `user`/`feedback` endpoint's id+type. **Fail-closed**
-  (unresolvable endpoint → drop). A trusted caller keeps all links unchanged. Wired
-  into both `knowledge_recall` and `unified_recall`. `knowledge_recall` also still
+  (unresolvable endpoint → drop). **R3 bughunt:** only an EXPLICIT `dst_kind ==
+  'knowledge'` bypasses the type wall; a `None`/missing/unknown kind is treated as a
+  `memory` endpoint (re-read, fail-closed) rather than blindly kept — closing a leak
+  where a `dst_kind=None` edge pointing at a `user`/`feedback` memory was passed
+  through as a "safe non-memory endpoint". A trusted caller keeps all links
+  unchanged. Wired into both `knowledge_recall` and `unified_recall`. `knowledge_recall` also still
   runs read-path `strip_secrets` on title/snippet (defense-in-depth, unchanged).
 - `session_id_from_env(env)` — re-export of `memory_lib.session_id_from_env` (SP-8
   substrate), sitting next to `caller_class_from_env` so the recall path's two

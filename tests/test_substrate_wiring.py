@@ -325,6 +325,45 @@ def test_learnings_projection_is_agnostic_consumer_fed(tmp_path):
     conn.close()
 
 
+def test_learnings_projection_writes_atomically_via_tmp_replace(tmp_path):
+    """R3 FIX 3: the git-tracked Learnings.md projection must be written atomically —
+    to a `<path>.tmp` then os.replace into place — so a SIGKILL/crash mid-write never
+    truncates the projection (Stage 3 then commits a torn file). We observe os.replace
+    is invoked with a `.tmp` source pointing at the final path, and that the final
+    content is whole with no leftover `.tmp`."""
+    import os as _os
+
+    conn = _db(tmp_path)
+    _seed_learnings(conn)
+    out = tmp_path / "risk-Learnings.md"
+
+    seen = {}
+    real_replace = _os.replace
+
+    def _spy_replace(src, dst):
+        seen["src"] = str(src)
+        seen["dst"] = str(dst)
+        return real_replace(src, dst)
+
+    orig = memory_export.os.replace
+    memory_export.os.replace = _spy_replace
+    try:
+        memory_export.export_learnings_projection(
+            conn, out, skill_tag="skill:risk-manager")
+    finally:
+        memory_export.os.replace = orig
+
+    # The atomic swap ran: tmp source -> final dst.
+    assert seen.get("src", "").endswith(".tmp")
+    assert seen.get("dst") == str(out)
+    # The final file is whole; no torn temp left behind.
+    text = out.read_text()
+    assert "Block-by-default sizing" in text
+    assert "Circuit breaker on 3 losses" in text
+    assert list(tmp_path.glob("*.tmp")) == []
+    conn.close()
+
+
 def test_learnings_projection_excludes_inactive(tmp_path):
     """A tombstoned / redirected learning is not projected (mirrors views' active
     filter) — a deleted lesson must not reappear in the per-skill surface."""

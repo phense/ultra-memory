@@ -202,6 +202,86 @@ def test_fence2_bound_subagent_sees_its_topic_only(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# R3 FIX 4 — a None/empty element in agent_topics must NOT widen the memory scope.
+# A topic-scoped caller whose set contains None passed topic=None to query_memories,
+# which applies NO filter → returns EVERY topiced memory (the all-topics/orchestrator
+# behavior) — a scope WIDENING that violates "a partial binding sees LESS, never
+# more". A mixed set {None,'trading'} also crashed sorted() with a TypeError.
+# ---------------------------------------------------------------------------
+
+def test_fix4_agent_topics_none_element_does_not_widen_scope(tmp_path):
+    """agent_topics={None} (a degenerate scoped set) must collapse to the empty
+    fail-closed set: it sees only NULL-topic operational rows of allowed types, NOT
+    other topics' memories. It must NOT behave like the orchestrator all-topics
+    sentinel (agent_topics is None)."""
+    conn = _db(tmp_path)
+    _save(conn, id="null_ref", type="reference", title="null ref",
+          body="rrfquery shared note", topic=None)
+    _save(conn, id="trading_ref", type="reference", title="trading ref",
+          body="rrfquery trading note", topic="trading")
+    _save(conn, id="cooking_ref", type="reference", title="cooking ref",
+          body="rrfquery cooking note", topic="cooking")
+    _add_knowledge(conn, slug="kn_trade", topic="trading", title="kn trade",
+                   snippet="rrfquery trading knowledge")
+    emb = _fake_embedder({"rrfquery": [1.0, 0.0, 0.0]})
+
+    out = unified_query.unified_recall(
+        conn, "rrfquery", caller_class="subagent", agent_topics={None},
+        embedder=emb, dim=3, top_k=10, now_ts="2026-05-02T00:00:00", audit=False)
+    seen_ids = {h.get("id") for h in out if h.get("source_kind") != "knowledge"}
+    # Only the NULL-topic row — NO topiced memory widening, NO topiced knowledge.
+    assert seen_ids == {"null_ref"}, seen_ids
+    assert "trading_ref" not in seen_ids
+    assert "cooking_ref" not in seen_ids
+    assert not any(h.get("source_kind") == "knowledge" for h in out)
+    conn.close()
+
+
+def test_fix4_agent_topics_mixed_none_does_not_crash_and_scopes(tmp_path):
+    """agent_topics={None, 'trading'} must NOT raise (the old sorted() TypeError on a
+    None element) and must scope to 'trading' only (+ NULL-topic rows) — the None is
+    dropped, never widening to other topics."""
+    conn = _db(tmp_path)
+    _save(conn, id="null_ref", type="reference", title="null ref",
+          body="rrfquery shared note", topic=None)
+    _save(conn, id="trading_ref", type="reference", title="trading ref",
+          body="rrfquery trading note", topic="trading")
+    _save(conn, id="cooking_ref", type="reference", title="cooking ref",
+          body="rrfquery cooking note", topic="cooking")
+    _add_knowledge(conn, slug="kn_trade", topic="trading", title="kn trade",
+                   snippet="rrfquery trading knowledge")
+    _add_knowledge(conn, slug="kn_cook", topic="cooking", title="kn cook",
+                   snippet="rrfquery cooking knowledge")
+    emb = _fake_embedder({"rrfquery": [1.0, 0.0, 0.0]})
+
+    out = unified_query.unified_recall(
+        conn, "rrfquery", caller_class="subagent", agent_topics={None, "trading"},
+        embedder=emb, dim=3, top_k=10, now_ts="2026-05-02T00:00:00", audit=False)
+    seen_ids = {h.get("id") for h in out if h.get("source_kind") != "knowledge"}
+    kn_slugs = {h["slug"] for h in out if h.get("source_kind") == "knowledge"}
+    assert seen_ids == {"null_ref", "trading_ref"}, seen_ids  # NOT cooking
+    assert kn_slugs == {"kn_trade"}, kn_slugs                  # NOT kn_cook
+    conn.close()
+
+
+def test_fix4_empty_string_element_also_dropped(tmp_path):
+    """An empty-string topic element ('' — a near-miss of None) is also dropped: a
+    scoped set of only falsy elements collapses to the empty fail-closed set."""
+    conn = _db(tmp_path)
+    _save(conn, id="null_ref", type="reference", title="null ref",
+          body="rrfquery shared", topic=None)
+    _save(conn, id="trading_ref", type="reference", title="trading ref",
+          body="rrfquery trading", topic="trading")
+    emb = _fake_embedder({"rrfquery": [1.0, 0.0, 0.0]})
+    out = unified_query.unified_recall(
+        conn, "rrfquery", caller_class="subagent", agent_topics={""},
+        embedder=emb, dim=3, top_k=10, now_ts="2026-05-02T00:00:00", audit=False)
+    seen_ids = {h.get("id") for h in out if h.get("source_kind") != "knowledge"}
+    assert seen_ids == {"null_ref"}, seen_ids  # no widening to 'trading'
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
 # FENCE 3 — knowledge + cross-store self-golden regression fence.
 # ---------------------------------------------------------------------------
 

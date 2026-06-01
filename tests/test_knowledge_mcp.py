@@ -284,6 +284,69 @@ def test_fix3_subagent_drops_link_when_endpoint_type_unresolvable(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# R3 bughunt FIX 5 — the links wall must FAIL-CLOSED on a None/missing dst_kind.
+# `_endpoint_allowed` returned True immediately for any kind != 'memory', so an edge
+# with dst_kind=None (or a missing dst_kind key → .get() is None) was treated as a
+# safe knowledge endpoint and KEPT — leaking its dst_id to a type-scoped subagent
+# even if that dst_id is actually a user/feedback memory. Only an EXPLICIT 'knowledge'
+# kind may bypass the type wall; None/missing/unknown → treated as a memory endpoint
+# (re-read, fail-closed on an unresolvable id).
+# ---------------------------------------------------------------------------
+
+def test_fix5_links_wall_drops_edge_with_none_dst_kind(tmp_path):
+    """A subagent recall over a returned memory whose `links` contains an edge with
+    dst_kind=None pointing at a real user/feedback memory id → the edge is DROPPED,
+    not leaked. (Pre-fix the None kind bypassed the wall as a 'non-memory' endpoint.)"""
+    conn = _db(tmp_path)
+    _save(conn, id="fb", type="feedback", title="how to work", body="a feedback note")
+    # An edge whose dst_kind is None but dst_id points at the forbidden feedback row.
+    links = [{"predicate": "references", "src_type": "project",
+              "dst_kind": None, "dst_id": "fb", "dst_type": None}]
+    kept = knowledge_mcp.filter_links_for_caller(
+        conn, links, caller_class="subagent")
+    assert kept == [], "None-dst_kind edge to a feedback memory leaked to a subagent"
+    conn.close()
+
+
+def test_fix5_links_wall_drops_edge_with_missing_dst_kind_key(tmp_path):
+    """A missing dst_kind KEY (.get('dst_kind') is None) is treated as a memory
+    endpoint and re-read — an edge to a forbidden user memory is DROPPED."""
+    conn = _db(tmp_path)
+    _save(conn, id="usr", type="user", title="peter pref", body="a personal pref")
+    links = [{"predicate": "references", "dst_id": "usr"}]  # NO dst_kind key
+    kept = knowledge_mcp.filter_links_for_caller(
+        conn, links, caller_class="subagent")
+    assert kept == [], "missing-dst_kind edge to a user memory leaked to a subagent"
+    conn.close()
+
+
+def test_fix5_links_wall_none_dst_kind_to_allowed_memory_kept(tmp_path):
+    """No over-filtering: a None-dst_kind edge whose dst_id resolves to an ALLOWED
+    type (reference) is treated as a memory endpoint, re-read, and KEPT."""
+    conn = _db(tmp_path)
+    _save(conn, id="ref", type="reference", title="ref x", body="a reference pointer")
+    links = [{"predicate": "references", "dst_kind": None, "dst_id": "ref",
+              "dst_type": None}]
+    kept = knowledge_mcp.filter_links_for_caller(
+        conn, links, caller_class="subagent")
+    assert {l["dst_id"] for l in kept} == {"ref"}
+    conn.close()
+
+
+def test_fix5_links_wall_keeps_explicit_knowledge_edge(tmp_path):
+    """An edge with an EXPLICIT dst_kind='knowledge' still bypasses the type wall and
+    is KEPT (knowledge wiki pages are not the secret-bearing user/feedback rows) —
+    the fix must not over-filter legitimate knowledge endpoints."""
+    conn = _db(tmp_path)
+    links = [{"predicate": "grounded_in", "dst_kind": "knowledge",
+              "dst_id": "some-wiki-slug", "dst_type": None}]
+    kept = knowledge_mcp.filter_links_for_caller(
+        conn, links, caller_class="subagent")
+    assert {l["dst_id"] for l in kept} == {"some-wiki-slug"}, "knowledge edge over-filtered"
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
 # SP-8 bughunt FIX 3 — knowledge_recall's per-hit record_access audit-write must be
 # best-effort. `record_access` goes through `_write_txn` which can raise (e.g.
 # WriteSpooled under write contention) — that must NOT turn a SUCCEEDED read into a
