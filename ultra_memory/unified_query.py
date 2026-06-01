@@ -48,6 +48,7 @@ cross-codebase parity with `wiki_query` is **deferred to a Trading-side SP-5
 integration test** (which CAN import both). The memory-store byte-identity (Test
 #1) IS enforced here, because that backend is engine-native.
 """
+import hashlib
 import json
 import math
 import re
@@ -58,6 +59,12 @@ from .redact_secrets import strip_secrets
 _RRF_K = 60
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
+# R4 PERF FIX 1: the knowledge embedding fetch batches its `target_id IN (…)` query
+# in chunks of this size to stay safely under SQLite's 999-bound-variable ceiling
+# (chunk + 1 model_name param = 501 ≪ 999), turning the old per-slug N+1 into
+# ceil(N/_EMBED_FETCH_CHUNK) round-trips. Tune-only; never changes ranking.
+_EMBED_FETCH_CHUNK = 500
+
 
 # ---------------------------------------------------------------------------
 # Generic IR primitives (no Trading specifics).
@@ -65,6 +72,60 @@ _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 def _tokenize(text):
     return _TOKEN_RE.findall((text or "").lower())
+
+
+# R4 PERF FIX 2: single-entry tokenized-corpus cache for `_bm25_rank`, keyed on a
+# STABLE (sha1) content fingerprint of the docs. `_bm25_rank` used to re-tokenize ALL
+# docs + recompute lengths/avgdl on EVERY call; in the consolidation drain it runs up
+# to 50× per weekly run → ~50× full-corpus re-tokenizations of the ~1223-page mirror.
+# The cache reuses the tokenization for an IDENTICAL corpus, and recomputes (never
+# serves stale) the moment any doc is edited / added / removed (the fingerprint
+# changes). The fingerprint is a sha1 over a canonical serialization of the
+# (doc_id, text) pairs — deterministic within AND across processes, so correctness
+# never depends on PYTHONHASHSEED (NOT Python's salted hash()). Single entry is right
+# for the recall path (one in-scope corpus at a time); a changed corpus simply evicts.
+_BM25_CORPUS_CACHE = {"fp": None, "corpus": None}
+
+
+def _bm25_corpus_fingerprint(docs):
+    """A STABLE sha1 digest over a canonical serialization of the (doc_id, text)
+    set — process-independent (no PYTHONHASHSEED salt). Any edit / add / remove to
+    `docs` changes the digest → the cache recomputes (never stale)."""
+    h = hashlib.sha1()
+    for doc_id in sorted(docs):
+        text = docs[doc_id] or ""
+        h.update(repr(doc_id).encode("utf-8"))
+        h.update(b"\x00")
+        h.update(text.encode("utf-8"))
+        h.update(b"\x01")
+    return h.hexdigest()
+
+
+def _bm25_corpus_stats(docs):
+    """Return the QUERY-INDEPENDENT corpus stats — tokenized docs, per-doc token sets
+    (for df membership), lengths, avgdl, n_docs — reusing a fingerprinted single-entry
+    cache so an unchanged corpus is tokenized only once. Byte-identical to inline
+    computation; this only memoizes it."""
+    fp = _bm25_corpus_fingerprint(docs)
+    if _BM25_CORPUS_CACHE["fp"] == fp:
+        return _BM25_CORPUS_CACHE["corpus"]
+    tokenized = {doc_id: _tokenize(text) for doc_id, text in docs.items()}
+    n_docs = len(tokenized)
+    lengths = {doc_id: len(toks) for doc_id, toks in tokenized.items()}
+    avgdl = (sum(lengths.values()) / n_docs) if n_docs else 0.0
+    token_sets = {doc_id: set(toks) for doc_id, toks in tokenized.items()}
+    corpus = {"tokenized": tokenized, "token_sets": token_sets,
+              "lengths": lengths, "avgdl": avgdl, "n_docs": n_docs}
+    _BM25_CORPUS_CACHE["fp"] = fp
+    _BM25_CORPUS_CACHE["corpus"] = corpus
+    return corpus
+
+
+def _bm25_cache_clear():
+    """Reset the corpus cache (test hook + safety valve). No behavioral effect on
+    results — only forces the next call to recompute the (cached-anyway) tokenization."""
+    _BM25_CORPUS_CACHE["fp"] = None
+    _BM25_CORPUS_CACHE["corpus"] = None
 
 
 def _bm25_rank(query, docs, *, k1=1.5, b=0.75):
@@ -76,20 +137,28 @@ def _bm25_rank(query, docs, *, k1=1.5, b=0.75):
     A doc with zero query-term overlap scores 0.0 and is dropped from the ranking
     (it contributes no RRF credit), mirroring wiki_query's BM25 which only returns
     matched pages.
+
+    R4 PERF FIX 2: the query-INDEPENDENT corpus tokenization (tokenized docs +
+    lengths + avgdl) is memoized on a stable content fingerprint (`_bm25_corpus_stats`)
+    so a repeated call over the SAME corpus reuses it; a CHANGED corpus recomputes.
+    The query-dependent df + scoring still run every call. RESULTS BYTE-IDENTICAL.
     """
     q_terms = set(_tokenize(query))
     if not q_terms or not docs:
         return []
-    tokenized = {doc_id: _tokenize(text) for doc_id, text in docs.items()}
-    n_docs = len(tokenized)
+    stats = _bm25_corpus_stats(docs)
+    tokenized = stats["tokenized"]
+    token_sets = stats["token_sets"]
+    lengths = stats["lengths"]
+    avgdl = stats["avgdl"]
+    n_docs = stats["n_docs"]
     if n_docs == 0:
         return []
-    lengths = {doc_id: len(toks) for doc_id, toks in tokenized.items()}
-    avgdl = (sum(lengths.values()) / n_docs) if n_docs else 0.0
-    # Document frequency per query term.
+    # Document frequency per query term (membership is identical to the old
+    # `term in toks` list-check, so df — and thus every score — is byte-identical).
     df = {}
     for term in q_terms:
-        df[term] = sum(1 for toks in tokenized.values() if term in toks)
+        df[term] = sum(1 for tset in token_sets.values() if term in tset)
     scored = []
     for doc_id, toks in tokenized.items():
         if not toks:
@@ -274,14 +343,32 @@ def _knowledge_candidates(conn, query, *, agent_topics, embedder, dim):
     # cached vector, this backend is empty -> BM25-only fusion (fail-open).
     embed_ranked = []
     if embedder is not None:
-        cached = {}
-        for slug in by_slug:
-            vrow = conn.execute(
-                "SELECT dim, vector FROM embeddings "
-                "WHERE target_kind='knowledge' AND target_id=? AND model_name=?",
-                (slug, retrieval_core.EMBED_MODEL)).fetchone()
-            if vrow is not None and vrow["dim"] == dim:
-                cached[slug] = retrieval_core.unpack_vector(vrow["vector"], dim)
+        # R4 PERF FIX 1: batch the vector fetch into ONE `… target_id IN (…)` query
+        # per chunk, instead of one SELECT per slug (the old N+1 — ~1223 per-row
+        # round-trips at the designed mirror scale). We chunk the IN-list well under
+        # SQLite's 999-bound-variable limit (chunk size 500, +1 for model_name → 501
+        # params per statement). PURE efficiency: the resulting `cached` dict (and so
+        # the cosine ranking + scores) is byte-identical — a slug with no cached
+        # vector or a dim-mismatch is still simply ABSENT from `cached`, exactly as
+        # before (the row never makes it into the dict).
+        slugs = list(by_slug)
+        fetched = {}  # target_id -> unpacked vector (DB row order is arbitrary)
+        for start in range(0, len(slugs), _EMBED_FETCH_CHUNK):
+            chunk = slugs[start:start + _EMBED_FETCH_CHUNK]
+            placeholders = ",".join("?" for _ in chunk)
+            for vrow in conn.execute(
+                    "SELECT target_id, dim, vector FROM embeddings "
+                    "WHERE target_kind='knowledge' AND model_name=? "
+                    f"AND target_id IN ({placeholders})",
+                    (retrieval_core.EMBED_MODEL, *chunk)).fetchall():
+                if vrow["dim"] == dim:
+                    fetched[vrow["target_id"]] = retrieval_core.unpack_vector(
+                        vrow["vector"], dim)
+        # Rebuild `cached` in `by_slug` (= unified_index row) order — IDENTICAL to the
+        # old per-slug loop's insertion order. `cosine_search` breaks score ties by
+        # dict-iteration order (no secondary key), so preserving insertion order keeps
+        # `embed_ranked` byte-identical to the pre-batch behavior.
+        cached = {slug: fetched[slug] for slug in slugs if slug in fetched}
         if cached:
             q_vec = embedder([query])[0]
             if len(q_vec) == dim:
