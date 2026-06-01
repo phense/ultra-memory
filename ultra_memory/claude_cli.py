@@ -41,7 +41,7 @@ def _child_env(base):
 
 
 def run_claude(prompt, *, model, system=None, claude_bin="claude",
-               timeout=120, runner=subprocess.run, env=None):
+               timeout=120, runner=subprocess.run, env=None, effort=None):
     """Run one off-session claude CLI call on the OAuth subscription.
 
     `runner` is injectable (subprocess.run-compatible) so tests never spawn a process.
@@ -51,6 +51,11 @@ def run_claude(prompt, *, model, system=None, claude_bin="claude",
         raise ValueError("run_claude: a non-empty model is required")
     child_env = _child_env(env)
     cmd = [claude_bin, "--model", model]
+    if effort is not None and str(effort).strip():
+        # Lower effort dramatically cuts per-call wall-clock (a mechanical Stage-2
+        # adjudicate item dropped 56s→23s at --effort low) — used by callers that
+        # batch many small structured-output calls under a wall-clock budget.
+        cmd += ["--effort", str(effort).strip()]
     if system is not None:
         cmd += ["--system-prompt", system]
     cmd += ["-p", prompt, "--output-format", "text"]

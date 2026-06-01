@@ -41,6 +41,23 @@ def test_omits_system_flag_when_absent():
     assert "--system-prompt" not in captured["cmd"]
 
 
+def test_effort_flag_added_when_set():
+    captured = {}
+    claude_cli.run_claude("p", model="m", effort="low",
+                          runner=make_runner(captured), env=dict(BASE_ENV))
+    cmd = captured["cmd"]
+    assert "--effort" in cmd and cmd[cmd.index("--effort") + 1] == "low"
+    # placed right after the model flag, before --system-prompt / -p
+    assert cmd[:4] == ["claude", "--model", "m", "--effort"]
+
+
+def test_blank_effort_is_ignored():
+    captured = {}
+    claude_cli.run_claude("p", model="m", effort="  ",
+                          runner=make_runner(captured), env=dict(BASE_ENV))
+    assert "--effort" not in captured["cmd"]
+
+
 def test_strips_recursion_env():
     captured = {}
     env = dict(BASE_ENV, CLAUDECODE="1", CLAUDE_CODE_SESSION_ID="abc",
