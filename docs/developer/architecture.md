@@ -26,8 +26,8 @@ not a rollback source for those.
 | `db.py` | Connection discipline (WAL, busy_timeout, FK, autocommit) + the forward-only, transactional, idempotent migration runner. |
 | `migrations/*.sql` | Ordered `NNNN_name.sql`. `0001` initial schema, `0002` import-fidelity columns, `0003` harness slug + sort order, `0004` cross-store fabric (topic/provenance/outcome columns; `unified_index`/`knowledge_pins`/`agent_topic_bindings` tables; `links` sub-types). |
 | `memory_lib.py` | **The only writer.** Every mutation: redact → `BEGIN IMMEDIATE`/`COMMIT` with retry+spool → `audit_log`. SP-3 adds the topic write path + `make_keyword_router`, `record_link`/`mirror_cross_store_links` (the `links` spine's first writer), the generalized `set_pinned(source_kind=…)`, and the gated `backfill_topic`. |
-| `wiki_sync.py` | **(SP-3)** Tier-1 wiki→memory mirror: walk consumer-fed `wiki_roots`, upsert pages into `unified_index`, reconcile orphans, embed into the shared cache. Project-agnostic, idempotent (sha-skip), fail-open. Population only. |
-| `unified_query.py` | **(SP-3)** the warm cross-store retrieval surface: `unified_recall` (memory cosine + generic knowledge BM25/cosine, FU-4 RRF, × outcome_weight) + the fail-closed `topic_scope_from_env`. No LLM. |
+| `wiki_sync.py` | **(SP-3)** Tier-1 wiki→memory mirror: walk consumer-fed `wiki_roots`, upsert pages into `unified_index`, reconcile orphans, embed into the shared cache. Project-agnostic, idempotent (sha-skip), fail-open. Population only. The orphan prune is scoped to the synced **roots' path-prefix** (not to topics that still have files), so a page deleted when its topic goes fully empty is still pruned (its `unified_index` row + knowledge embedding) instead of lingering as a phantom recall hit. |
+| `unified_query.py` | **(SP-3)** the warm cross-store retrieval surface: `unified_recall` (memory cosine + generic knowledge BM25/cosine, FU-4 RRF, × outcome_weight) + the fail-closed `topic_scope_from_env`. No LLM. The final fused sort uses a **deterministic total order** `(-weighted_score, (kind, key))` so a tie cannot reorder run-to-run under `PYTHONHASHSEED` (the rrf dict is built from a `set`); the secondary key changes only tie-order, never which score ranks where. |
 | `redact_secrets.py` | Pure secret-stripper (the pre-persist + pre-export chokepoint). |
 | `retrieval_core.py` | cosine, RRF, vector (de)serialise, content hash, embedding cache (single + batch), lazy fastembed (model cached in a persistent `$HOME` dir, never `$TMPDIR`). |
 | `memory_query.py` | Read side: candidates → cosine → title boost → ranking signals → 1-hop links. No LLM. |
@@ -98,8 +98,11 @@ survives `iterdump`, so the committed dump round-trips the version.
 Phase-1 memory retrieval is **embedding-cosine + title-index only**; BM25/RRF/
 reranker are deferred behind a measured eval gate (the wiki side keeps full RRF).
 `query_memories` reads candidates from one snapshot, embeds all cache-misses in a
-single batched call + one write txn (`get_or_embed_batch`), ranks, and attaches
-1-hop links. The embedder is always injected.
+single batched call + one write txn (`get_or_embed_batch`), ranks, **sorts +
+truncates to the top_k ids first, THEN attaches 1-hop links** — so the per-row
+`_links_for` SELECT runs only for the top_k survivors, not for every candidate
+(bounding the per-recall link work to top_k without changing the ranking/scoring or
+the returned dict shape). The embedder is always injected.
 
 ## Cross-store fabric (SP-3)
 
@@ -198,6 +201,11 @@ cycle:
   importer. **`agent` and `background_review` have no engine write site yet** — they
   are reserved values an agent-initiated save / a future Tier-2 maintenance write
   will set; the SP-7 provenance gate may auto-edit only those non-`human` rows.
+  Provenance is **never downgraded on re-save**: an `import`/`agent`/`background_review`
+  re-save over a `human` row preserves `human`. The bootstrap **importer is
+  edit-safe**: a legacy re-import SKIPS any row whose live `created_by` is `human`
+  (it neither reverts the human-edited body nor demotes the provenance) — mirroring
+  the deliberate status/pin preservation.
 - `session_events.outcome_signal` (the deterministic capture hint) is accepted by
   `record_session_event` but **set by no engine writer** — the Stop-hook capture
   that enqueues `skill_learning_candidate` rows is **Trading-side** (it lives in the

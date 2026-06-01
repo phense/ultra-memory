@@ -411,3 +411,52 @@ def test_lazy_embedder_defers_build_until_first_call_and_memoizes():
 
     assert embed(["de", "f"]) == [[2.0], [1.0]]
     assert builds == [1]  # memoized — no second build
+
+
+# ---------------------------------------------------------------------------
+# R4 FIX 4 — the knowledge MCP error payload must NOT leak the raw exception
+# string (internal filesystem/DB paths) across the privilege boundary. The result
+# ROWS are strip_secrets'd, but the ERROR payload was not — and strip_secrets does
+# NOT redact paths anyway. Return a FIXED generic error; log the detail locally.
+# ---------------------------------------------------------------------------
+
+def test_fix4_recall_error_does_not_leak_internal_path(tmp_path, capsys):
+    """An exception carrying an absolute path → the client-facing error string is a
+    generic one (NEITHER the path NOR the db filename leaks), while the detail is
+    logged locally (stderr) for server-side debugging."""
+    import json
+    conn = _db(tmp_path)
+    _save(conn, id="proj", type="project", title="alpha", body="alpha fact")
+
+    leaky_path = "/Users/USER/.cache/fastembed/models/secret-model-x/model.onnx"
+    db_name = "memory.db"
+
+    def boom(texts):
+        raise RuntimeError(
+            f"OperationalError: unable to open {leaky_path} (db {db_name})")
+
+    res = knowledge_mcp.run_query_tool(
+        {"query": "alpha", "top_k": 5}, conn=conn, embedder=boom,
+        caller_class="subagent", dim=3, now_ts="2026-05-02T00:00:00", ts=None)
+    payload = json.loads(res[0].text)
+    assert "error" in payload
+    # The client-facing error is the FIXED generic string.
+    assert payload["error"] == "recall failed (internal error)"
+    assert leaky_path not in payload["error"]
+    assert db_name not in payload["error"]
+    # The detail IS preserved server-side (stderr), so debugging info is not lost.
+    captured = capsys.readouterr()
+    assert leaky_path in captured.err
+    conn.close()
+
+
+def test_fix4_missing_query_error_is_unchanged(tmp_path):
+    """The pre-existing structured 'missing query' error (no exception interpolated)
+    is unaffected — only the exception-interpolating catch is genericized."""
+    import json
+    conn = _db(tmp_path)
+    res = knowledge_mcp.run_query_tool(
+        {}, conn=conn, embedder=_flat_embedder(), caller_class="subagent", dim=3)
+    payload = json.loads(res[0].text)
+    assert payload["error"] == "missing required 'query' string argument"
+    conn.close()

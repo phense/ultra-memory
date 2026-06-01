@@ -221,6 +221,35 @@ def test_import_uses_file_mtime_for_timestamps(tmp_path):
     conn.close()
 
 
+def test_import_stores_updated_at_in_canonical_utc(tmp_path):
+    """Round-4 FIX 5: the import path must store updated_at/created_at in the
+    canonical tz-aware UTC `%Y-%m-%dT%H:%M:%SZ` format (the engine's
+    maintain/retention convention), NOT a naive-local isoformat (19 chars, no
+    offset). A naive-local ts vs an aware-UTC ts compare off by the local offset
+    in the raw-string ORDER BYs the rehydrate gist uses."""
+    import datetime as _dt
+    import os
+    import re
+
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    f = mem / "old_note.md"
+    _write(f, "old-note", "reference", "d", "Body.")
+    old = _dt.datetime(2026, 1, 1, 12, 0, 0, tzinfo=_dt.timezone.utc).timestamp()
+    os.utime(f, (old, old))
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    mi.import_memory_dir(conn, mem, index_path=None, ts="2026-05-30T10:00:00")
+    row = conn.execute(
+        "SELECT created_at, updated_at FROM memories WHERE id='old-note'").fetchone()
+    # Canonical: ends with 'Z', no '+00:00' offset, no microseconds.
+    canonical = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+    assert canonical.match(row["updated_at"]), row["updated_at"]
+    assert canonical.match(row["created_at"]), row["created_at"]
+    # Still reflects the FILE's age (mtime), 2026-01-01 UTC.
+    assert row["updated_at"].startswith("2026-01-01")
+    conn.close()
+
+
 def test_import_persists_file_slug_and_sort_order(tmp_path):
     """C1: the underscore filename slug is NOT derivable from name: (which drops
     prefixes, e.g. feedback_email_routing.md → name: email-routing). It must be
@@ -241,4 +270,93 @@ def test_import_persists_file_slug_and_sort_order(tmp_path):
     first = conn.execute(
         "SELECT sort_order FROM memories WHERE id='user-language'").fetchone()
     assert first["sort_order"] == 0                        # first line
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# R4 FIX 2 — save_memory must not DOWNGRADE created_by provenance, and a legacy
+# re-import must not revert a human-edited body or demote 'human' → 'import'.
+# ---------------------------------------------------------------------------
+
+def test_r4fix2_save_memory_never_downgrades_human_provenance(tmp_path):
+    """A human-owned row stays 'human' on a non-human re-save (the engine never
+    DOWNGRADES provenance); body is still updated by the re-save as before."""
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    memory_lib.save_memory(conn, id="X", type="reference", title="T",
+                           body="v1", ts="2026-05-30T10:00:00Z",
+                           created_by="import")
+    memory_lib.save_memory(conn, id="X", type="reference", title="T",
+                           body="v2-human", ts="2026-05-30T11:00:00Z",
+                           created_by="human")
+    row = conn.execute("SELECT created_by, body FROM memories WHERE id='X'").fetchone()
+    assert row["created_by"] == "human" and row["body"] == "v2-human"
+
+    # A background_review re-save must NOT demote it back to a non-human origin.
+    memory_lib.save_memory(conn, id="X", type="reference", title="T",
+                           body="v3-bg", ts="2026-05-30T12:00:00Z",
+                           created_by="background_review")
+    row = conn.execute("SELECT created_by, body FROM memories WHERE id='X'").fetchone()
+    assert row["created_by"] == "human"          # provenance preserved (no downgrade)
+    assert row["body"] == "v3-bg"                 # body still updates on a normal re-save
+    conn.close()
+
+
+def test_r4fix2_normal_nonhuman_resave_still_updates(tmp_path):
+    """A non-human → non-human re-save still updates created_by/body as before
+    (no regression to the §7a provenance-stamping contract)."""
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    memory_lib.save_memory(conn, id="Y", type="reference", title="T",
+                           body="v1", ts="2026-05-30T10:00:00Z",
+                           created_by="agent")
+    memory_lib.save_memory(conn, id="Y", type="reference", title="T",
+                           body="v2", ts="2026-05-30T11:00:00Z",
+                           created_by="background_review")
+    row = conn.execute("SELECT created_by, body FROM memories WHERE id='Y'").fetchone()
+    assert row["created_by"] == "background_review" and row["body"] == "v2"
+    conn.close()
+
+
+def test_r4fix2_import_does_not_revert_human_edited_row(tmp_path):
+    """A legacy re-import over a memory a human edited via /memory-edit
+    (created_by='human') must keep BOTH its created_by AND its human-edited body —
+    mirroring the deliberate status/pin preservation already in place."""
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    # Bootstrap import wrote X with body 'v1'.
+    memory_lib.save_memory(conn, id="X", type="reference", title="T",
+                           body="v1", ts="2026-05-30T10:00:00Z",
+                           created_by="import")
+    # Human later edited it via /memory-edit.
+    memory_lib.save_memory(conn, id="X", type="reference", title="T",
+                           body="v2-human", ts="2026-05-30T11:00:00Z",
+                           created_by="human")
+
+    # Now a legacy re-import runs over a dir whose X.md still carries the OLD 'v1'.
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    _write(mem / "x.md", "X", "reference", "d", "v1")
+    mi.import_memory_dir(conn, mem, ts="2026-05-30T12:00:00Z")
+
+    row = conn.execute("SELECT created_by, body FROM memories WHERE id='X'").fetchone()
+    assert row["created_by"] == "human"          # NOT demoted to 'import'
+    assert row["body"] == "v2-human"             # NOT reverted to the frozen legacy 'v1'
+    conn.close()
+
+
+def test_r4fix2_import_still_creates_and_updates_non_human_rows(tmp_path):
+    """The import edit-safety guard is scoped to 'human' rows only: a NEW import
+    creates the row, and a re-import over a non-human row still upserts (idempotent
+    bootstrap behavior preserved)."""
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    _write(mem / "z.md", "Z", "reference", "d", "first")
+    n1 = mi.import_memory_dir(conn, mem, ts="2026-05-30T10:00:00Z")
+    assert n1 == 1
+    row = conn.execute("SELECT created_by, body FROM memories WHERE id='Z'").fetchone()
+    assert row["created_by"] == "import" and row["body"] == "first"
+    # Re-import with a changed body over the still-'import' row → updates.
+    _write(mem / "z.md", "Z", "reference", "d", "second")
+    mi.import_memory_dir(conn, mem, ts="2026-05-30T11:00:00Z")
+    row = conn.execute("SELECT created_by, body FROM memories WHERE id='Z'").fetchone()
+    assert row["created_by"] == "import" and row["body"] == "second"
     conn.close()

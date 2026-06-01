@@ -222,6 +222,48 @@ def test_reconciliation_prunes_orphans(tmp_path):
     conn.close()
 
 
+def test_r4fix1_prune_when_topic_emptied(tmp_path):
+    """R4 FIX 1 — a topic going FULLY empty must still prune its orphan row.
+
+    The pre-fix prune recomputed `synced_topics` from the CURRENT on-disk pages,
+    then gated on `topic IN (...)`. When the deleted page was the LAST page of its
+    topic, that topic dropped out of `synced_topics`, so its orphaned unified_index
+    row (a phantom pointing at a deleted file) was NEVER pruned. Scope the prune to
+    the synced ROOTS (path-prefix), not to topics that still have files."""
+    conn = _db(tmp_path)
+    root = tmp_path / "wiki"
+    pa = _make_wiki(root, "trading", "only-page", "the only page in its topic")
+    s1 = wiki_sync.wiki_sync(conn, [root], embedder=_fake_embedder(),
+                             ts="2026-05-31T10:00:00Z")
+    assert {r["slug"] for r in _index_rows(conn)} == {"only-page"}
+    assert s1["embedded"] == 1
+    # The knowledge embedding for the page is present.
+    assert conn.execute(
+        "SELECT COUNT(*) FROM embeddings WHERE target_kind='knowledge' "
+        "AND target_id='only-page'").fetchone()[0] == 1
+
+    # Delete the page → the topic dir is now empty (no surviving sibling).
+    pa.unlink()
+    s2 = wiki_sync.wiki_sync(conn, [root], embedder=_fake_embedder(),
+                             ts="2026-05-31T11:00:00Z")
+    # The orphan row is PRUNED even though its topic has zero surviving files.
+    assert s2["pruned"] == 1
+    assert conn.execute(
+        "SELECT COUNT(*) FROM unified_index WHERE slug='only-page'").fetchone()[0] == 0
+    # And the orphaned knowledge embedding is gone too (no phantom vector).
+    assert conn.execute(
+        "SELECT COUNT(*) FROM embeddings WHERE target_kind='knowledge' "
+        "AND target_id='only-page'").fetchone()[0] == 0
+
+    # unified_recall no longer returns the phantom (no deleted-file path hit).
+    from ultra_memory import unified_query
+    hits = unified_query.unified_recall(
+        conn, "the only page in its topic", caller_class="orchestrator",
+        agent_topics=None, embedder=_fake_embedder(), top_k=5, audit=False)
+    assert all(h.get("slug") != "only-page" for h in hits)
+    conn.close()
+
+
 def test_reconciliation_only_prunes_within_synced_roots(tmp_path):
     """A row that belongs to a root NOT in this sync call is left untouched —
     the orphan prune is scoped to the synced roots' topics/paths."""

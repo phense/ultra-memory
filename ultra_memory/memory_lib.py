@@ -268,12 +268,21 @@ def save_memory(conn, *, id, type, title, body, ts, origin_session_id=None,
             _audit(conn, op="save", target_kind="memory", target_id=id,
                    reason="create", prior=None, ts=ts)
         else:
+            # R4 FIX 2(a): never DOWNGRADE provenance. A human-owned row stays
+            # 'human' unless a human edits it — so an 'agent'/'background_review'/
+            # 'import' re-save over a 'human' row preserves 'human' (status + pinned
+            # are already preserved on re-save; created_by was the inconsistency).
+            prior_created_by = prior["created_by"]
+            effective_created_by = (
+                "human" if (prior_created_by == "human" and created_by != "human")
+                else created_by)
             conn.execute(
                 "UPDATE memories SET type=?, title=?, body=?, description=?, "
                 "index_hook=?, node_type=?, file_slug=?, sort_order=?, updated_at=?, "
                 "topic=?, created_by=? WHERE id=?",
                 (type, title, body, description, index_hook, node_type,
-                 file_slug, sort_order, updated, resolved_topic, created_by, id),
+                 file_slug, sort_order, updated, resolved_topic,
+                 effective_created_by, id),
             )
             _audit(conn, op="save", target_kind="memory", target_id=id,
                    reason="update", prior=dict(prior), ts=ts)

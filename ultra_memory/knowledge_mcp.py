@@ -207,8 +207,18 @@ def run_query_tool(arguments, *, conn, embedder, caller_class, dim=None,
                 recall_kwargs["dim"] = dim
             results = unified_query.unified_recall(conn, query, **recall_kwargs)
     except Exception as exc:  # degrade ONE query, never kill the server loop (§13)
+        # R4 FIX 4: the client-facing error must NOT leak the raw exception string
+        # — str(exc) can embed internal filesystem/DB paths (a fastembed model path,
+        # a sqlite OperationalError with the db filename). strip_secrets does NOT
+        # redact paths, so routing the message through it is insufficient. Return a
+        # FIXED generic string across the privilege boundary; log the detail LOCALLY
+        # (stderr) so server-side debugging info is preserved, not leaked.
+        import sys
+        import traceback
+        print(f"[knowledge_mcp] recall failed: {exc}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return [TextContent(type="text", text=json.dumps(
-            {"error": f"recall failed: {exc}"}))]
+            {"error": "recall failed (internal error)"}))]
     return [TextContent(type="text", text=json.dumps({"results": results}))]
 
 
