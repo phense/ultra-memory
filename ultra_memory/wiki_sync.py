@@ -31,6 +31,7 @@ Returns a small summary {upserted, skipped, pruned, embedded, errors} so
 import json
 
 from ultra_memory import retrieval_core
+from ultra_memory.redact_secrets import strip_secrets
 
 
 def _split_frontmatter(text):
@@ -155,6 +156,17 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts):
                 bm25_text = _bm25_text(body)
                 frontmatter_json = json.dumps(fm, ensure_ascii=False, sort_keys=True)
                 sha = retrieval_core.content_sha256(text)
+                # wiki_sync is a REDACTION CHOKEPOINT, equivalent to the memory
+                # write path (save_memory). The documented free-form `Edit`
+                # exception can land an unredacted secret on a wiki page; redact
+                # the queryable text before it reaches the unified_index mirror
+                # (which unified_recall + the rehydrate gist read). `content_sha256`
+                # is computed on the RAW page text above (so the idempotency/cache
+                # key is stable + matches the on-disk file), then we redact.
+                title = strip_secrets(title)
+                snippet = strip_secrets(snippet)
+                bm25_text = strip_secrets(bm25_text)
+                frontmatter_json = strip_secrets(frontmatter_json)
             except Exception:
                 summary["errors"] += 1
                 continue

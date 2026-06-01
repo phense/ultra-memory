@@ -206,6 +206,83 @@ def test_session_id_from_env_mirrors_caller_class_pattern():
         {"ULTRA_MEMORY_SESSION_ID": " S-1 "}) == "S-1"
 
 
+# ---------------------------------------------------------------------------
+# SP-8 bughunt FIX 3 — the type wall must extend to the `links` of a returned row.
+# A subagent recalling an ALLOWED project/reference memory that carries an edge to
+# a FORBIDDEN user/feedback memory must NOT receive that forbidden memory's id/type
+# via the `links` field (a sideband leak past the primary-row type wall).
+# ---------------------------------------------------------------------------
+
+def _link(conn, *, src_id, predicate, dst_id, dst_type, ts="2026-05-01T00:00:00"):
+    memory_lib.record_link(
+        conn, src_kind="memory", src_id=src_id, predicate=predicate,
+        dst_kind="memory", dst_id=dst_id, dst_type=dst_type, ts=ts)
+
+
+def test_fix3_subagent_recall_drops_links_to_forbidden_type(tmp_path):
+    """A subagent recalling the project memory must NOT see, via `links`, the id/type
+    of a feedback memory the project memory links to."""
+    conn = _db(tmp_path)
+    _save(conn, id="proj", type="project", title="proj x", body="public project fact")
+    _save(conn, id="fb", type="feedback", title="how to work", body="a feedback note")
+    _link(conn, src_id="proj", predicate="references", dst_id="fb", dst_type="feedback")
+    out = knowledge_mcp.knowledge_recall(
+        conn, "proj", caller_class="subagent", embedder=_flat_embedder(), dim=3,
+        now_ts="2026-05-02T00:00:00", audit=False)
+    proj = [r for r in out if r["id"] == "proj"]
+    assert proj, "subagent must still recall the allowed project memory"
+    dst_ids = {l["dst_id"] for l in proj[0]["links"]}
+    dst_types = {l["dst_type"] for l in proj[0]["links"]}
+    assert "fb" not in dst_ids, "forbidden feedback id leaked via links"
+    assert "feedback" not in dst_types, "forbidden feedback type leaked via links"
+    conn.close()
+
+
+def test_fix3_subagent_recall_keeps_links_to_allowed_type(tmp_path):
+    """An edge to an ALLOWED type (project→reference) is retained for the subagent —
+    no over-filtering."""
+    conn = _db(tmp_path)
+    _save(conn, id="proj", type="project", title="proj x", body="public project fact")
+    _save(conn, id="ref", type="reference", title="ref x", body="a reference pointer")
+    _link(conn, src_id="proj", predicate="references", dst_id="ref", dst_type="reference")
+    out = knowledge_mcp.knowledge_recall(
+        conn, "proj", caller_class="subagent", embedder=_flat_embedder(), dim=3,
+        now_ts="2026-05-02T00:00:00", audit=False)
+    proj = [r for r in out if r["id"] == "proj"][0]
+    assert "ref" in {l["dst_id"] for l in proj["links"]}
+    conn.close()
+
+
+def test_fix3_orchestrator_recall_keeps_links_to_all_types(tmp_path):
+    """The full-recall orchestrator caller is NOT subject to the links filter — it
+    still sees the edge to the feedback memory (no over-filtering of trusted)."""
+    conn = _db(tmp_path)
+    _save(conn, id="proj", type="project", title="proj x", body="public project fact")
+    _save(conn, id="fb", type="feedback", title="how to work", body="a feedback note")
+    _link(conn, src_id="proj", predicate="references", dst_id="fb", dst_type="feedback")
+    out = knowledge_mcp.knowledge_recall(
+        conn, "proj", caller_class="orchestrator", embedder=_flat_embedder(), dim=3,
+        now_ts="2026-05-02T00:00:00", audit=False)
+    proj = [r for r in out if r["id"] == "proj"][0]
+    assert "fb" in {l["dst_id"] for l in proj["links"]}
+    conn.close()
+
+
+def test_fix3_subagent_drops_link_when_endpoint_type_unresolvable(tmp_path):
+    """Fail-closed: if the edge's endpoint cannot be resolved to a known allowed
+    type (e.g. a dangling dst id), the edge is DROPPED for the subagent."""
+    conn = _db(tmp_path)
+    _save(conn, id="proj", type="project", title="proj x", body="public project fact")
+    # An edge to a non-existent memory id (no row to resolve the type from).
+    _link(conn, src_id="proj", predicate="references", dst_id="ghost", dst_type=None)
+    out = knowledge_mcp.knowledge_recall(
+        conn, "proj", caller_class="subagent", embedder=_flat_embedder(), dim=3,
+        now_ts="2026-05-02T00:00:00", audit=False)
+    proj = [r for r in out if r["id"] == "proj"][0]
+    assert "ghost" not in {l["dst_id"] for l in proj["links"]}
+    conn.close()
+
+
 def test_db_path_from_env_required(tmp_path):
     """The DB path comes from config (ULTRA_MEMORY_DB), never cwd. Missing → raises."""
     import pytest

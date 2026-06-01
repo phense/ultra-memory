@@ -451,3 +451,56 @@ def test_resolve_wiki_roots_empty_is_empty(monkeypatch):
     assert maintain._resolve_wiki_roots(os.environ) == []
     monkeypatch.setenv("ULTRA_MEMORY_WIKI_ROOTS", "   ")
     assert maintain._resolve_wiki_roots(os.environ) == []
+
+
+# ---------------------------------------------------------------------------
+# SP-8 bughunt FIX 2 — wiki_sync is a REDACTION CHOKEPOINT.
+# The documented free-form `Edit` exception can land an unredacted secret on a
+# wiki page; wiki_sync must NOT copy it verbatim into the queryable unified_index
+# mirror (which unified_recall + the rehydrate gist read).
+# ---------------------------------------------------------------------------
+
+def test_fix2_wiki_sync_redacts_secret_in_title_snippet_bm25(tmp_path):
+    """A secret on a wiki page body/title is REDACTED before it reaches
+    unified_index.title/snippet/bm25_text."""
+    conn = _db(tmp_path)
+    root = tmp_path / "wiki"
+    secret = "api_key=AKIAIOSFODNN7EXAMPLE"
+    secret_val = "AKIAIOSFODNN7EXAMPLE"
+    # Secret in the body (→ snippet + bm25_text) AND in the title.
+    _make_wiki(root, "trading", "leaky-page",
+               f"The config uses {secret} for auth.",
+               title=f"Leaky page {secret}")
+    wiki_sync.wiki_sync(conn, [root], ts="2026-05-31T10:00:00Z")
+    row = conn.execute(
+        "SELECT title, snippet, bm25_text, frontmatter FROM unified_index "
+        "WHERE slug='leaky-page'").fetchone()
+    assert row is not None
+    assert secret_val not in row["title"]
+    assert secret_val not in row["snippet"]
+    assert secret_val not in row["bm25_text"]
+    assert secret_val not in (row["frontmatter"] or "")
+    # And the redaction marker is present (load-bearing: confirms we redacted, not
+    # merely dropped the field).
+    assert "[REDACTED]" in row["snippet"]
+    assert "[REDACTED]" in row["bm25_text"]
+    conn.close()
+
+
+def test_fix2_wiki_sync_keeps_nonsecret_text_intact(tmp_path):
+    """Redaction is conservative: ordinary prose passes through unchanged so the
+    chokepoint does not mangle real content (no over-redaction regression)."""
+    conn = _db(tmp_path)
+    root = tmp_path / "wiki"
+    _make_wiki(root, "trading", "clean-page",
+               "Credit spreads use institutional-grade-discipline.",
+               title="Clean page")
+    wiki_sync.wiki_sync(conn, [root], ts="2026-05-31T10:00:00Z")
+    row = conn.execute(
+        "SELECT title, snippet, bm25_text FROM unified_index "
+        "WHERE slug='clean-page'").fetchone()
+    assert row["title"] == "Clean page"
+    assert "institutional-grade-discipline" in row["snippet"]
+    assert "institutional-grade-discipline" in row["bm25_text"]
+    assert "[REDACTED]" not in row["snippet"]
+    conn.close()

@@ -345,6 +345,27 @@ def test_session_event_redacts_secret_in_detail(tmp_path):
     conn.close()
 
 
+def test_session_event_redacts_secret_in_files_and_refs(tmp_path):
+    """SP-8 bughunt FIX 4: the module docstring guarantees "All persisted text
+    passes through redact_secrets first" — `files` and `refs` must too (they were
+    persisted verbatim). Each string element is redacted before json.dumps."""
+    conn = _db(tmp_path)
+    memory_lib.record_session_event(
+        conn, session_id="s1", kind="note", title="t", ts="2026-05-30T10:00:00",
+        files=["https://user:secretpw@host/x", "/plain/path/ok.py"],
+        refs=["token=abc123def", "just-a-ref"])
+    row = conn.execute(
+        "SELECT files, refs FROM session_events WHERE session_id='s1'").fetchone()
+    files = json.loads(row[0])
+    refs = json.loads(row[1])
+    # The URI userinfo password and the token value are gone; structure preserved.
+    assert "secretpw" not in row[0] and "[REDACTED]" in files[0]
+    assert files[1] == "/plain/path/ok.py"
+    assert "abc123def" not in row[1] and "[REDACTED]" in refs[0]
+    assert refs[1] == "just-a-ref"
+    conn.close()
+
+
 def test_resave_preserves_deleted_tombstone(tmp_path):
     """M7: a re-save (e.g. a re-import while the file still exists on disk) must NOT
     resurrect a deliberately-deleted memory — content updates, tombstone stays."""

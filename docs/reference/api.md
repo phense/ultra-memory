@@ -69,7 +69,10 @@ Every public function. The caller owns connections and supplies timestamps.
   `outcome_signal` (SP-3 D13, §7a substrate) is an optional deterministic per-event
   hint; it is **payload, excluded from `event_key`**, so events differing only in
   the signal still dedupe (first write wins). Inert by default (`NULL`); spooled +
-  replayed.
+  replayed. **Redaction (SP-8 bughunt):** title, detail, AND every string element of
+  `files`/`refs` pass through `strip_secrets` before persist + spool — honoring the
+  module guarantee that *all persisted text* is redacted first (the `event_key` is
+  keyed on the RAW pre-redaction text so a rule change can't un-dedupe a replay).
 - `event_id_for_key(conn, event_key) -> int | None` — **SP-8 A2.** Resolve the
   content-addressed `event_key` STRING that `record_session_event` returns back to
   its integer `session_events.id` — the value the SP-8 `informed_by` attribution
@@ -220,6 +223,14 @@ consumer's wiki (no topic-model module, not even PyYAML).
   `embeddings` table with `target_kind='knowledge'` (reuses `get_or_embed_batch` +
   its sha invalidation; `embedder=None` → upsert rows, skip embedding). No LLM, no
   model download beyond the one shared embedder.
+  **Redaction chokepoint (SP-8 bughunt):** `wiki_sync` is a write-time redaction
+  chokepoint equivalent to the memory write path — `title`/`snippet`/`bm25_text`/
+  `frontmatter` pass through `strip_secrets` before the `unified_index` INSERT (and
+  the redacted text is what gets embedded). The documented free-form `Edit`
+  exception can land an unredacted secret on a wiki page; this keeps it out of the
+  queryable mirror that `unified_recall` + the rehydrate gist read. `content_sha256`
+  is computed on the RAW page text (idempotency/cache key stays stable, matches the
+  on-disk file).
 
 ## `unified_query` *(SP-3 Stage 6)*
 
@@ -265,7 +276,16 @@ best-rank-per-backend RRF, weighted by `outcome_weight` (inert 1.0). No LLM.
   knowledge row is in scope, the result is `query_memories`' own dicts verbatim
   (same order/fields/scores). Knowledge hits carry `source_kind='knowledge'`, `slug,
   topic, title, page_type, snippet, path, score`; memory hits carry
-  `source_kind='memory'` + the `query_memories` fields.
+  `source_kind='memory'` + the `query_memories` fields. **Read-path redaction (SP-8
+  bughunt):** like `knowledge_recall`, every caller-facing title/snippet runs through
+  `strip_secrets` — the memory `title`, the knowledge `title`+`snippet`, AND the
+  memory-only byte-identity `title` — defense-in-depth catching a secret that entered
+  the DB by a path other than the write chokepoint (byte-identity holds for
+  secret-free text, which `strip_secrets` leaves unchanged). **Links type-wall (SP-8
+  bughunt):** a type-scoped (subagent) caller's per-row `links` are filtered through
+  `filter_links_for_caller` so an edge to a forbidden `user`/`feedback` memory does
+  not leak that endpoint's id+type past the primary-row type wall (fail-closed; the
+  trusted/orchestrator caller keeps all links).
 - `topic_scope_from_env(env, conn=None, *, agent_name=None) -> set` — **fail-closed**
   topic-scope resolver (mirrors `caller_class_from_env`): union of
   `ULTRA_MEMORY_CALLER_TOPIC` (comma/`:`/`;`-separated) and any
@@ -352,6 +372,15 @@ downstream consumer (Trading-side, not the engine) folds those edges into an EWM
 - `allowed_types_for(caller_class)` / `caller_class_from_env(env)` — the **type**
   axis of the access wall (unchanged): trusted (`orchestrator`/`owner`) → all types;
   else `SAFE_TYPES` = `(project, reference)`, fail-closed.
+- `filter_links_for_caller(conn, links, *, caller_class)` — **SP-8 bughunt.** Extends
+  the type wall from the PRIMARY row to its **edges**: for a type-scoped caller it
+  drops any `links` edge whose `memory` endpoint resolves (via `SELECT type FROM
+  memories WHERE id=?`, trusting the live row over the edge's stored `*_type`) to a
+  type outside `allowed_types_for(caller_class)` — so an allowed project/reference
+  row can't leak a forbidden `user`/`feedback` endpoint's id+type. **Fail-closed**
+  (unresolvable endpoint → drop). A trusted caller keeps all links unchanged. Wired
+  into both `knowledge_recall` and `unified_recall`. `knowledge_recall` also still
+  runs read-path `strip_secrets` on title/snippet (defense-in-depth, unchanged).
 - `session_id_from_env(env)` — re-export of `memory_lib.session_id_from_env` (SP-8
   substrate), sitting next to `caller_class_from_env` so the recall path's two
   env-read dimensions (caller-class + session-id) are side by side. Both recall
