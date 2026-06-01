@@ -150,7 +150,7 @@ def main(argv=None):
         os.environ.get("ULTRA_MEMORY_REBUILD_INDEX", "") == "1")
     # Zero-config-consistent with the knowledge MCP + session hooks: explicit
     # ULTRA_MEMORY_DB wins, else <CLAUDE_PROJECT_DIR>/data/memory.db, else
-    # ~/.ultra-memory/memory.db (never cwd). A derived path that does not exist yet
+    # ~/.claude/memory.db (never cwd). A derived path that does not exist yet
     # → no-op (fail-open): maintain only runs over an existing, ready store.
     from ultra_memory.knowledge_mcp import db_path_from_env
     db = str(db_path_from_env(os.environ))

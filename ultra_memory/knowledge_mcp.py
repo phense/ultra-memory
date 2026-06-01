@@ -254,7 +254,7 @@ def db_path_from_env(env):
       1. ``ULTRA_MEMORY_DB`` (the explicit override), if set + non-blank.
       2. else ``CLAUDE_PROJECT_DIR``/data/memory.db (the project's canonical location),
          if CLAUDE_PROJECT_DIR is set + non-blank.
-      3. else ``~/.ultra-memory/memory.db`` (the user-global fallback).
+      3. else ``~/.claude/memory.db`` (the user-global fallback).
 
     The path is only RESOLVED, never created here — ``open_memory_db`` downstream does
     the create+migrate, and an empty store recalls nothing gracefully. Blank values are
@@ -267,7 +267,7 @@ def db_path_from_env(env):
     project_dir = (env.get("CLAUDE_PROJECT_DIR") or "").strip()
     if project_dir:
         return Path(project_dir) / "data" / "memory.db"
-    return Path.home() / ".ultra-memory" / "memory.db"
+    return Path.home() / ".claude" / "memory.db"
 
 
 def lazy_embedder(factory=None):

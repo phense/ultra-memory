@@ -387,10 +387,10 @@ def test_db_path_from_env_derives_default(tmp_path):
             Path("/x") / "data" / "memory.db")
     # blank CLAUDE_PROJECT_DIR is also treated as unset → user-global fallback.
     assert knowledge_mcp.db_path_from_env(
-        {"CLAUDE_PROJECT_DIR": "  "}) == Path.home() / ".ultra-memory" / "memory.db"
-    # (iii) unset + no project dir → ~/.ultra-memory/memory.db (user-global).
+        {"CLAUDE_PROJECT_DIR": "  "}) == Path.home() / ".claude" / "memory.db"
+    # (iii) unset + no project dir → ~/.claude/memory.db (user-global).
     assert knowledge_mcp.db_path_from_env({}) == (
-        Path.home() / ".ultra-memory" / "memory.db")
+        Path.home() / ".claude" / "memory.db")
     # The safety property: NO resolution branch returns a cwd-relative path.
     for env in ({}, {"CLAUDE_PROJECT_DIR": "/x"}, {"ULTRA_MEMORY_DB": str(p)}):
         assert knowledge_mcp.db_path_from_env(env).is_absolute()

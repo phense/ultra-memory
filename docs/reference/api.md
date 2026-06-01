@@ -462,7 +462,7 @@ downstream consumer (Trading-side, not the engine) folds those edges into an EWM
   and `maintain` route through it, so a zero-config install opens the same DB everywhere).
   Resolution order, **NEVER cwd**: (1) explicit `ULTRA_MEMORY_DB` if set + non-blank →
   `Path(it)`; else (2) `${CLAUDE_PROJECT_DIR}/data/memory.db` if `CLAUDE_PROJECT_DIR` is
-  set + non-blank; else (3) `~/.ultra-memory/memory.db` (user-global). Blank values are
+  set + non-blank; else (3) `~/.claude/memory.db` (user-global). Blank values are
   treated as unset (fall through). It only RESOLVES — `open_memory_db` downstream does the
   create+migrate, and an empty store recalls nothing gracefully. **Zero-config change
   (2026-06-01):** it no longer raises — `ConfigError` is kept for callers that reference
@@ -513,7 +513,7 @@ Shared, fail-open, no-LLM, no-write helpers for the session hooks.
 - `resolve_db_path(env=None) -> str` — resolve the `memory.db` path the SAME way the
   knowledge MCP does (delegates to `knowledge_mcp.db_path_from_env`), so the whole plugin
   is zero-config-consistent: explicit `ULTRA_MEMORY_DB`, else
-  `${CLAUDE_PROJECT_DIR}/data/memory.db`, else `~/.ultra-memory/memory.db` — never cwd.
+  `${CLAUDE_PROJECT_DIR}/data/memory.db`, else `~/.claude/memory.db` — never cwd.
   Returns a `str` (hooks feed it to `db_ready` / `open_memory_db`). Used by all three hook
   `main()` shells.
 - `db_ready(db_path) -> bool` — True only when the schema is present AND
@@ -538,7 +538,7 @@ Shared, fail-open, no-LLM, no-write helpers for the session hooks.
   material work.
 - `main(stdin, stdout) -> int` — CLI shell: read payload, resolve the DB path via
   `common.resolve_db_path()` (zero-config: explicit `ULTRA_MEMORY_DB`, else
-  `${CLAUDE_PROJECT_DIR}/data/memory.db`, else `~/.ultra-memory/memory.db` — never cwd),
+  `${CLAUDE_PROJECT_DIR}/data/memory.db`, else `~/.claude/memory.db` — never cwd),
   stamp `ts`, run, write any output. Exit 0.
 
 ## `hooks.rehydrate` (SessionStart hook)

@@ -23,7 +23,7 @@
       "title": "Canonical memory.db path",
       "required": false,
       "default": "",
-      "description": "Optional override. Leave empty to auto-derive: <project>/data/memory.db (project/local install), or ~/.ultra-memory/memory.db (user-scope)."
+      "description": "Optional override. Leave empty to auto-derive: <project>/data/memory.db (project/local install), or ~/.claude/memory.db (user-scope)."
     },
     "caller_class": {
       "type": "string",

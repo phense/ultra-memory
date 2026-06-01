@@ -61,7 +61,7 @@ def test_session_id_falls_back_to_transcript_stem():
 def test_resolve_db_path_matches_engine_derivation(monkeypatch):
     """Zero-config consistency: the hooks resolve the DB path the SAME way the
     knowledge MCP does (knowledge_mcp.db_path_from_env) — explicit override wins,
-    else <CLAUDE_PROJECT_DIR>/data/memory.db, else ~/.ultra-memory/memory.db. Returns
+    else <CLAUDE_PROJECT_DIR>/data/memory.db, else ~/.claude/memory.db. Returns
     a str (hooks feed it to db_ready / open_memory_db)."""
     from pathlib import Path
     # explicit override wins
@@ -75,7 +75,7 @@ def test_resolve_db_path_matches_engine_derivation(monkeypatch):
     monkeypatch.delenv("ULTRA_MEMORY_DB", raising=False)
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     assert common.resolve_db_path() == str(
-        Path.home() / ".ultra-memory" / "memory.db")
+        Path.home() / ".claude" / "memory.db")
 
 
 def test_resolve_db_path_never_cwd_relative(monkeypatch):

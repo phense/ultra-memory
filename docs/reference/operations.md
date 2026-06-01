@@ -17,7 +17,7 @@ MCP, all three session hooks (via `hooks/common.resolve_db_path`), and `maintain
 resolve the `memory.db` path the SAME way, NEVER cwd: (1) explicit `ULTRA_MEMORY_DB` (the
 `data_db_path` override, threaded through `${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH}`) if set;
 else (2) `${CLAUDE_PROJECT_DIR}/data/memory.db` (project/local install); else (3)
-`~/.ultra-memory/memory.db` (user scope). The `.mcp.json` env carries bash-default
+`~/.claude/memory.db` (user scope). The `.mcp.json` env carries bash-default
 fallbacks (`${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH:-${CLAUDE_PROJECT_DIR}/data/memory.db}`,
 `${CLAUDE_PLUGIN_OPTION_CALLER_CLASS:-subagent}`) so both env vars ALWAYS resolve — Claude
 Code rejects an MCP server whose env references an unset `${CLAUDE_PLUGIN_OPTION_*}`, and it
@@ -28,7 +28,7 @@ user-scope case where `CLAUDE_PROJECT_DIR` may be empty.
 
 | Key | Required | Default | Purpose |
 |---|---|---|---|
-| `data_db_path` | no | `""` (auto-derive) | Optional override. Empty ⇒ derive `<project>/data/memory.db`, else `~/.ultra-memory/memory.db`. Set an absolute path to point at a `memory.db` elsewhere. |
+| `data_db_path` | no | `""` (auto-derive) | Optional override. Empty ⇒ derive `<project>/data/memory.db`, else `~/.claude/memory.db`. Set an absolute path to point at a `memory.db` elsewhere. |
 | `caller_class` | no | `subagent` | MCP recall privilege class (the **type** axis). Fail-closed: `subagent` ⇒ `project`/`reference` only. |
 | `rehydrate_budget` | no | `2000` | Character budget for the SessionStart rehydration gist. |
 | `oauth_token` | no | — | OAuth token, NEVER an `ANTHROPIC_API_KEY`. Only for LLM maintenance; the prune+export slice does not use it. |
