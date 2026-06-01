@@ -553,6 +553,29 @@ def test_unified_recall_audits_each_hit(tmp_path):
     conn.close()
 
 
+def test_unified_recall_threads_ascending_1based_rank(tmp_path):
+    """SP-8 substrate: each audited recall hit carries its 1-based position in the
+    FULL fused result list — rank=1 for the top hit, ascending, no gaps. The ranks
+    recorded match the order the hits are returned in (the overall-relevance signal)."""
+    conn = _db(tmp_path)
+    _save(conn, id="m1", type="reference", title="rate", body="rate note",
+          topic="trading")
+    _add_knowledge(conn, slug="kn1", topic="trading", title="Rates",
+                   snippet="rate curve note")
+    emb = _fake_embedder({"rate": [1.0, 0.0, 0.0]})
+    out = unified_query.unified_recall(
+        conn, "rate", caller_class="subagent", agent_topics={"trading"},
+        embedder=emb, dim=3, top_k=5, now_ts="2026-05-02T00:00:00",
+        ts="2026-05-02T00:00:00")
+    assert len(out) >= 2  # both the memory + the knowledge hit returned
+    ranks = [r["rank"] for r in conn.execute(
+        "SELECT rank FROM access_log WHERE context LIKE 'unified_recall:%' ORDER BY id"
+    ).fetchall()]
+    # 1-based, ascending, contiguous over the returned hits — top hit is rank 1.
+    assert ranks == list(range(1, len(out) + 1))
+    conn.close()
+
+
 def test_unified_recall_threads_session_id_from_env(tmp_path, monkeypatch):
     """SP-8 substrate: when ULTRA_MEMORY_SESSION_ID is set, each audited recall hit
     carries it on the access_log row (the recalled-by-session substrate)."""

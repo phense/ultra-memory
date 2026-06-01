@@ -329,18 +329,20 @@ def session_id_from_env(env):
     return sid or None
 
 
-def record_access(conn, *, target_kind, target_id, ts, context=None, session_id=None):
+def record_access(conn, *, target_kind, target_id, ts, context=None,
+                  session_id=None, rank=None):
     """Append-only access log + atomic access_count increment (memory targets only).
 
     `session_id` (SP-8 substrate, §5.1) records WHICH SESSION recalled this unit — a
     generic opaque string (NULL when the caller didn't supply one = the pre-cutover /
-    no-attribution state). It is the harmless substrate the usage-outcome attribution
-    needs; it has NO ranking effect here."""
+    no-attribution state). `rank` (SP-8 substrate) records the unit's 1-based position
+    in the FULL fused result list at recall time (NULL for a non-recall access). Both
+    are harmless substrate the usage-outcome attribution needs; NO ranking effect here."""
     def work():
         conn.execute(
-            "INSERT INTO access_log (target_kind, target_id, ts, context, session_id) "
-            "VALUES (?,?,?,?,?)",
-            (target_kind, target_id, ts, context, session_id),
+            "INSERT INTO access_log (target_kind, target_id, ts, context, session_id, rank) "
+            "VALUES (?,?,?,?,?,?)",
+            (target_kind, target_id, ts, context, session_id, rank),
         )
         if target_kind == "memory":
             conn.execute(
@@ -351,7 +353,7 @@ def record_access(conn, *, target_kind, target_id, ts, context=None, session_id=
 
     _write_txn(conn, work, spool={
         "op": "record_access", "target_kind": target_kind, "target_id": target_id,
-        "ts": ts, "context": context, "session_id": session_id})
+        "ts": ts, "context": context, "session_id": session_id, "rank": rank})
 
 
 def consolidate(conn, *, loser_id, canonical_id, reason, ts):

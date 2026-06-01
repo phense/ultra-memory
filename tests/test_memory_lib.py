@@ -130,6 +130,25 @@ def test_record_access_writes_session_id(tmp_path):
     conn.close()
 
 
+def test_record_access_writes_rank(tmp_path):
+    """SP-8 substrate: record_access threads an optional 1-based fused-rank into the
+    new access_log.rank column; it stays NULL when the kwarg is omitted
+    (backward-compatible)."""
+    conn = _db(tmp_path)
+    memory_lib.save_memory(conn, id="m1", type="reference", title="t", body="b",
+                           ts="2026-05-30T10:00:00")
+    memory_lib.record_access(conn, target_kind="memory", target_id="m1",
+                             ts="2026-05-30T10:05:00", rank=3)
+    memory_lib.record_access(conn, target_kind="memory", target_id="m1",
+                             ts="2026-05-30T10:06:00")  # no rank -> NULL
+    rows = conn.execute(
+        "SELECT rank FROM access_log WHERE target_id='m1' ORDER BY id"
+    ).fetchall()
+    assert rows[0]["rank"] == 3
+    assert rows[1]["rank"] is None
+    conn.close()
+
+
 def test_record_access_spools_and_replays_session_id(tmp_path):
     """SP-8 substrate: a record_access spool record carries session_id, and
     replay_spool re-applies it into the column (the SQLITE_BUSY-casualty path)."""

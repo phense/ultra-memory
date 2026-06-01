@@ -98,6 +98,23 @@ def test_migrate_0006_adds_access_log_session_id(tmp_path):
     conn.close()
 
 
+def test_migrate_0007_adds_access_log_rank(tmp_path):
+    """SP-8 substrate: migration 0007 adds a nullable rank column to access_log
+    (additive, idempotent). A fresh DB reaches user_version 7 with the column
+    present; re-running is a no-op."""
+    conn = db.connect(tmp_path / "m.db")
+    v = db.migrate(conn, MIG)
+    assert v == 7
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(access_log)")}
+    assert "rank" in cols
+    # idempotent re-run
+    again = db.migrate(conn, MIG)
+    assert again == v
+    cols2 = {r[1] for r in conn.execute("PRAGMA table_info(access_log)")}
+    assert "rank" in cols2
+    conn.close()
+
+
 def test_migrate_failed_migration_rolls_back_fully(tmp_path):
     """C3: a migration that fails partway must leave NEITHER a partial schema
     change NOR a bumped version — apply + version-bump are atomic."""

@@ -70,12 +70,15 @@ Every public function. The caller owns connections and supplies timestamps.
   hint; it is **payload, excluded from `event_key`**, so events differing only in
   the signal still dedupe (first write wins). Inert by default (`NULL`); spooled +
   replayed.
-- `record_access(conn, *, target_kind, target_id, ts, context=None, session_id=None)`
+- `record_access(conn, *, target_kind, target_id, ts, context=None, session_id=None, rank=None)`
   — append to `access_log` + atomic `access_count += 1` for memory targets.
   `session_id` (SP-8 substrate) is an optional **generic opaque** string recording
   *which session* recalled the target; `NULL` when unsupplied (= the pre-cutover /
-  not-attributable state). No ranking effect — it is the substrate a later
-  usage-outcome attribution joins on. Spooled + replayed.
+  not-attributable state). `rank` (SP-8 substrate) is the optional 1-based position
+  of the unit in the FULL fused recall list (rank=1 = top hit, counting both memory
+  and knowledge hits); `NULL` when unsupplied (= a non-recall access). Both are
+  logging-only — no ranking effect; the substrate a later usage-outcome / top-k
+  attribution policy reads. Spooled + replayed.
 - `session_id_from_env(env) -> str | None` — the generic session-id env read, the
   exact mirror of `caller_class_from_env`: stripped `ULTRA_MEMORY_SESSION_ID` or
   `None`. Project-agnostic (the engine learns *a* session id, never that it is

@@ -446,7 +446,11 @@ def _audit_hits(conn, results, *, caller_class, ts, now_ts, audit, memory_only):
     # every audited recall row, so a later attribution step can ask "which session
     # recalled this unit?". Unset env → NULL → harmless (no attribution), never errors.
     session_id = memory_lib.session_id_from_env(os.environ)
-    for item in results:
+    # SP-8 substrate: `results` is ALREADY in fused-rank order, so its 1-based
+    # enumerate position IS the unit's overall-relevance rank (rank=1 = top hit,
+    # counting both memory and knowledge hits) — the signal a later top-k
+    # attribution policy needs. Recorded only; no behavioral effect here.
+    for rank, item in enumerate(results, start=1):
         if memory_only or item.get("source_kind") == "memory":
             tk, tid = "memory", item["id"]
         else:
@@ -454,7 +458,8 @@ def _audit_hits(conn, results, *, caller_class, ts, now_ts, audit, memory_only):
         try:
             memory_lib.record_access(
                 conn, target_kind=tk, target_id=tid, ts=audit_ts,
-                context=f"unified_recall:{caller_class}", session_id=session_id)
+                context=f"unified_recall:{caller_class}", session_id=session_id,
+                rank=rank)
         except Exception:
             pass
 

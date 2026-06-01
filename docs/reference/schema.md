@@ -17,6 +17,7 @@ Version is tracked by `PRAGMA user_version` and mirrored in `meta.schema_version
 | `0004_cross_store_fabric.sql` | 4 | SP-3 cross-store fabric: `memories.topic`/`created_by`/`outcome_weight`, `session_events.outcome_signal`, `links.src_type`/`dst_type`; new tables `unified_index`, `knowledge_pins`, `agent_topic_bindings`; index `idx_unified_topic`, `idx_links_dst` |
 | `0005_unified_index_bm25_text.sql` | 5 | SP-6 BM25 full-body fix (D11): `unified_index.bm25_text` — the FULL collapsed page body for the knowledge-side BM25 document (`snippet` stays the ~400-char display preview) |
 | `0006_access_log_session_id.sql` | 6 | SP-8 substrate (§5.1): `access_log.session_id` — a generic opaque string recording *which session* recalled a unit (the harmless logging substrate the usage-outcome attribution joins on; `NULL` = not attributable) |
+| `0007_access_log_rank.sql` | 7 | SP-8 substrate: `access_log.rank` — the 1-based position of the unit in the FULL fused recall list at recall time (rank=1 = top hit, counting both memory and knowledge hits); `NULL` on pre-0007 rows and any non-recall access; harmless (logging only, no ranking effect), feeds a later top-k attribution policy |
 
 The runner (`db.migrate`) applies each pending file's statements + the version bump
 in one transaction; `ADD COLUMN` replay is tolerated (idempotent).
@@ -86,6 +87,10 @@ Append-only reinforcement source of truth: `id`, `target_kind`, `target_id`,
 *which session* recalled the target (SP-8 substrate). `NULL` on pre-0006 rows and
 whenever the recall caller supplied no session id; harmless (logging only, no
 ranking effect) — it is the substrate a later usage-outcome attribution joins on.
+Plus **(0007)** `rank` — the unit's 1-based position in the FULL fused recall list
+at recall time (rank=1 = top hit, counting both memory and knowledge hits). `NULL`
+on pre-0007 rows and any non-recall access; harmless (logging only, no ranking
+effect) — the signal a later top-k attribution policy reads.
 
 ### `links`
 The **cross-store edge spine** (SP-3 D5/D6): `src_kind`, `src_id`, `predicate`,
