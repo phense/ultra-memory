@@ -50,8 +50,11 @@ def main(argv=None) -> int:
     sys.stderr.write(
         f"[maintenance] ran={result.ran} skipped={result.skipped} "
         f"errors={list(result.errors)}\n")
-    # Exit 0 even on per-beat errors (fail-open: never wedge the caller / launchd).
-    return 0
+    # The beats are individually fail-open (they never raise — by the time we get
+    # here every due beat has run), so this exit code is a pure SIGNAL, not a wedge:
+    # non-zero iff a beat recorded a (caught) error, so a consumer cron wrapper can
+    # email on it (preserving the old consolidate_candidates.py exit-1-on-error).
+    return 1 if result.errors else 0
 
 
 if __name__ == "__main__":
