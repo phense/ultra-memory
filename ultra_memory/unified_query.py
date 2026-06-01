@@ -19,7 +19,8 @@ forbids the engine importing ANYTHING from Trading. We therefore do NOT import
   • Knowledge side → a NEW GENERIC ranker over the `unified_index` rows whose
                      `topic ∈ agent_topics`:
                        (a) a small generic BM25 over each row's text
-                           (`title` + `snippet` + `frontmatter`);
+                           (`title` + full body; NO frontmatter — see
+                           `_knowledge_doc_text`);
                        (b) embedding-cosine over the SHARED `embeddings` table with
                            `target_kind='knowledge'` (reusing the same cosine
                            machinery `memory_query`/`retrieval_core` already use —
@@ -202,16 +203,22 @@ def _row_get(row, key):
 
 
 def _knowledge_doc_text(row):
-    """The generic IR text for a unified_index row: title + FULL body + frontmatter.
+    """The generic IR text for a unified_index row: title + FULL body (NO frontmatter).
 
     SP-6 #6 (D11): the BM25 document is the FULL collapsed body (`bm25_text`), not
     the 400-char display `snippet` — so a query term in a page's back half ranks,
     matching `wiki_query`'s full-text BM25 (closes the SP-5 parity tail-divergence).
-    Falls back to `snippet` for un-migrated / NULL `bm25_text` rows (back-compat)."""
+    Falls back to `snippet` for un-migrated / NULL `bm25_text` rows (back-compat).
+
+    SP-6 stage-3 parity fix: the page `frontmatter` is DROPPED from the BM25 document.
+    The `title` stays (high-signal); the frontmatter `tags:`/`type:` values are noise
+    — including them made a query term that matched ONLY a tag value a spurious
+    near-zero-relevance tail hit, diverging from Trading's `wiki_query` (which BM25s
+    the RENDERED page body, not the frontmatter). BM25ing title + body only aligns the
+    engine's document with `wiki_query`'s full-text-body BM25."""
     title = _row_get(row, "title") or ""
     bm25 = _row_get(row, "bm25_text") or _row_get(row, "snippet") or ""
-    frontmatter = _row_get(row, "frontmatter") or ""
-    return f"{title}\n{bm25}\n{frontmatter}"
+    return f"{title}\n{bm25}"
 
 
 def _knowledge_candidates(conn, query, *, agent_topics, embedder, dim):
