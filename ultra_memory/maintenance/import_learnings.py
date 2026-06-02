@@ -39,6 +39,7 @@ import sys
 from pathlib import Path
 
 from ultra_memory import memory_lib
+from ultra_memory._time import now_utc_zulu
 # Aliased through a module attribute so a fail-open test can monkeypatch it.
 from ultra_memory.memory_export import (
     export_learnings_projection as _export_learnings_projection,
@@ -483,11 +484,6 @@ def beat(conn, config, ts, env):
 # + the nightly --regen-only path. The registry resolves from the consumer config.
 # --------------------------------------------------------------------------- #
 
-def _now_z():
-    import datetime
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def main(argv=None):
     import argparse
     from ultra_memory.maintenance.config import load_config
@@ -507,7 +503,7 @@ def main(argv=None):
     conn = memory_lib.open_memory_db(args.db)
     repo = Path(args.repo_root)
     cfg = load_config(project_dir=repo, env=os.environ)
-    ts = _now_z()
+    ts = now_utc_zulu()
     try:
         files = all_self_learning_files(repo, cfg.self_learning_files)
         if args.regen_only:

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import memory_lib
+from ._time import ZULU_FMT
 
 _INDEX_LINE = re.compile(r"^- \[(?P<title>.+?)\]\((?P<slug>[^)]+?)\.md\)"
                          r"(?:\s+—\s+(?P<hook>.*\S))?\s*$")
@@ -101,7 +102,7 @@ def import_memory_dir(conn, memory_dir, *, index_path=None, ts):
         # the CLI/save path's aware-UTC stamps compared off by the local UTC
         # offset, corrupting the rehydrate gist's `ORDER BY updated_at` recency.
         mtime = datetime.fromtimestamp(
-            path.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            path.stat().st_mtime, tz=timezone.utc).strftime(ZULU_FMT)
         # R4 FIX 2(b): a legacy re-import is EDIT-SAFE + provenance-safe. If the live
         # row was edited by a human (created_by='human', e.g. via /memory-edit),
         # SKIP the import overwrite entirely — re-saving the frozen-legacy body would

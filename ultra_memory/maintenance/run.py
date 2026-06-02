@@ -16,10 +16,10 @@ callables here as each subsystem lands. NO LLM / OAuth here — that lives in th
 """
 from __future__ import annotations
 
-import datetime
 from dataclasses import dataclass, field
 
 from ultra_memory import memory_lib
+from ultra_memory._time import hours_between, now_utc_zulu
 
 # Beat order. `session_ingest` runs FIRST — it is the ingestion source (mines each
 # finished session's transcript into the store), so its knowledge is present before
@@ -68,10 +68,6 @@ def default_registry() -> dict:
     return registry
 
 
-def _now_z() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _get_meta(conn, key):
     try:
         row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
@@ -88,13 +84,6 @@ def _set_meta(conn, key, value) -> None:
     memory_lib._with_immediate_retry(conn, work)
 
 
-def _hours_between(earlier_z: str, later_z: str) -> float:
-    fmt = "%Y-%m-%dT%H:%M:%SZ"
-    a = datetime.datetime.strptime(earlier_z, fmt)
-    b = datetime.datetime.strptime(later_z, fmt)
-    return (b - a).total_seconds() / 3600.0
-
-
 def _clock_key(beat: str) -> str:
     return f"last_maintenance_beat:{beat}"
 
@@ -106,7 +95,7 @@ def is_due(conn, beat: str, cadence_hours: int, now_z: str) -> bool:
     if not last:
         return True
     try:
-        return _hours_between(last, now_z) >= cadence_hours
+        return hours_between(last, now_z) >= cadence_hours
     except Exception:
         return True
 
@@ -130,7 +119,7 @@ def run_pipeline(conn, config, *, registry=None, ts=None, env=None, force=False,
     names) restricts the run to those beats (the per-beat CLI path)."""
     if registry is None:
         registry = default_registry()
-    now_z = ts or _now_z()
+    now_z = ts or now_utc_zulu()
     res = PipelineResult()
     only_set = set(only) if only else None
     for beat in BEAT_ORDER:

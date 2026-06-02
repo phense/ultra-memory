@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 
 from ultra_memory import memory_lib
+from ultra_memory._time import now_utc_zulu
 from ultra_memory.hooks import common
 from ultra_memory.maintenance import session_ingest
 
@@ -134,17 +135,12 @@ def run(payload, *, db_path, ts):
     return {}
 
 
-def _db_path_from_env():
+def main(stdin, stdout):
+    payload = common.read_payload(stdin)
     # Zero-config-consistent with the knowledge MCP: explicit ULTRA_MEMORY_DB wins,
     # else the fixed global ~/.ultra-knowledge/memory.db (never cwd, never project-local).
-    return common.resolve_db_path()
-
-
-def main(stdin, stdout):
-    import datetime
-    payload = common.read_payload(stdin)
-    db_path = _db_path_from_env()
-    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    db_path = common.resolve_db_path()
+    ts = now_utc_zulu()
     out = run(payload, db_path=db_path, ts=ts)
     if out:
         json.dump(out, stdout)

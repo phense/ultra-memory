@@ -4,6 +4,7 @@ bounded so session_events (where the real growth is) cannot grow unboundedly."""
 import datetime
 
 from . import memory_lib
+from ._time import ZULU_FMT
 
 # Bound the rolled digest so sessions.summary can't grow unboundedly across runs.
 _SUMMARY_MAX_LINES = 200
@@ -19,9 +20,9 @@ _ATTRIBUTION_PREDICATES = ("validated_as", "superseded_by", "informed_by")
 
 
 def _cutoff(ts, keep_days):
-    base = datetime.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(
+    base = datetime.datetime.strptime(ts, ZULU_FMT).replace(
         tzinfo=datetime.timezone.utc)
-    return (base - datetime.timedelta(days=keep_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (base - datetime.timedelta(days=keep_days)).strftime(ZULU_FMT)
 
 
 def prune_session_events(conn, *, keep_days, ts):

@@ -1,7 +1,10 @@
 """SessionStart-hook rehydration: a budgeted, DB-derived gist. No LLM, read-only."""
 import json
+import os
 from pathlib import Path
 
+from ultra_memory import memory_lib
+from ultra_memory._time import now_utc_zulu
 from ultra_memory.hooks import common
 
 _PULL_POINTER = (
@@ -163,9 +166,6 @@ def build_gist(conn, *, budget_chars=2000):
     return pinned_section + "\n\n" + trimmed
 
 
-from ultra_memory import memory_lib
-
-
 def run(payload, *, db_path, shadow, ts, shadow_out=None, budget_chars=2000):
     """Build + inject the gist (live) or log it (shadow). Returns {} when no
     injection. Fail-open: any error → {} (SessionStart proceeds without us)."""
@@ -199,7 +199,6 @@ def _budget_from_env():
 
     Invalid / non-numeric values fail-soft back to the default so a bad config
     can never break rehydration."""
-    import os
     raw = os.environ.get("ULTRA_MEMORY_REHYDRATE_BUDGET", "").strip()
     if not raw:
         return 2000
@@ -211,15 +210,13 @@ def _budget_from_env():
 
 
 def main(stdin, stdout):
-    import datetime
-    import os
     payload = common.read_payload(stdin)
     # Zero-config-consistent with the knowledge MCP: explicit ULTRA_MEMORY_DB wins,
     # else the fixed global ~/.ultra-knowledge/memory.db (never cwd, never project-local).
     db_path = common.resolve_db_path()
     shadow = os.environ.get("ULTRA_MEMORY_SHADOW", "1") == "1"
     shadow_out = os.environ.get("ULTRA_MEMORY_SHADOW_OUT") or None
-    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = now_utc_zulu()
     out = run(payload, db_path=db_path, shadow=shadow, ts=ts, shadow_out=shadow_out,
               budget_chars=_budget_from_env())
     if out:

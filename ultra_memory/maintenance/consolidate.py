@@ -53,6 +53,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ultra_memory import memory_lib
+from ultra_memory._time import now_utc_zulu
 from ultra_memory.claude_cli import run_claude          # the OAuth chokepoint
 from ultra_memory.unified_query import unified_recall
 
@@ -74,10 +75,6 @@ AUDIT_DIR: Path | None = None
 
 def _warn(msg: str) -> None:
     print(f"[consolidate] {msg}", file=sys.stderr)
-
-
-def _now_z() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # --------------------------------------------------------------------------- #
@@ -323,7 +320,7 @@ def consolidate(conn, *, runner=subprocess.run, embedder, env=None,
     if audit_dir is None:
         audit_dir = AUDIT_DIR
     if ts is None:
-        ts = _now_z()
+        ts = now_utc_zulu()
     project_dir = Path(project_dir) if project_dir is not None else Path.cwd()
 
     summary = {

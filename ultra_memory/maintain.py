@@ -5,10 +5,10 @@ command, and a documented CLI. Pure Python — NO LLM, NO OAuth token (the memor
 maintenance slice is prune + export only). Fail-open: a maintenance error must
 never block a session.
 """
-import datetime
 import os
 
 from ultra_memory import memory_lib, retention, memory_export, wiki_sync
+from ultra_memory._time import hours_between, now_utc_zulu
 
 # Retention window for session_events (days). Conservative default; rolled into
 # sessions.summary before deletion, so nothing is lost — only the raw rows are bounded.
@@ -23,10 +23,6 @@ _META_KEY = "last_maintenance"
 # skipped entirely, so a pure-memory deployment with no expert-wiki is byte-
 # identically unaffected.
 _WIKI_ROOTS_ENV = "ULTRA_MEMORY_WIKI_ROOTS"
-
-
-def _now_z():
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _get_meta(conn, key):
@@ -46,13 +42,6 @@ def _set_meta(conn, key, value):
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
 
     memory_lib._with_immediate_retry(conn, work)
-
-
-def _hours_between(earlier_z, later_z):
-    fmt = "%Y-%m-%dT%H:%M:%SZ"
-    a = datetime.datetime.strptime(earlier_z, fmt)
-    b = datetime.datetime.strptime(later_z, fmt)
-    return (b - a).total_seconds() / 3600.0
 
 
 def _resolve_wiki_roots(env):
@@ -91,13 +80,13 @@ def run(conn, *, out_dir, ts=None, keep_days=_KEEP_DAYS, force=False,
     ULTRA_MEMORY_WIKI_ROOTS env seam (`_resolve_wiki_roots`). If there are no roots
     (the pure-memory deployment), wiki_sync is skipped ENTIRELY and the return value
     is byte-identical to pre-Stage-5 behavior."""
-    ts = ts or _now_z()
+    ts = ts or now_utc_zulu()
     if env is None:
         env = os.environ
     last = _get_meta(conn, _META_KEY)
     if not force and last:
         try:
-            if _hours_between(last, ts) < _THROTTLE_HOURS:
+            if hours_between(last, ts) < _THROTTLE_HOURS:
                 return {"pruned": 0, "exported": False, "skipped": True}
         except ValueError:
             pass  # unparseable stamp -> proceed (self-heal)
