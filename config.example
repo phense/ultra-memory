@@ -20,6 +20,21 @@ export ULTRA_MEMORY_HARNESS_DIR="/abs/path/to/.claude/projects/<slug>/memory"
 # Optional: the consumer's LLM-Wiki dir, if the wiki gateway is co-located.
 export ULTRA_MEMORY_WIKI_DIR="/abs/path/to/consumer/wiki"
 
+# --- Tier-2 wiki-maintenance (the wiki_maintenance beat / wiki_curate CLI) -------
+# The active wiki root(s) maintenance curates (comma/pathsep-separated). Unset → the
+# wiki_maintenance beat is a no-op (a pure-memory install). config.wiki_roots reads this.
+# export ULTRA_MEMORY_WIKI_ROOTS="$HOME/.ultra-knowledge/wiki"
+#
+# The remaining wiki seams live in <project>/.ultra-memory/config.toml [maintenance]:
+#   wiki_gateway        = "scripts/wiki_lib.py"   # the audited write gateway (create-page/log/…)
+#   wiki_linter         = "module:function"       # OPTIONAL: a consumer linter supplying Stage-1
+#                                                 # findings (resolved with <project>/scripts on
+#                                                 # sys.path); absent → the engine's generic lint
+#   wiki_graph_extractor = ["py", "extract.py", "{wiki_root}", "--out", "{graph_dir}"]  # OPTIONAL
+#   [maintenance.wiki]  # OPTIONAL: override any WikiSchemaConfig field; absent → reference defaults
+# A consumer whose wiki follows the reference Karpathy conventions needs none of the
+# [maintenance.wiki] table — every default already matches.
+
 # --- knowledge MCP: caller privilege class --------------------------------------
 # Fail-closed: anything other than an explicit trusted class is treated as the
 # untrusted "subagent" (recall limited to project/reference; never user/feedback).
