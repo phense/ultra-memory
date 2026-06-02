@@ -23,6 +23,15 @@ def slugify(text: str) -> str:
 
 
 class WikiGateway:
+    """Project-agnostic wiki write-gateway. A consumer subclasses this and overrides
+    ONLY the project-specific hooks below; everything else — the verb materializers
+    (create_page / append_validation_log_entry / register_in_theme_index / log), the
+    embedding+cosine machinery, the fcntl write-lock, secret redaction (strip_secrets),
+    and the audit row — is inherited and MUST NOT be re-implemented. Wire a subclass in
+    `<project>/.ultra-memory/config.toml` as `wiki_gateway = "<module>:<Class>"` (unset →
+    this built-in turnkey gateway). Generate a starter subclass with
+    `python -m ultra_memory.wiki_gateway scaffold`."""
+
     # ── embedding constants ──
     EMBED_DIM: int = 384  # BAAI/bge-small-en-v1.5 native dim
     EMBED_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
@@ -1347,22 +1356,42 @@ Topic root index. Theme-indexes link here; atomic pages link to their theme-inde
 
     # ── override points (simple, no-LLM defaults) ──
     def route(self, claim: dict[str, Any]) -> Path:
+        """Where a new page lands on disk. DEFAULT: `<topic>/concepts/<slug(title)>.md`.
+        Called by the base when materializing a new atomic. Override to route by theme,
+        subdir, or a custom convention. Return a `Path` relative to the wiki root."""
         title = claim.get("title") or claim.get("text") or "untitled"
         return Path(self.topic) / self.schema.atomics_subdir / f"{slugify(title)}.md"
 
     def theme_for(self, claim: dict[str, Any]) -> str:
+        """The theme-index a new atomic registers under. DEFAULT: `claim["theme"]` or
+        "general". Called by `register_in_theme_index`. Override to derive the theme from
+        tags/content. Return a str."""
         return claim.get("theme") or "general"
 
     def render_frontmatter(self, claim: dict[str, Any]) -> dict:
+        """The YAML frontmatter dict for a new page. DEFAULT: `{"type":"mechanism",
+        "title": claim["title"]}`. Called by the base before writing the page body.
+        Override to add fields (tags, sources, dates). Return a dict."""
         return {"type": "mechanism", "title": claim.get("title", "untitled")}
 
     def dedup_check(self, text: str, topic: str):
+        """Semantic dedup-on-write. DEFAULT: OFF (returns None → always create). Called
+        before materializing a new page. Override to turn dedup on, e.g.
+        `return self.find_overlap_match(text, Path(), 0.85)` (the embedding machinery is
+        inherited). Return a match (to merge instead of create) or None."""
         return None  # OFF by default; an override turns on embedding cosine
 
     def derive_anchor(self, claim: dict[str, Any], existing) -> str | None:
+        """A stable in-page section anchor (for concept pages with `### … {#anchor}`
+        sections). DEFAULT: None (standalone atomic, no anchor). Called when routing a
+        claim into an existing concept page. Override to mint a deterministic anchor.
+        Return a str or None."""
         return None
 
     def confidence_label(self, claim: dict[str, Any]) -> str:
+        """A confidence tag rendered on the page (e.g. the source's reliability).
+        DEFAULT: "Standard". Called by the render path. Override to map speaker/validity
+        to your own labels. Return a str."""
         return "Standard"
 
 
