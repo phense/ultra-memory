@@ -1147,21 +1147,12 @@ Topic root index. Theme-indexes link here; atomic pages link to their theme-inde
         wiki_root: Path | None = None,
     ) -> str:
         """Create a NEW concepts/ or synthesis/ page from agent-authored content.
-        Returns "written". Raises ValueError if `path` is not under `root`
-        or already exists (never clobbers).
-
-        `path` may be absolute or relative. Relative paths are resolved relative to
-        `root` (the effective `wiki_root` parameter), so a scaffold stub may call
-        ``create_page(Path("topic/concepts/x.md"), ..., wiki_root=raw_wiki_root)``.
+        Returns "written". Raises ValueError if `path` is not under
+        `<root>/concepts|synthesis` or already exists (never clobbers).
         """
         t = topic or self.topic
         root = wiki_root if wiki_root is not None else self._topic_root(t)
-        # Resolve relative paths against root (not cwd) so scaffold stubs and callers
-        # that pass the raw wiki_root + a topic-relative path work correctly.
-        path = Path(path)
-        if not path.is_absolute():
-            path = root / path
-        path = self._require_under(path, root)
+        path = self._require_under(path, root / "concepts", root / "synthesis")
         if path.exists():
             raise ValueError(f"create-page refuses to clobber existing page: {path}")
         path.parent.mkdir(parents=True, exist_ok=True)

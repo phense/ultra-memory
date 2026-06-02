@@ -3,6 +3,7 @@ of the box (its defaults produce a valid page) — and contains all 6 override h
 import importlib.util
 from pathlib import Path
 from ultra_memory import wiki_gateway
+from ultra_memory.wiki_gateway import WikiGateway, cli
 
 HOOKS = ["route", "theme_for", "render_frontmatter",
          "dedup_check", "derive_anchor", "confidence_label"]
@@ -22,13 +23,39 @@ def test_scaffold_text_has_all_six_hooks_and_config_snippet():
     assert "research" in text
 
 def test_scaffold_stub_imports_instantiates_and_writes(tmp_path):
+    """Generate a scaffold stub, import the class, then drive it via the REAL CLI
+    entry point — exactly like test_wiki_gateway_cli.py does.  This proves the
+    stub works end-to-end without touching the engine's create_page contract."""
+    # 1. Generate the scaffold stub.
     out = tmp_path / "my_gw.py"
     wiki_gateway.scaffold_to_file(out, class_name="MyGw", topic="research")
+    # 2. Import and verify the stub class is present and is a WikiGateway subclass.
     mod = _load(out, "my_gw")
-    gw = mod.MyGw(wiki_root=tmp_path / "wiki", topic="research")     # instantiates
-    # turnkey defaults: create_page lands a valid page
-    (tmp_path / "wiki" / "research" / "concepts").mkdir(parents=True)
-    res = gw.create_page(Path("research/concepts/x.md"), "**Mechanism**: smoke.\n",
-                         topic="research", wiki_root=tmp_path / "wiki")
-    assert res == "written"
-    assert (tmp_path / "wiki" / "research" / "concepts" / "x.md").is_file()
+    assert hasattr(mod, "MyGw"), "scaffold stub is missing MyGw class"
+    assert issubclass(mod.MyGw, WikiGateway), "MyGw must subclass WikiGateway"
+
+    # 3. Set up a valid wiki tree: dest must be under <wiki_root>/research/concepts/
+    #    to satisfy create_page's _require_under(path, root/"concepts", root/"synthesis").
+    wiki_root = tmp_path / "wiki"
+    concepts_dir = wiki_root / "research" / "concepts"
+    concepts_dir.mkdir(parents=True)
+    dest = concepts_dir / "x.md"
+
+    # 4. Prepare a content file.
+    content_file = tmp_path / "content.md"
+    content_file.write_text("**Mechanism**: smoke test.\n")
+
+    # 5. Call the REAL CLI with the scaffold class — same pattern as test_wiki_gateway_cli.py.
+    rc = cli(
+        mod.MyGw,
+        [
+            "create-page",
+            "--path", str(dest),
+            "--topic", "research",
+            "--from-file", str(content_file),
+            "--wiki-root", str(wiki_root),
+        ],
+    )
+    assert rc == 0, f"cli(MyGw, create-page) returned {rc}"
+    assert dest.exists(), "create-page did not write the destination file"
+    assert "smoke test" in dest.read_text()
