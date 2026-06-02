@@ -35,7 +35,12 @@ def default_registry() -> dict:
         registry["consolidate"] = consolidate.beat
     except Exception:  # a beat module that fails to import must not wedge the rest
         pass
-    # aggressive / synthesize register here as each cluster is migrated.
+    try:
+        from ultra_memory.maintenance import aggressive_run
+        registry["aggressive"] = aggressive_run.beat
+    except Exception:
+        pass
+    # synthesize registers here when the SP-10 cluster is migrated.
     return registry
 
 
