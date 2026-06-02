@@ -77,6 +77,7 @@ def run_stage1(
     load_vecs=None,                       # callable(wiki_root, new_atomics) -> {path:(sha,vec)}
     graph_extractor_cmd: list[str] | None = None,
     repo_root: Path | None = None,
+    lint_findings=None,                    # callable(wiki_root, schema) -> findings dict
 ) -> dict:
     """Compose the 5 Stage-1 detectors into one worklist for *wiki_root* and write it.
     Returns the finalized worklist dict."""
@@ -118,10 +119,14 @@ def run_stage1(
                                         if _resolve(p).exists() else ""),
                      schema=schema)
 
-    # 3. lint (fail-open — a routing error must never block the worklist write)
+    # 3. lint (fail-open — a routing error must never block the worklist write). A
+    #    consumer may inject `lint_findings(wiki_root, schema)` to supply findings from
+    #    its OWN (richer/proven) linter; absent → the engine's generic lint.
     try:
-        pages = detect_lint.collect_pages(wiki_root)
-        findings = detect_lint.lint(pages, schema=schema)
+        if lint_findings is not None:
+            findings = lint_findings(wiki_root, schema)
+        else:
+            findings = detect_lint.lint(detect_lint.collect_pages(wiki_root), schema=schema)
         rename_index = detect_lint.build_rename_index(repo_root=repo_root, wiki_subpath=wiki_dir)
         detect_lint.route_findings(findings, w, schema=schema, rename_index=rename_index,
                                    read_text=_read_text, write_text=_write_text, wiki_dir=wiki_dir)
@@ -172,6 +177,7 @@ def run_stage1_multi(
     today: str | None = None,
     load_vecs=None,
     graph_extractor_cmd: list[str] | None = None,
+    lint_findings=None,
 ) -> dict:
     """Compose Stage-1 over every root in *roots* into ONE merged worklist. The
     per-root marker is resolved via ``marker_for`` (unless *since_ref* is explicit).
@@ -191,6 +197,7 @@ def run_stage1_multi(
         w = run_stage1(
             root, per_root_out, schema=schema, since_ref=since_ref, do_graph=do_graph,
             today=today, load_vecs=load_vecs, graph_extractor_cmd=graph_extractor_cmd,
+            lint_findings=lint_findings,
             marker_path=marker_for(root) if since_ref is None else None)
         merged["items"].extend(w["items"])
         merged["new_atomics"].extend(w["new_atomics"])

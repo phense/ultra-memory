@@ -145,6 +145,16 @@ def test_route_oversized_priorities(tmp_path):
     assert by["kb/concepts/s.md"] == 3 and by["kb/concepts/h.md"] == 1
 
 
+def test_route_empirical_log_issues_from_injected_linter(tmp_path):
+    # a consumer linter may emit empirical_log_issues as "<path>:<line>: <msg>" strings
+    w = wl.new_worklist("wiki", generated_at="2026-06-02")
+    findings = {"empirical_log_issues": ["concepts/x.md:42: missing [strategy/sub] tag"]}
+    dl.route_findings(findings, w, schema=WikiSchemaConfig(), rename_index={},
+                      read_text=lambda p: "", write_text=lambda p, t: None, wiki_dir="wiki")
+    item = [i for i in w["items"] if i["kind"] == "recategorize"][0]
+    assert item["atomic_path"] == "wiki/concepts/x.md" and "missing" in item["claim"]
+
+
 def test_route_wiki_dir_prefix_is_seam(tmp_path):
     w = wl.new_worklist("wiki", generated_at="2026-06-02")
     findings = {"orphans": [{"path": "concepts/o.md", "slug": "o"}]}

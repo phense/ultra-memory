@@ -71,3 +71,65 @@ def test_beat_full_chain_clean_wiki_completes(tmp_path):
 def test_beat_registered_and_ordered():
     assert "wiki_maintenance" in default_registry()
     assert "wiki_maintenance" in BEAT_ORDER
+
+
+# --------------------------------------------------------------------------- #
+# Stage-aware CLI (the cutover seam: separate Stage-1 detect / Stage-2 adjudicate).
+# --------------------------------------------------------------------------- #
+
+def test_stage1_build_writes_worklist(tmp_path):
+    repo, root = _git_wiki(tmp_path)
+    (root / "trading" / "concepts" / "lonely.md").write_text(
+        "---\ntype: concept\ntitle: L\n---\nbody")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "c"], cwd=repo, check=True)
+    out = tmp_path / "wl.json"
+    conn = sqlite3.connect(":memory:")
+    w = wiki_curate.stage1_build(conn, _cfg(tmp_path, roots=[root]), out_path=out)
+    assert out.exists() and len(w["items"]) >= 1
+
+
+def test_stage1_build_no_roots_returns_none(tmp_path):
+    conn = sqlite3.connect(":memory:")
+    assert wiki_curate.stage1_build(conn, _cfg(tmp_path), out_path=tmp_path / "x.json") is None
+
+
+def test_stage2_adjudicate_skips_without_gateway(tmp_path):
+    repo, root = _git_wiki(tmp_path)
+    out = tmp_path / "wl.json"
+    from ultra_memory.wiki_maintenance import worklist as wl
+    wl.write_worklist(wl.new_worklist(str(root), generated_at="2026-06-02"), out)
+    conn = sqlite3.connect(":memory:")
+    rc = wiki_curate.stage2_adjudicate(conn, _cfg(tmp_path, roots=[root], gateway=None),
+                                       worklist_path=out)
+    assert rc is None
+
+
+def test_stage1_build_uses_injected_wiki_linter(tmp_path, monkeypatch):
+    # a consumer linter declared via config.wiki_linter ("module:func") is resolved
+    # (with <project_dir>/scripts on sys.path) and supplies the lint findings.
+    repo, root = _git_wiki(tmp_path)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "my_linter.py").write_text(
+        "def lint_findings(wiki_root, schema):\n"
+        "    return {'orphans': [{'path': 'trading/concepts/inj.md', 'slug': 'inj'}]}\n")
+    cfg = MaintenanceConfig(
+        project_dir=tmp_path, db_path=tmp_path / "m.db", export_dir=tmp_path / "e",
+        wiki_roots=[root], topics=["trading"], wiki_linter="my_linter:lint_findings")
+    import sqlite3
+    w = wiki_curate.stage1_build(sqlite3.connect(":memory:"), cfg, out_path=tmp_path / "wl.json")
+    assert any(i["kind"] == "cross-link" and i["title"] == "inj" for i in w["items"])
+
+
+def test_cli_stage1(tmp_path, monkeypatch):
+    repo, root = _git_wiki(tmp_path)
+    (root / "trading" / "concepts" / "lonely.md").write_text(
+        "---\ntype: concept\ntitle: L\n---\nbody")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "c"], cwd=repo, check=True)
+    out = tmp_path / "wl.json"
+    monkeypatch.setenv("ULTRA_MEMORY_WIKI_ROOTS", str(root))
+    monkeypatch.setenv("ULTRA_MEMORY_DB", str(tmp_path / "m.db"))
+    rc = wiki_curate.main(["--stage", "1", "--out", str(out), "--project-dir", str(tmp_path)])
+    assert rc == 0 and out.exists()

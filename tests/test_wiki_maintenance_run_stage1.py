@@ -142,6 +142,22 @@ def test_multi_empty_roots_is_safe(tmp_path):
     assert w["items"] == []
 
 
+def test_injected_lint_findings_replaces_generic(tmp_path):
+    # a consumer linter (e.g. a richer wiki_lint) supplies findings; the generic lint
+    # is bypassed, and the consumer's findings are routed into the worklist.
+    repo, root, base = _git_wiki(tmp_path)
+    seen = {}
+
+    def lint_findings(wiki_root, schema):
+        seen["called"] = str(wiki_root)
+        return {"orphans": [{"path": "trading/concepts/x.md", "slug": "x"}]}
+
+    w = rs.run_stage1(root, tmp_path / "wl.json", since_ref=base, do_graph=False,
+                      today="2026-06-02", lint_findings=lint_findings)
+    assert seen["called"] == str(root)
+    assert any(i["kind"] == "cross-link" and i["title"] == "x" for i in w["items"])
+
+
 def test_no_trading_or_path_literal():
     src = Path(rs.__file__).read_text().lower()
     assert "trading" not in src and "/users/" not in src

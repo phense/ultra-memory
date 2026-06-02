@@ -76,6 +76,10 @@ class MaintenanceConfig:
     # graph.sqlite the graph detector queries). Empty → no graph rebuild (query the
     # existing graph if present). `{wiki_root}` placeholders are substituted by the beat.
     wiki_graph_extractor: list = field(default_factory=list)
+    # An optional consumer lint hook ("module:function", resolved with <project_dir>
+    # and <project_dir>/scripts on sys.path) that supplies the Stage-1 lint findings
+    # from a richer/proven linter. Empty → the engine's generic lint.
+    wiki_linter: str = ""
 
     def beat_enabled(self, name: str) -> bool:
         return bool(self.beats.get(name, _DEFAULT_BEATS.get(name, False)))
@@ -145,6 +149,7 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
     wiki_schema = raw.get("wiki") if isinstance(raw.get("wiki"), dict) else {}
     graph_extractor = raw.get("wiki_graph_extractor")
     graph_extractor = [str(x) for x in graph_extractor] if isinstance(graph_extractor, list) else []
+    wiki_linter = env.get("ULTRA_MEMORY_WIKI_LINTER") or raw.get("wiki_linter") or ""
 
     beats = dict(_DEFAULT_BEATS)
     if isinstance(raw.get("beats"), dict):
@@ -172,4 +177,5 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
         self_learning_files=_parse_self_learning_files(raw.get("self_learning_files")),
         wiki_schema=wiki_schema,
         wiki_graph_extractor=graph_extractor,
+        wiki_linter=str(wiki_linter),
     )

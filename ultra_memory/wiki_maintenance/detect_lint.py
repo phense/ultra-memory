@@ -237,6 +237,15 @@ def route_findings(findings: dict, w: dict, *,
                     claim=f"duplicate slug across {len(paths)} files: {', '.join(paths)}",
                     priority=1, kinds=kinds)
 
+    # A consumer linter may emit `empirical_log_issues` as raw strings shaped
+    # "<path>:<line>: <message>"; route each to a recategorize item (the leading
+    # path segment becomes the atomic_path). Absent for the generic lint.
+    for finding in findings.get("empirical_log_issues", []):
+        raw_path = str(finding).split(":", 2)[0].strip() or "unknown"
+        path = _wiki_rel(raw_path, wiki_dir)
+        wl.add_item(w, kind="recategorize", atomic_path=path, title=Path(path).stem,
+                    claim=str(finding), priority=3, kinds=kinds)
+
     for finding in findings.get("read_errors", []):
         wl.add_item(w, kind="recategorize", atomic_path=_wiki_rel(finding["path"], wiki_dir),
                     title=Path(finding["path"]).stem,

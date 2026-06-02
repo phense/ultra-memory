@@ -166,3 +166,15 @@ def test_wiki_graph_extractor_loaded(tmp_path):
 def test_wiki_graph_extractor_default_empty(tmp_path):
     cfg = load_config(project_dir=tmp_path, env={})
     assert cfg.wiki_graph_extractor == []
+
+
+def test_wiki_linter_loaded(tmp_path):
+    (tmp_path / ".ultra-memory").mkdir()
+    (tmp_path / ".ultra-memory" / "config.toml").write_text(
+        '[maintenance]\nwiki_linter = "my_adapter:lint_findings"\n')
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.wiki_linter == "my_adapter:lint_findings"
+
+
+def test_wiki_linter_default_empty(tmp_path):
+    assert load_config(project_dir=tmp_path, env={}).wiki_linter == ""
