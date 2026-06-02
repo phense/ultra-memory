@@ -598,3 +598,35 @@ Shared, fail-open, no-LLM, no-write helpers for the session hooks.
 - `main(stdin, stdout) -> int` — CLI shell; DB path via `common.resolve_db_path()`
   (zero-config derivation — see `db_path_from_env`), `ULTRA_MEMORY_SHADOW` (default `"1"`),
   `ULTRA_MEMORY_SHADOW_OUT`, and `ULTRA_MEMORY_REHYDRATE_BUDGET` (default `2000`) from env.
+
+## `wiki_gateway`
+
+The **wiki write-gateway base class** — the subclassable API a consumer project extends to give its
+wiki custom routing, dedup, frontmatter, anchors, and confidence labels.
+
+### `WikiGateway`
+
+Project-agnostic wiki write-gateway. A consumer subclasses this and overrides only the
+project-specific hooks below; everything else — the verb materializers, the embedding+cosine
+machinery, the fcntl write-lock, secret redaction (`strip_secrets`), and the audit row — is
+inherited and must not be re-implemented. Wire a subclass in `<project>/.ultra-memory/config.toml`
+as `wiki_gateway = "<module>:<Class>"` (unset → the built-in turnkey gateway). Generate a starter
+subclass with `python -m ultra_memory.wiki_gateway scaffold`.
+
+**The 6 override hooks** (override only what differs; each defaults to `super()`):
+- `route(claim) -> Path` — where a new page lands on disk. Default: `<topic>/concepts/<slug(title)>.md`.
+- `theme_for(claim) -> str` — the theme-index a new atomic registers under. Default: `claim["theme"]` or `"general"`.
+- `render_frontmatter(claim) -> dict` — the YAML frontmatter dict for a new page. Default: `{"type": "mechanism", "title": claim["title"]}`.
+- `dedup_check(text, topic) -> match|None` — semantic dedup-on-write. Default: OFF (returns `None` → always create). Turn on with `self.find_overlap_match(text, Path(), 0.85)`.
+- `derive_anchor(claim, existing=None) -> str|None` — a stable in-page section anchor. Default: `None` (standalone atomic).
+- `confidence_label(claim) -> str` — a confidence tag rendered on the page. Default: `"Standard"`.
+
+**Inherited verbs** (do not re-implement):
+`create_page` / `append_validation_log_entry` / `register_in_theme_index` / `log`.
+
+**CLI verbs** (`python -m ultra_memory.wiki_gateway <verb>`):
+- `create-page` — materialize a new atomic wiki page.
+- `append-validation-log` — add a strategy-tagged entry to a page's `## Empirical Validation Log`.
+- `register-index` — register a new atomic under its theme-index.
+- `log` — write a human `wiki/log.md` run line.
+- `scaffold --out <path> --class-name <Name> --topic <topic>` — emit a ready-to-edit `class <Name>(WikiGateway)` stub with all 6 hooks, their contracts, and the `.ultra-memory/config.toml` snippet. Deterministic, no LLM.

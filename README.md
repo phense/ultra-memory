@@ -108,8 +108,22 @@ first-class store *beside* session memory: it ships the **wiki sync**, the **cro
 the full **curation/maintenance engine** — a schema-driven 5-detector framework (stale · dedup · scope ·
 lint · graph), a grey-zone dedup judge, and a conservative consolidation drain. Structured writes go
 through a single **audited gateway** (routed, deduped, secret-redacted, audited) wired via a thin
-consumer config seam — a reference gateway is included; point it at your knowledge base, or run
-**pure-memory with no wiki at all**.
+consumer config seam — scaffold your own gateway in one command, or run **pure-memory with no wiki
+at all**.
+
+### Extending the wiki gateway
+
+The wiki write path is a subclassable plugin API — `ultra_memory.wiki_gateway.WikiGateway`. To give a
+project its own wiki (custom routing, dedup, frontmatter, anchors, labels), scaffold an extension:
+
+```
+python -m ultra_memory.wiki_gateway scaffold --out scripts/my_wiki.py --class-name MyWikiGateway --topic mytopic
+```
+
+then override only the hooks that differ and wire `wiki_gateway = "my_wiki:MyWikiGateway"` in
+`.ultra-memory/config.toml` (unset → a turnkey built-in). The `using-wiki-gateway` skill teaches the
+6-hook contract; the inherited engine (materialization, secret redaction, write-lock, audit) is never
+re-implemented. (No consumer config at all → a pure-memory install with no wiki.)
 
 ### 2. A typed-edge graph + one ranked recall across both stores
 A `links` table records typed edges (e.g. a `validated_as` edge from a session learning to the wiki
@@ -204,8 +218,10 @@ release blockers (see <a href="BACKLOG.md">BACKLOG §5.2</a>). Marked ⚠️ unt
 and mem0 (~56k★, funded, hosted dashboard, 14M+ downloads) have distribution we have yet to earn.
 ⁷ ultra-memory ships the wiki tier as an <em>engine</em> — sync, cross-store fusion, and the full
 curation/maintenance pipeline (5 detectors + grey-zone judge + consolidation); the structured write
-gateway is wired via a consumer config seam (reference implementation included). Genuinely first-class
-and git-canonical, but bring-your-own-wiki rather than a turnkey authoring UI.
+gateway is a subclassable base (<code>WikiGateway</code>) — scaffold a starter extension with one
+command (<code>python -m ultra_memory.wiki_gateway scaffold</code>), then wire it via a thin consumer
+config seam (or leave unset for the built-in turnkey). Genuinely first-class and git-canonical, but
+bring-your-own-wiki rather than a turnkey authoring UI.
 ⁸ STORM autonomously <em>writes</em> citation-grounded, Wikipedia-style articles (genuine LLM
 curation) — but each run emits a <strong>standalone report</strong>: no <code>[[wikilinks]]</code>, no
 cross-article knowledge base, no topic-partitioned store that accumulates and is re-queried over time.

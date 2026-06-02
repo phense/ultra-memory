@@ -42,6 +42,18 @@ not a rollback source for those.
 | `wiki_maintenance/*` | **(Subsystem 1)** project-agnostic LLM-wiki curation. `schema_config.py` — `WikiSchemaConfig`, every Karpathy-wiki convention as one overridable seam (field names, atomics subdir, index-name template, page-types, size caps, dedup band, stale/conflict markers, graph predicates/thresholds). `wiki_util` / `worklist` (move-generic) → `detect_{stale,dedup,scope,lint,graph}` (the 5 detectors, schema-driven; lint is injectable so a consumer's proven linter can supply findings to the generic router) → `run_stage1` (the Stage-1 orchestrator: scope→dedup→lint→graph→stale into one root-stamped worklist, multi-root) → `adjudicate` (the ONE batched OAuth decision per root-chunk → apply via the consumer gateway; grey-zone merge via an injected decider, default auto-merge-only). No consumer literal (a portability guard test enforces it); a pure-memory install with no `wiki_roots` is a no-op. |
 | `maintenance/wiki_curate.py` | **(Subsystem 1 beat)** the config bridge: maps `MaintenanceConfig` onto `wiki_maintenance` (schema from `wiki_schema`, roots from `wiki_roots`, vectors via `retrieval_core`, graph extractor + lint hook from config) and runs Stage-1→Stage-2. Registered LAST in the pipeline (`wiki_maintenance`, 24h); also a stage-aware CLI (`--stage 1\|2\|all`) so a consumer shell keeps a two-stage, worklist-on-disk structure with separate timeouts. Self-gates: no roots → no-op; no gateway → Stage-1 only. |
 | `hooks/rehydrate.py` | SessionStart hook: budgeted pure-SQL gist; shadow mode logs it, live mode injects `additionalContext`. |
+| `wiki_gateway.py` | **The wiki write-gateway base class.** A consumer subclasses `WikiGateway` and overrides only the 6 project-specific hooks (`route` / `theme_for` / `render_frontmatter` / `dedup_check` / `derive_anchor` / `confidence_label`); the verb materializers (`create_page`, `append_validation_log_entry`, `register_in_theme_index`, `log`), the embedding+cosine machinery, the fcntl write-lock, secret redaction, and the audit row are all inherited. Wire a subclass via `wiki_gateway = "<module>:<Class>"` in `<project>/.ultra-memory/config.toml` (unset → the built-in turnkey gateway). Generate a starter extension with `python -m ultra_memory.wiki_gateway scaffold`. |
+
+## Wiki write-gateway (consumer extension point)
+
+The wiki write path is a **subclassable base** (`wiki_gateway.WikiGateway`) — not a monolithic
+implementation a consumer has to fork. A project that wants custom routing, dedup, frontmatter,
+anchors, or confidence labels subclasses it and overrides only the relevant hooks; the full verb
+materializer + audit infrastructure is inherited. The binding is a thin config seam:
+`wiki_gateway = "<module>:<Class>"` in `<project>/.ultra-memory/config.toml`. Unset → the
+built-in turnkey gateway. No consumer config at all → a pure-memory install with no wiki (all
+wiki beats are no-ops). This resolves BACKLOG §5.3.4 (the doc-discipline reminder for the
+gateway extensibility contract).
 
 ## Session hooks (spec §9, §10) — the capture/replay edge
 
