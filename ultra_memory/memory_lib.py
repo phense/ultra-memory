@@ -440,18 +440,29 @@ def record_access(conn, *, target_kind, target_id, ts, context=None,
         "ts": ts, "context": context, "session_id": session_id, "rank": rank})
 
 
+def _mutate_memory_audited(conn, *, mem_id, op, reason, ts, verb, mutate):
+    """The shared single-row memory-mutation triad: fetch the prior row, raise
+    ``KeyError`` if it is absent, run ``mutate()`` (the verb's own ``UPDATE``), then
+    ``_audit`` against the prior row. Centralizes the fetch-prior + None-check +
+    audit-on-mutate guarantee so every per-field verb can't drift from it. `verb`
+    only shapes the KeyError message; `mutate` is a no-arg closure doing the UPDATE.
+    Runs inside the caller's ``work()`` (so under ``_write_txn``'s BEGIN IMMEDIATE)."""
+    prior = conn.execute("SELECT * FROM memories WHERE id=?", (mem_id,)).fetchone()
+    if prior is None:
+        raise KeyError(f"{verb}: no memory with id {mem_id!r}")
+    mutate()
+    _audit(conn, op=op, target_kind="memory", target_id=mem_id,
+           reason=reason, prior=dict(prior), ts=ts)
+
+
 def consolidate(conn, *, loser_id, canonical_id, reason, ts):
     """Redirect-stub: mark loser status='redirect' + supersedes=canonical. Never deletes."""
     def work():
-        prior = conn.execute("SELECT * FROM memories WHERE id=?", (loser_id,)).fetchone()
-        if prior is None:
-            raise KeyError(f"consolidate: no memory with id {loser_id!r}")
-        conn.execute(
-            "UPDATE memories SET status='redirect', supersedes=?, updated_at=? WHERE id=?",
-            (canonical_id, ts, loser_id),
-        )
-        _audit(conn, op="redirect", target_kind="memory", target_id=loser_id,
-               reason=reason, prior=dict(prior), ts=ts)
+        _mutate_memory_audited(
+            conn, mem_id=loser_id, op="redirect", reason=reason, ts=ts, verb="consolidate",
+            mutate=lambda: conn.execute(
+                "UPDATE memories SET status='redirect', supersedes=?, updated_at=? WHERE id=?",
+                (canonical_id, ts, loser_id)))
 
     _write_txn(conn, work, spool={
         "op": "consolidate", "loser_id": loser_id, "canonical_id": canonical_id,
@@ -468,12 +479,10 @@ def delete(conn, *, id, reason, tier, ts):
         raise ValueError(f"unknown tier: {tier!r} (expected one of {_DELETE_TIERS})")
 
     def work():
-        prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
-        if prior is None:
-            raise KeyError(f"delete: no memory with id {id!r}")
-        conn.execute("UPDATE memories SET status='deleted', updated_at=? WHERE id=?", (ts, id))
-        _audit(conn, op="soft_delete", target_kind="memory", target_id=id,
-               reason=f"[{tier}] {reason}", prior=dict(prior), ts=ts)
+        _mutate_memory_audited(
+            conn, mem_id=id, op="soft_delete", reason=f"[{tier}] {reason}", ts=ts, verb="delete",
+            mutate=lambda: conn.execute(
+                "UPDATE memories SET status='deleted', updated_at=? WHERE id=?", (ts, id)))
 
     _write_txn(conn, work, spool={
         "op": "delete", "id": id, "reason": reason, "tier": tier, "ts": ts})
@@ -522,14 +531,10 @@ def set_pinned(conn, *, source_kind=None, source_id=None, id=None, pinned, ts,
 
     if source_kind == "memory":
         def work():
-            prior = conn.execute(
-                "SELECT * FROM memories WHERE id=?", (source_id,)).fetchone()
-            if prior is None:
-                raise KeyError(f"set_pinned: no memory with id {source_id!r}")
-            conn.execute("UPDATE memories SET pinned=? WHERE id=?",
-                         (1 if pinned else 0, source_id))
-            _audit(conn, op=op, target_kind="memory", target_id=source_id,
-                   reason=reason, prior=dict(prior), ts=ts)
+            _mutate_memory_audited(
+                conn, mem_id=source_id, op=op, reason=reason, ts=ts, verb="set_pinned",
+                mutate=lambda: conn.execute(
+                    "UPDATE memories SET pinned=? WHERE id=?", (1 if pinned else 0, source_id)))
     else:  # knowledge: upsert knowledge_pins (idempotent on slug PK)
         def work():
             prior = conn.execute(
@@ -553,12 +558,10 @@ def set_pinned(conn, *, source_kind=None, source_id=None, id=None, pinned, ts,
 def set_verified(conn, *, id, ts, reason="manual verify"):
     """Stamp last_verified=ts (a human reconfirmed the memory is still true). Audited."""
     def work():
-        prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
-        if prior is None:
-            raise KeyError(f"set_verified: no memory with id {id!r}")
-        conn.execute("UPDATE memories SET last_verified=? WHERE id=?", (ts, id))
-        _audit(conn, op="verify", target_kind="memory", target_id=id,
-               reason=reason, prior=dict(prior), ts=ts)
+        _mutate_memory_audited(
+            conn, mem_id=id, op="verify", reason=reason, ts=ts, verb="set_verified",
+            mutate=lambda: conn.execute(
+                "UPDATE memories SET last_verified=? WHERE id=?", (ts, id)))
 
     _write_txn(conn, work, spool={"op": "set_verified", "id": id, "ts": ts, "reason": reason})
 
@@ -582,12 +585,10 @@ def set_outcome_weight(conn, *, id, weight, ts, reason="outcome aggregate"):
     it just persists whatever it is handed. Audited; spooled + replayable like every
     other write."""
     def work():
-        prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
-        if prior is None:
-            raise KeyError(f"set_outcome_weight: no memory with id {id!r}")
-        conn.execute("UPDATE memories SET outcome_weight=? WHERE id=?", (weight, id))
-        _audit(conn, op="outcome_weight", target_kind="memory", target_id=id,
-               reason=reason, prior=dict(prior), ts=ts)
+        _mutate_memory_audited(
+            conn, mem_id=id, op="outcome_weight", reason=reason, ts=ts, verb="set_outcome_weight",
+            mutate=lambda: conn.execute(
+                "UPDATE memories SET outcome_weight=? WHERE id=?", (weight, id)))
 
     _write_txn(conn, work, spool={
         "op": "set_outcome_weight", "id": id, "weight": weight, "ts": ts,
@@ -625,13 +626,10 @@ def set_status(conn, *, id, status, ts, reason):
             f"(expected one of {_KNOWN_STATUSES})")
 
     def work():
-        prior = conn.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone()
-        if prior is None:
-            raise KeyError(f"set_status: no memory with id {id!r}")
-        conn.execute("UPDATE memories SET status=?, updated_at=? WHERE id=?",
-                     (status, ts, id))
-        _audit(conn, op="set_status", target_kind="memory", target_id=id,
-               reason=reason, prior=dict(prior), ts=ts)
+        _mutate_memory_audited(
+            conn, mem_id=id, op="set_status", reason=reason, ts=ts, verb="set_status",
+            mutate=lambda: conn.execute(
+                "UPDATE memories SET status=?, updated_at=? WHERE id=?", (status, ts, id)))
 
     _write_txn(conn, work, spool={
         "op": "set_status", "id": id, "status": status, "ts": ts, "reason": reason})
