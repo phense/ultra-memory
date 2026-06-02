@@ -193,6 +193,81 @@ def test_real_apply_create_page_shells_gateway(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# M1: gateway_prefix — the RESOLVED argv prefix replaces the hardcoded ["uv","run",gw].
+# --------------------------------------------------------------------------- #
+
+def _capture_runner():
+    calls = []
+
+    class R:
+        returncode = 0
+        stderr = ""
+
+    def runner(cmd, **kw):
+        calls.append((cmd, kw.get("cwd")))
+        return R()
+
+    return runner, calls
+
+
+def test_real_apply_create_page_uses_builtin_prefix(tmp_path):
+    """gateway_prefix=['python','-m','ultra_memory.wiki_gateway'] → the create-page
+    argv is prefix + [verb, …, --from-file, tmp], NOT ['uv','run',<gw>,…]."""
+    runner, calls = _capture_runner()
+    prefix = ["python", "-m", "ultra_memory.wiki_gateway"]
+    fns = adj.real_apply_fns(gateway_prefix=prefix, runner=runner, cwd=tmp_path,
+                             default_topic="trading")
+    fns["create-page"]({"op": "create-page", "path": "wiki/trading/concepts/x.md", "content": "# X"})
+    cmd = calls[0][0]
+    assert cmd[:3] == prefix
+    assert cmd[3] == "create-page"
+    assert "uv" not in cmd and "run" not in cmd
+    assert "--from-file" in cmd
+
+
+def test_real_apply_create_page_uses_gateway_class_prefix(tmp_path):
+    """A --gateway-class prefix is preserved verbatim ahead of the verb."""
+    runner, calls = _capture_runner()
+    prefix = ["python", "-m", "ultra_memory.wiki_gateway",
+              "--gateway-class", "wiki_lib:TradingWikiGateway"]
+    fns = adj.real_apply_fns(gateway_prefix=prefix, runner=runner, cwd=tmp_path)
+    fns["log"]({"op": "log", "message": "hi"})
+    cmd = calls[0][0]
+    assert cmd[:5] == prefix
+    assert cmd[5] == "log"
+    assert "--gateway-class" in cmd
+
+
+def test_real_apply_prefix_none_falls_back_to_uv_run_gateway(tmp_path):
+    """Back-compat: no gateway_prefix → the legacy ['uv','run',<gateway>] argv. Existing
+    callers that pass only `gateway=` keep working byte-identically."""
+    runner, calls = _capture_runner()
+    fns = adj.real_apply_fns(gateway=Path("/g/wiki_lib.py"), runner=runner, cwd=tmp_path)
+    fns["log"]({"op": "log", "message": "hi"})
+    cmd = calls[0][0]
+    assert cmd[:3] == ["uv", "run", "/g/wiki_lib.py"]
+    assert cmd[3] == "log"
+
+
+def test_adjudicate_threads_gateway_prefix_into_apply(tmp_path):
+    """adjudicate(gateway_prefix=…) flows the prefix into real_apply_fns so a create-page
+    action shells the resolved prefix (the end-to-end M1 wire)."""
+    runner, calls = _capture_runner()
+    p = _write_wl(tmp_path, items=[{"kind": "synthesis-candidate", "title": "S"}])
+    prefix = ["python", "-m", "ultra_memory.wiki_gateway",
+              "--gateway-class", "wiki_lib:TradingWikiGateway"]
+    rc = adj.adjudicate(
+        p, gateway_prefix=prefix, model="m", runner=runner,
+        claude_call=lambda *a, **k: json.dumps({"actions": [
+            {"op": "create-page", "path": "wiki/trading/synthesis/s.md", "content": "# S"}]}),
+        fallback_cwd=tmp_path)
+    assert rc == 0
+    assert calls, "no gateway verb was shelled"
+    cmd = calls[0][0]
+    assert cmd[:5] == prefix and "create-page" in cmd
+
+
+# --------------------------------------------------------------------------- #
 # build_sys + guard.
 # --------------------------------------------------------------------------- #
 

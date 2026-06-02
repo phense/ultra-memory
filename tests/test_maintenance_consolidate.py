@@ -338,6 +338,72 @@ def test_merge_write_failure_leaves_candidate_unresolved(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# M1: gateway_prefix — the resolved argv prefix replaces the hardcoded ["uv","run"]
+# --------------------------------------------------------------------------- #
+
+def test_merge_uses_resolved_gateway_prefix(tmp_path):
+    """When consolidate is given a gateway_prefix, the merge write shells
+    prefix + [append-validation-log, …, --from-file, tmp] — NOT ['uv','run',<gw>,…]."""
+    conn = _open_temp_db(tmp_path)
+    _enqueue_candidate(conn, session_id="s0", skill="backtest")
+    cand_id = _candidate_rows(conn)[0]["id"]
+
+    plan = {"decisions": [
+        {"candidate_id": cand_id, "action": "merge",
+         "page": "wiki/trading/concepts/p.md", "entry": "Validated.", "reason": "dup"},
+    ]}
+    wiki_calls = []
+
+    def runner(cmd, **kw):
+        if "append-validation-log" in cmd:
+            wiki_calls.append(cmd)
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps(plan), stderr="")
+
+    prefix = ["python", "-m", "ultra_memory.wiki_gateway",
+              "--gateway-class", "wiki_lib:TradingWikiGateway"]
+    # apply_merge=None → the real _default_apply_merge; a gateway_prefix is supplied.
+    summary = cc.consolidate(
+        conn, runner=runner, embedder=_fake_embedder(), env=FAKE_ENV,
+        project_dir=tmp_path, apply_merge=None, wiki_gateway=DUMMY_GATEWAY,
+        gateway_prefix=prefix)
+
+    assert summary["merged"] == 1
+    assert wiki_calls, "append-validation-log was not shelled"
+    cmd = wiki_calls[0]
+    assert cmd[:5] == prefix
+    assert cmd[5] == "append-validation-log"
+    assert "uv" not in cmd and "run" not in cmd
+
+
+def test_merge_prefix_none_falls_back_to_uv_run(tmp_path):
+    """Back-compat: no gateway_prefix → the legacy ['uv','run',<wiki_gateway>] argv."""
+    conn = _open_temp_db(tmp_path)
+    _enqueue_candidate(conn, session_id="s0", skill="backtest")
+    cand_id = _candidate_rows(conn)[0]["id"]
+
+    plan = {"decisions": [
+        {"candidate_id": cand_id, "action": "merge",
+         "page": "wiki/trading/concepts/p.md", "entry": "Validated.", "reason": "dup"},
+    ]}
+    wiki_calls = []
+
+    def runner(cmd, **kw):
+        if "append-validation-log" in cmd:
+            wiki_calls.append(cmd)
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps(plan), stderr="")
+
+    summary = cc.consolidate(
+        conn, runner=runner, embedder=_fake_embedder(), env=FAKE_ENV,
+        project_dir=tmp_path, apply_merge=None, wiki_gateway=DUMMY_GATEWAY)
+
+    assert summary["merged"] == 1
+    assert wiki_calls and wiki_calls[0][:2] == ["uv", "run"]
+    assert str(DUMMY_GATEWAY) in wiki_calls[0]
+
+
+# --------------------------------------------------------------------------- #
 # PROJECT-AGNOSTIC: no wiki_gateway → merge degrades to a logged skip
 # --------------------------------------------------------------------------- #
 

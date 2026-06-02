@@ -75,6 +75,35 @@ def test_absolute_paths_kept_absolute(tmp_path):
     assert cfg.probe_corpus == abs_corpus
 
 
+def test_wiki_gateway_module_class_spec_not_abs_mangled(tmp_path):
+    """A `module:Class` gateway spec must survive load_config as a RAW STRING — never
+    `_abs`-mangled into a bogus `<project_dir>/module:Class` path. (M1: the resolver
+    needs the literal spec to build the --gateway-class prefix.)"""
+    (tmp_path / ".ultra-memory").mkdir()
+    (tmp_path / ".ultra-memory" / "config.toml").write_text(
+        '[maintenance]\nwiki_gateway = "wiki_lib:TradingWikiGateway"\n')
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.wiki_gateway == "wiki_lib:TradingWikiGateway"
+
+
+def test_wiki_gateway_env_module_class_spec_not_abs_mangled(tmp_path):
+    """The env override path also keeps a `module:Class` spec a raw string."""
+    cfg = load_config(
+        project_dir=tmp_path,
+        env={"ULTRA_MEMORY_WIKI_GATEWAY": "mymod:MyGateway"})
+    assert cfg.wiki_gateway == "mymod:MyGateway"
+
+
+def test_wiki_gateway_real_path_still_abs_resolved(tmp_path):
+    """A real filesystem path (no `module:Class` colon) is still resolved to absolute —
+    the `module:Class` carve-out must not regress the path form."""
+    (tmp_path / ".ultra-memory").mkdir()
+    (tmp_path / ".ultra-memory" / "config.toml").write_text(
+        '[maintenance]\nwiki_gateway = "scripts/wiki_lib.py"\n')
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.wiki_gateway == tmp_path / "scripts" / "wiki_lib.py"
+
+
 # --------------------------------------------------------------------------- #
 # Model B / import_learnings migration — the self_learning_files registry seam
 # + the learnings (projection-regen) beat defaults.

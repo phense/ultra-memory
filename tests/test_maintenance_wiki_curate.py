@@ -149,6 +149,103 @@ def test_stage2_threads_injected_merge_decider(tmp_path, monkeypatch):
     assert captured["merge_decider"](0.6, "a", "b") is True   # the injected judge
 
 
+# --------------------------------------------------------------------------- #
+# M1: the beat actually CALLS _resolve_gateway and threads the prefix down.
+# (The gap that let M1 pass CI: only _resolve_gateway's argv shape was unit-tested,
+# never the beat call.) These integration tests assert the wiring, not just the shape.
+# --------------------------------------------------------------------------- #
+
+def _capture_adjudicate(monkeypatch):
+    """Patch adj.adjudicate to record its kwargs and return rc=0."""
+    captured = {}
+    from ultra_memory.wiki_maintenance import adjudicate as adj
+    monkeypatch.setattr(adj, "adjudicate", lambda *a, **k: captured.update(k) or 0)
+    return captured
+
+
+def test_stage2_adjudicate_threads_builtin_prefix_when_gateway_none(tmp_path, monkeypatch):
+    """config.wiki_gateway=None → the beat resolves to the BUILT-IN turnkey prefix
+    and threads it into adjudicate (not None — None gateway means skip; here we use a
+    sentinel non-None spec that resolves to the built-in)."""
+    repo, root = _git_wiki(tmp_path)
+    out = tmp_path / "wl.json"
+    from ultra_memory.wiki_maintenance import worklist as wl
+    wl.write_worklist(wl.new_worklist(str(root), generated_at="2026-06-02"), out)
+    captured = _capture_adjudicate(monkeypatch)
+    # An empty-string gateway is "set" (not None → don't skip) but resolves to built-in.
+    cfg = MaintenanceConfig(
+        project_dir=tmp_path, db_path=tmp_path / "m.db", export_dir=tmp_path / "e",
+        wiki_roots=[root], topics=["trading"], wiki_gateway="")
+    # wiki_gateway="" is falsy-but-not-None; the beat must NOT skip on it, and must
+    # route the resolved built-in prefix into adjudicate.
+    import sqlite3
+    rc = wiki_curate.stage2_adjudicate(sqlite3.connect(":memory:"), cfg, worklist_path=out)
+    prefix = captured.get("gateway_prefix")
+    assert prefix is not None, "beat did not thread a gateway_prefix into adjudicate"
+    assert "ultra_memory.wiki_gateway" in " ".join(prefix)
+    assert "--gateway-class" not in prefix
+    assert rc == 0
+
+
+def test_stage2_adjudicate_threads_gateway_class_prefix(tmp_path, monkeypatch):
+    """config.wiki_gateway='module:Class' → the beat resolves to a --gateway-class
+    prefix and threads it into adjudicate."""
+    repo, root = _git_wiki(tmp_path)
+    out = tmp_path / "wl.json"
+    from ultra_memory.wiki_maintenance import worklist as wl
+    wl.write_worklist(wl.new_worklist(str(root), generated_at="2026-06-02"), out)
+    captured = _capture_adjudicate(monkeypatch)
+    cfg = MaintenanceConfig(
+        project_dir=tmp_path, db_path=tmp_path / "m.db", export_dir=tmp_path / "e",
+        wiki_roots=[root], topics=["trading"],
+        wiki_gateway="wiki_lib:TradingWikiGateway")
+    import sqlite3
+    wiki_curate.stage2_adjudicate(sqlite3.connect(":memory:"), cfg, worklist_path=out)
+    prefix = captured.get("gateway_prefix")
+    assert prefix is not None
+    assert "--gateway-class" in prefix
+    idx = prefix.index("--gateway-class")
+    assert prefix[idx + 1] == "wiki_lib:TradingWikiGateway"
+
+
+def test_stage2_adjudicate_threads_uv_run_prefix_for_path(tmp_path, monkeypatch):
+    """A real-path gateway → the beat resolves to the back-compat uv-run prefix."""
+    repo, root = _git_wiki(tmp_path)
+    gw = tmp_path / "scripts" / "wiki_lib.py"
+    gw.parent.mkdir(parents=True, exist_ok=True)
+    gw.touch()
+    out = tmp_path / "wl.json"
+    from ultra_memory.wiki_maintenance import worklist as wl
+    wl.write_worklist(wl.new_worklist(str(root), generated_at="2026-06-02"), out)
+    captured = _capture_adjudicate(monkeypatch)
+    cfg = MaintenanceConfig(
+        project_dir=tmp_path, db_path=tmp_path / "m.db", export_dir=tmp_path / "e",
+        wiki_roots=[root], topics=["trading"], wiki_gateway=gw)
+    import sqlite3
+    wiki_curate.stage2_adjudicate(sqlite3.connect(":memory:"), cfg, worklist_path=out)
+    prefix = captured.get("gateway_prefix")
+    assert prefix is not None
+    assert prefix[0] == "uv" and "run" in prefix and str(gw) in prefix
+
+
+def test_consolidate_beat_threads_resolved_prefix(tmp_path, monkeypatch):
+    """consolidate.beat resolves config.wiki_gateway via _resolve_gateway and threads
+    the prefix into consolidate() (the gap: the beat hardcoded uv-run instead)."""
+    from ultra_memory.maintenance import consolidate as cons
+    captured = {}
+    monkeypatch.setattr(cons, "consolidate",
+                        lambda conn, **k: captured.update(k) or {"op": "consolidate"})
+    cfg = MaintenanceConfig(
+        project_dir=tmp_path, db_path=tmp_path / "m.db", export_dir=tmp_path / "e",
+        topics=["trading"], wiki_gateway="wiki_lib:TradingWikiGateway")
+    import sqlite3
+    cons.beat(sqlite3.connect(":memory:"), cfg, "2026-06-02T00:00:00Z", {})
+    prefix = captured.get("gateway_prefix")
+    assert prefix is not None
+    assert "--gateway-class" in prefix
+    assert prefix[prefix.index("--gateway-class") + 1] == "wiki_lib:TradingWikiGateway"
+
+
 def test_cli_stage1(tmp_path, monkeypatch):
     repo, root = _git_wiki(tmp_path)
     (root / "trading" / "concepts" / "lonely.md").write_text(

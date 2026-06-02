@@ -60,7 +60,8 @@ class MaintenanceConfig:
     wiki_roots: list[Path] = field(default_factory=list)
     briefings_dir: Path | None = None          # None → no audit/digest writes
     probe_corpus: Path | None = None           # None → the skill-loop holds (no corpus)
-    wiki_gateway: Path | None = None           # None → no wiki (wiki-write beats degrade)
+    wiki_gateway: Path | str | None = None     # None → no wiki; a path → uv-run; a
+    #                                            "module:Class" raw string → --gateway-class
     topics: list[str] = field(default_factory=list)
     model: str = _DEFAULT_MODEL
     beats: dict = field(default_factory=lambda: dict(_DEFAULT_BEATS))
@@ -108,6 +109,34 @@ def _abs(project_dir: Path, value) -> Path | None:
         return None
     p = Path(str(value)).expanduser()
     return p if p.is_absolute() else (project_dir / p)
+
+
+def _looks_like_module_class(value: str) -> bool:
+    """True iff *value* is a ``module:Class`` gateway spec (NOT a filesystem path):
+    it contains a ``":"`` whose left side is not an existing path and is not an
+    obvious path form. A spec like ``"wiki_lib:TradingWikiGateway"`` stays a raw
+    string (so the resolver can build the ``--gateway-class`` prefix); a real path
+    like ``"scripts/wiki_lib.py"`` or ``"/abs/wiki_lib.py"`` is still ``_abs``'d."""
+    if ":" not in value:
+        return False
+    left = value.split(":", 1)[0]
+    # Path-shaped left side → treat the whole thing as a path (Windows drive letters,
+    # explicit relative/absolute markers, or a real file on disk).
+    if (not left or value.startswith(("/", "./", "../", "~"))
+            or value.endswith(".py") or Path(value).expanduser().exists()):
+        return False
+    return True
+
+
+def _abs_gateway(project_dir: Path, value) -> Path | str | None:
+    """Resolve the wiki_gateway field. A ``module:Class`` spec is kept as a RAW
+    string (M1 — never ``_abs``-mangled into a bogus path); a real path is ``_abs``'d
+    like every other path field."""
+    if value in (None, ""):
+        return None
+    if _looks_like_module_class(str(value)):
+        return str(value)
+    return _abs(project_dir, value)
 
 
 def _parse_self_learning_files(raw_value) -> list:
@@ -176,7 +205,7 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
         wiki_roots=_resolve_wiki_roots(env),
         briefings_dir=_abs(project_dir, briefings),
         probe_corpus=_abs(project_dir, corpus),
-        wiki_gateway=_abs(project_dir, gateway),
+        wiki_gateway=_abs_gateway(project_dir, gateway),
         topics=[str(t) for t in topics],
         model=str(model),
         beats=beats,

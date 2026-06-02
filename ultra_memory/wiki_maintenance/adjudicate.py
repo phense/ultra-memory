@@ -195,18 +195,29 @@ def _topic_from_path(rel: str, *, wiki_dir: str, default_topic: str) -> str:
     return default_topic
 
 
-def real_apply_fns(*, gateway, runner=subprocess.run, cwd: Path | None = None,
+def real_apply_fns(*, gateway=None, gateway_prefix: list[str] | None = None,
+                   runner=subprocess.run, cwd: Path | None = None,
                    today: str | None = None, schema: WikiSchemaConfig | None = None,
                    default_topic: str = "default", wiki_dir: str = "wiki") -> dict:
     """Build the real apply dispatch dict. ``create-page``/``log`` shell the consumer
-    *gateway* (``uv run <gateway> <verb> …``) with ``cwd=<action root>.parent``; ``edit``
-    /``redirect-stub`` write files directly. Each action resolves against its OWN source
-    root (``action['root']``), else *cwd* (default cwd of the process)."""
+    gateway with ``cwd=<action root>.parent``; ``edit``/``redirect-stub`` write files
+    directly. Each action resolves against its OWN source root (``action['root']``),
+    else *cwd* (default cwd of the process).
+
+    The gateway argv is built from *gateway_prefix* (the RESOLVED argv prefix from
+    ``wiki_curate._resolve_gateway`` — e.g. ``["python", "-m",
+    "ultra_memory.wiki_gateway"]`` for the built-in turnkey, or a ``--gateway-class``
+    prefix, or ``["uv", "run", <path>]``) + ``[verb, …args, "--from-file", tmp]``. When
+    *gateway_prefix* is None (back-compat / direct callers that pass only *gateway*) it
+    falls back to the legacy ``["uv", "run", str(gateway)]`` prefix."""
     schema = schema or WikiSchemaConfig()
     fallback = Path(cwd) if cwd is not None else Path.cwd()
     if today is None:
         today = today_iso()
-    gateway = str(gateway)
+    if gateway_prefix is None:
+        gateway_prefix = ["uv", "run", str(gateway)]
+    else:
+        gateway_prefix = list(gateway_prefix)
 
     def _resolve(action: dict, rel: str) -> Path:
         p = Path(rel)
@@ -214,7 +225,7 @@ def real_apply_fns(*, gateway, runner=subprocess.run, cwd: Path | None = None,
 
     def _run_gateway_verb(verb_args: list[str], content: str, *, suffix: str,
                           run_cwd: Path, fail_label: str) -> None:
-        """Write `content` to a temp file, shell ``uv run <gateway> <verb_args…>
+        """Write `content` to a temp file, shell ``<gateway_prefix> <verb_args…>
         --from-file <tmp>`` in *run_cwd*, warn on a non-zero exit, always unlink. The
         ``getattr`` reads tolerate an injected test `runner` that returns a non-
         ``CompletedProcess`` shape."""
@@ -223,7 +234,7 @@ def real_apply_fns(*, gateway, runner=subprocess.run, cwd: Path | None = None,
             tf.write(content)
             tmp = tf.name
         try:
-            proc = runner(["uv", "run", gateway, *verb_args, "--from-file", tmp],
+            proc = runner([*gateway_prefix, *verb_args, "--from-file", tmp],
                           capture_output=True, text=True, cwd=str(run_cwd))
             if getattr(proc, "returncode", 0) != 0:
                 print(f"warning: {fail_label}: "
@@ -322,7 +333,7 @@ def _default_claude_call(prompt, *, model, system, timeout, env, claude_bin, eff
 
 # ── orchestration ────────────────────────────────────────────────────────────
 
-def adjudicate(worklist_path, *, gateway, model,
+def adjudicate(worklist_path, *, gateway=None, gateway_prefix=None, model,
                claude_call=None, runner=subprocess.run, apply_fns=None,
                schema: WikiSchemaConfig | None = None, merge_decider=None,
                sys_prompt=None, index_stems=None, timeout=DEFAULT_TIMEOUT,
@@ -331,11 +342,17 @@ def adjudicate(worklist_path, *, gateway, model,
     """Run Stage-2 adjudication over the worklist. Returns 0 on success, 1 if EVERY
     bundled chunk failed (writes nothing). The default *claude_call* is the OAuth-only
     ``run_claude``; the default *merge_decider* auto-merges only a pair at/above
-    ``schema.dedup_upper``."""
+    ``schema.dedup_upper``.
+
+    *gateway_prefix* is the RESOLVED gateway argv prefix (from
+    ``wiki_curate._resolve_gateway``); when None the apply path falls back to the
+    legacy ``["uv", "run", str(gateway)]`` so direct callers that pass only *gateway*
+    keep working."""
     schema = schema or WikiSchemaConfig()
     if apply_fns is None:
-        apply_fns = real_apply_fns(gateway=gateway, runner=runner, cwd=fallback_cwd,
-                                   schema=schema, default_topic=default_topic, wiki_dir=wiki_dir)
+        apply_fns = real_apply_fns(gateway=gateway, gateway_prefix=gateway_prefix,
+                                   runner=runner, cwd=fallback_cwd, schema=schema,
+                                   default_topic=default_topic, wiki_dir=wiki_dir)
     if merge_decider is None:
         upper = schema.dedup_upper
         merge_decider = lambda cosine, claim, cand: cosine is not None and cosine >= upper  # noqa: E731

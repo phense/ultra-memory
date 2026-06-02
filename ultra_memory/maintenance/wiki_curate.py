@@ -118,7 +118,9 @@ def _resolve_gateway(spec, config) -> list[str]:
     """
     import sys as _sys
 
-    spec = (spec or "").strip()
+    # spec may be a Path (a resolved real-path gateway), a "module:Class" str, "" or
+    # None — coerce to a stripped string before the form dispatch.
+    spec = ("" if spec is None else str(spec)).strip()
 
     # Unset / empty → built-in turnkey.
     if not spec:
@@ -214,8 +216,12 @@ def stage2_adjudicate(conn, config, *, worklist_path, schema=None, env=None):
     print(f"[wiki_curate] stage2 merge_decider: "
           f"{'calibrated:' + config.wiki_merge_decider if md else 'engine-default (auto-merge-only)'}",
           file=_sys.stderr)
+    # Resolve the gateway spec (unset/"" → built-in turnkey; "module:Class" →
+    # --gateway-class; a path → uv-run) into the argv prefix the apply path shells.
+    gateway_prefix = _resolve_gateway(config.wiki_gateway, config)
     return adj.adjudicate(
-        worklist_path, gateway=config.wiki_gateway, model=config.model, schema=schema,
+        worklist_path, gateway=config.wiki_gateway, gateway_prefix=gateway_prefix,
+        model=config.model, schema=schema,
         env=env, default_topic=default_topic, wiki_dir=roots[-1].name or "wiki",
         index_stems=_collect_index_stems(roots, schema), fallback_cwd=roots[-1].parent,
         merge_decider=md)

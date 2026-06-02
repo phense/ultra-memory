@@ -256,21 +256,31 @@ def _mark_resolved(conn, candidate_id) -> None:
         "op": "consolidate_mark_resolved", "candidate_id": candidate_id})
 
 
-def _default_apply_merge(*, page, entry, project_dir, runner, topic, wiki_gateway) -> bool:
-    """Shell ``uv run <wiki_gateway> append-validation-log`` through the injected
-    runner (so tests never spawn a process). NEVER rewrites the page — the verb only
-    appends a validation-log entry.
+def _default_apply_merge(*, page, entry, project_dir, runner, topic, wiki_gateway,
+                         gateway_prefix=None) -> bool:
+    """Shell ``<gateway_prefix> append-validation-log`` through the injected runner (so
+    tests never spawn a process). NEVER rewrites the page — the verb only appends a
+    validation-log entry.
+
+    The gateway argv is built from *gateway_prefix* (the RESOLVED prefix from
+    ``wiki_curate._resolve_gateway`` — built-in turnkey / ``--gateway-class`` /
+    ``uv run <path>``) + ``[append-validation-log, …, "--from-file", tmp]``. When None
+    (back-compat / direct callers) it falls back to ``["uv", "run", str(wiki_gateway)]``.
 
     Returns True iff the wiki write SUCCEEDED (rc==0). On a non-zero exit (e.g. the
     target page doesn't exist → wiki_lib raises ValueError → rc=1) it returns False
     so the caller leaves the source candidate UN-resolved — never lose a learning,
     mirroring the graduate branch's raise→un-resolved semantics."""
+    if gateway_prefix is None:
+        gateway_prefix = ["uv", "run", str(wiki_gateway)]
+    else:
+        gateway_prefix = list(gateway_prefix)
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
         tf.write(entry)
         tmp = tf.name
     try:
         proc = runner(
-            ["uv", "run", str(wiki_gateway), "append-validation-log",
+            [*gateway_prefix, "append-validation-log",
              "--page", str(page), "--from-file", tmp, "--topic", topic],
             capture_output=True, text=True, cwd=str(project_dir),
         )
@@ -301,11 +311,14 @@ def consolidate(conn, *, runner=subprocess.run, embedder, env=None,
                 max_graduations=DEFAULT_MAX_GRADUATIONS, model=None,
                 timeout=DEFAULT_TIMEOUT, claude_bin="claude",
                 apply_merge=None, audit_dir=None, wiki_gateway=None,
-                default_topic="default", ts=None) -> dict:
+                gateway_prefix=None, default_topic="default", ts=None) -> dict:
     """Run ONE conservative consolidation drain. Returns a summary dict; NEVER
     raises (fail-open). `apply_merge` is injectable so tests don't shell wiki_lib;
     `audit_dir` overrides the audit-log dir (None → no audit file); `wiki_gateway`
-    is the consumer's wiki CLI (None → a merge decision degrades to a logged skip)."""
+    is the consumer's wiki CLI (None → a merge decision degrades to a logged skip).
+    `gateway_prefix` is the RESOLVED gateway argv prefix (from
+    ``wiki_curate._resolve_gateway``); None → the default merge writer falls back to
+    the legacy ``["uv", "run", str(wiki_gateway)]`` prefix."""
     if model is None:
         model = DEFAULT_MODEL
     if apply_merge is None:
@@ -354,7 +367,8 @@ def consolidate(conn, *, runner=subprocess.run, embedder, env=None,
             _apply_one(conn, decision, by_id=by_id, summary=summary,
                        max_graduations=max_graduations, project_dir=project_dir,
                        runner=runner, apply_merge=apply_merge,
-                       wiki_gateway=wiki_gateway, default_topic=default_topic, ts=ts)
+                       wiki_gateway=wiki_gateway, gateway_prefix=gateway_prefix,
+                       default_topic=default_topic, ts=ts)
         except Exception as exc:  # per-decision fail-open
             _warn(f"apply failed for decision {decision.get('candidate_id')}: {exc}")
 
@@ -363,7 +377,7 @@ def consolidate(conn, *, runner=subprocess.run, embedder, env=None,
 
 
 def _apply_one(conn, decision, *, by_id, summary, max_graduations, project_dir,
-               runner, apply_merge, wiki_gateway, default_topic, ts) -> None:
+               runner, apply_merge, wiki_gateway, gateway_prefix, default_topic, ts) -> None:
     """Apply ONE decision, provenance-gated. Marks the candidate resolved only when
     the action is fully applied (a capped/refused graduation leaves it un-resolved
     for the next run)."""
@@ -407,8 +421,14 @@ def _apply_one(conn, decision, *, by_id, summary, max_graduations, project_dir,
             _mark_resolved(conn, cand_id)
             summary["skipped"] += 1
             return
-        ok = apply_merge(page=page, entry=entry, project_dir=project_dir, runner=runner,
-                         topic=_topic_from_page(page, default_topic), wiki_gateway=wiki_gateway)
+        merge_kwargs = dict(
+            page=page, entry=entry, project_dir=project_dir, runner=runner,
+            topic=_topic_from_page(page, default_topic), wiki_gateway=wiki_gateway)
+        # The resolved gateway prefix is for the DEFAULT writer's argv; an injected
+        # writer owns its own argv, so only thread it into _default_apply_merge.
+        if apply_merge is _default_apply_merge:
+            merge_kwargs["gateway_prefix"] = gateway_prefix
+        ok = apply_merge(**merge_kwargs)
         # Only mark resolved + count when the wiki write SUCCEEDED. A False return
         # (the merge write failed) leaves the candidate resolved=0 so the next drain
         # re-selects it — never lose a learning. An injected apply_merge that returns
@@ -500,14 +520,21 @@ def _resolve_embedder():
 
 def beat(conn, config, ts, env):
     """The `run_pipeline` registry entry. Threads the resolved MaintenanceConfig
-    seam (model / audit dir / wiki gateway / default topic) into `consolidate`."""
+    seam (model / audit dir / wiki gateway / default topic) into `consolidate`.
+    Resolves ``config.wiki_gateway`` through ``wiki_curate._resolve_gateway`` into an
+    argv prefix (turnkey built-in / ``--gateway-class`` / ``uv run <path>``) so the
+    default merge writer invokes the resolved gateway, not a hardcoded ``uv run``."""
+    from ultra_memory.maintenance.wiki_curate import _resolve_gateway
+
     audit_dir = (config.briefings_dir / "maintenance-logs") if config.briefings_dir else None
     default_topic = config.topics[0] if getattr(config, "topics", None) else "default"
+    gateway_prefix = (_resolve_gateway(config.wiki_gateway, config)
+                      if config.wiki_gateway is not None else None)
     return consolidate(
         conn, embedder=_resolve_embedder(), env=env,
         project_dir=config.project_dir, model=config.model,
         audit_dir=audit_dir, wiki_gateway=config.wiki_gateway,
-        default_topic=default_topic, ts=ts)
+        gateway_prefix=gateway_prefix, default_topic=default_topic, ts=ts)
 
 
 # --------------------------------------------------------------------------- #
