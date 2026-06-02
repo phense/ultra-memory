@@ -147,3 +147,71 @@ def test_load_all_atomic_mechanisms_from_wiki_root(tmp_path):
         assert isinstance(vec, list)
     except ImportError:
         pytest.skip("fastembed not available")
+
+
+# ── Task 5: semantic dedup + overlap + anchor-disambiguation ─────────────────
+
+def test_find_overlap_match_returns_best_page(tmp_path):
+    """find_overlap_match returns the best page when cosine >= threshold."""
+    try:
+        from fastembed import TextEmbedding  # noqa: F401
+    except ImportError:
+        pytest.skip("fastembed not available")
+
+    concepts = tmp_path / "t" / "concepts"
+    concepts.mkdir(parents=True)
+
+    mech1 = concepts / "mech-alpha.md"
+    mech1.write_text(
+        "---\ntype: mechanism\ntitle: Alpha\n---\n\n**Mechanism**: Interest rates rise when inflation is high.\n"
+    )
+    mech2 = concepts / "mech-beta.md"
+    mech2.write_text(
+        "---\ntype: mechanism\ntitle: Beta\n---\n\n**Mechanism**: Bears hibernate in winter months.\n"
+    )
+
+    gw = WikiGateway(wiki_root=tmp_path, topic="t")
+    # Querying with text very similar to mech1 should find it
+    result = gw.find_overlap_match(
+        "When inflation runs high, central banks raise interest rates.",
+        theme_dir=concepts,
+        threshold=0.70,
+    )
+    assert result is not None
+    path, anchor, sim = result
+    assert path == mech1
+    assert sim >= 0.70
+
+
+def test_find_overlap_match_returns_none_below_threshold(tmp_path):
+    """find_overlap_match returns None when no page meets the threshold."""
+    try:
+        from fastembed import TextEmbedding  # noqa: F401
+    except ImportError:
+        pytest.skip("fastembed not available")
+
+    concepts = tmp_path / "t" / "concepts"
+    concepts.mkdir(parents=True)
+    mech = concepts / "mech.md"
+    mech.write_text(
+        "---\ntype: mechanism\ntitle: M\n---\n\n**Mechanism**: The moon is made of cheese.\n"
+    )
+
+    gw = WikiGateway(wiki_root=tmp_path, topic="t")
+    result = gw.find_overlap_match(
+        "Quantum entanglement enables faster-than-light communication.",
+        theme_dir=concepts,
+        threshold=0.999,  # impossibly high threshold
+    )
+    assert result is None
+
+
+def test_disambiguate_anchor_idempotent(tmp_path):
+    """_disambiguate_anchor: same claim_text → same anchor (deterministic)."""
+    gw = WikiGateway(wiki_root=tmp_path, topic="t")
+    # colliding_path that doesn't exist on disk → fresh anchor
+    col_path = tmp_path / "base-anchor-1234.md"
+    anchor1, is_idem1 = gw._disambiguate_anchor("base-anchor-1234", "some claim text", col_path)
+    anchor2, is_idem2 = gw._disambiguate_anchor("base-anchor-1234", "some claim text", col_path)
+    assert anchor1 == anchor2  # deterministic
+    assert is_idem1 is False   # nothing on disk → fresh

@@ -370,6 +370,240 @@ class WikiGateway:
                 return text
         return self.extract_mechanism_text(md_text)
 
+    # ── semantic dedup + overlap ────────────────────────────────────────────────
+
+    # Per-instance cache of all atomic mechanisms (populated lazily by
+    # `load_all_atomic_mechanisms`; cleared by `_clear_atomics_cache`).
+    _all_atomics_cache: "list[tuple[Path, str | None, list[float]]] | None" = None
+
+    def find_overlap_match(
+        self,
+        claim_text: str,
+        theme_dir: "Path",
+        threshold: float,
+    ) -> "tuple[Path, str | None, float] | None":
+        """Return (best_path, anchor, cosine_similarity) if any atomic mechanism
+        unit in the wiki concepts tree has cosine(embed(claim_text), embed(unit))
+        >= threshold; else None.
+
+        Two unit types are scanned (see `load_all_atomic_mechanisms`):
+          - standalone atomic files (anchor = None)
+          - ``{#anchor}`` sections inside type: concept hub pages
+
+        Scans GLOBALLY across all theme directories, not just the target theme.
+        The ``theme_dir`` parameter is preserved for signature compatibility but
+        no longer constrains the scan scope.
+
+        Theme-index and master-hub pages are excluded.
+        """
+        if not claim_text or not claim_text.strip():
+            return None
+        claim_vec = self.embed_with_cache(claim_text)  # transient — not cached by file path
+        best: "tuple[Path, str | None, float] | None" = None
+        for path, anchor, atomic_vec in self.load_all_atomic_mechanisms():
+            sim = self.cosine_sim(claim_vec, atomic_vec)
+            if sim >= threshold and (best is None or sim > best[2]):
+                best = (path, anchor, sim)
+        return best
+
+    def _find_in_flight_match(
+        self,
+        claim_vec: "list[float]",
+        in_flight: "list[tuple[list[float], Path]]",
+        threshold: float,
+    ) -> "tuple[Path, float] | None":
+        """Return (atomic_path, similarity) for the best match in ``in_flight``
+        if best similarity >= threshold; else None.
+
+        ``in_flight`` holds (claim_vec, atomic_path) tuples for proposals
+        already accumulated for the current video / batch.
+        """
+        best: "tuple[Path, float] | None" = None
+        for other_vec, other_path in in_flight:
+            sim = self.cosine_sim(claim_vec, other_vec)
+            if sim >= threshold and (best is None or sim > best[1]):
+                best = (other_path, sim)
+        return best
+
+    def judge_route(
+        self,
+        sim: float,
+        claim_text: str,
+        candidate_text: str,
+        *,
+        judge_enabled: bool,
+        resolve_fn: "Any",
+        cosine_floor: float | None = None,
+    ) -> bool:
+        """Decide whether a best-cosine on-disk candidate should be MERGED against.
+
+        judge disabled  → legacy pure-cosine: merge iff sim >= cosine_floor.
+        judge enabled   → sim >= dedup_upper: auto-merge (no judge call);
+                          dedup_lower <= sim < dedup_upper: resolve_fn decides
+                            (verdict 'same' → merge, 'different' → no merge);
+                          sim < dedup_lower: no merge.
+        resolve_fn(claim_text, candidate_text, sim) -> {"verdict": "same"|"different", ...}
+
+        ``cosine_floor`` defaults to ``self.schema.dedup_lower`` when None.
+        Keep ``resolve_fn`` consumer-injected — no LLM in the base.
+        """
+        if cosine_floor is None:
+            cosine_floor = self.schema.dedup_lower
+        if not judge_enabled:
+            return sim >= cosine_floor
+        if sim >= self.schema.dedup_upper:
+            return True
+        if sim < self.schema.dedup_lower:
+            return False
+        return resolve_fn(claim_text, candidate_text, sim)["verdict"] == "same"
+
+    def _log_borderline_if_needed(
+        self,
+        kind: str,
+        sim: float,
+        threshold: float,
+        source: "dict[str, Any]",
+        claim_text: str,
+        target: str,
+        verdict: "str | None" = None,
+    ) -> None:
+        """Append a line to the borderline log if ``sim`` falls in the
+        borderline band ``[threshold, dedup_upper)``. No-op otherwise.
+
+        ``kind`` is "on-disk" or "in-flight"; ``verdict`` is the judge decision
+        when the judge tier decided this borderline match.
+        """
+        import sys
+        from datetime import datetime, timezone
+
+        borderline_upper = self.schema.dedup_upper
+        if not (threshold <= sim < borderline_upper):
+            return
+        try:
+            if self.wiki_root is not None:
+                log_path = (
+                    self.wiki_root.parent
+                    / "briefings"
+                    / "maintenance-logs"
+                    / f"ingest-borderline-merges-{datetime.now(timezone.utc).date().isoformat()}.log"
+                )
+            else:
+                return  # no wiki_root → skip
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            snippet = claim_text.replace("\n", " ").strip()
+            if len(snippet) > 160:
+                snippet = snippet[:157] + "…"
+            verdict_col = f"\tverdict={verdict}" if verdict is not None else ""
+            line = (
+                f"{datetime.now(timezone.utc).isoformat()}\t{kind}\tsim={sim:.3f}\t"
+                f"video={source.get('channel_name', '?')}/{source.get('video_id', '?')}\t"
+                f"target={target}\tclaim={snippet}{verdict_col}\n"
+            )
+            with log_path.open("a") as fh:
+                fh.write(line)
+        except Exception as e:
+            print(f"warning: failed to write borderline log: {e}", file=sys.stderr)
+
+    def dedup_cross_video(
+        self,
+        proposals_new: "list[dict[str, Any]]",
+        proposals_merge: "list[dict[str, Any]]",
+        threshold: float,
+    ) -> int:
+        """Post-pass over ``proposals_new`` to demote cross-video paraphrase clones.
+
+        Closes the gap between on-disk and in-flight dedup: when two videos produce
+        paraphrases of the same mechanism and no canonical atomic exists yet on disk,
+        both pass ``find_overlap_match`` AND ``_find_in_flight_match``. This function
+        runs once after process_files() returns, with all proposals_new visible.
+
+        Restricted to same-theme. Mutates ``proposals_new`` (removes demoted) and
+        ``proposals_merge`` (appends demoted) in place. Returns count of demoted.
+        """
+        if len(proposals_new) < 2:
+            return 0
+
+        vecs = [self.embed_with_cache(p["claim"]["claim"]) for p in proposals_new]
+
+        surviving: "list[dict[str, Any]]" = []
+        surviving_vecs: "list[list[float]]" = []
+        demoted = 0
+
+        for p, v in zip(proposals_new, vecs):
+            best_idx = -1
+            best_sim = 0.0
+            for i, sp in enumerate(surviving):
+                if sp["theme"] != p["theme"]:
+                    continue
+                sim = self.cosine_sim(v, surviving_vecs[i])
+                if sim >= threshold and sim > best_sim:
+                    best_idx = i
+                    best_sim = sim
+
+            if best_idx >= 0:
+                canonical = surviving[best_idx]
+                proposals_merge.append({
+                    "atomic_path": canonical["atomic_path"],
+                    "section_anchor": None,
+                    "claim": p["claim"],
+                    "source": p["source"],
+                    "theme": canonical["theme"],
+                    "title": canonical["title"],
+                    "overlap_score": best_sim,
+                    "overlap_reason": f"embedding-cosine-cross-video (BAAI/bge-small-en-v1.5, sim={best_sim:.2f})",
+                })
+                self._log_borderline_if_needed(
+                    kind="cross-video",
+                    sim=best_sim,
+                    threshold=threshold,
+                    source=p["source"],
+                    claim_text=p["claim"]["claim"],
+                    target=str(canonical["atomic_path"]),
+                )
+                demoted += 1
+            else:
+                surviving.append(p)
+                surviving_vecs.append(v)
+
+        proposals_new[:] = surviving
+        return demoted
+
+    def _disambiguate_anchor(
+        self, base_anchor: str, claim_text: str, colliding_path: "Path"
+    ) -> "tuple[str, bool]":
+        """Resolve a disambiguation anchor for a DISTINCT claim that landed on an
+        already-taken atomic_path (a derive_anchor 4-hex collision).
+
+        Returns ``(anchor, is_idempotent_hit)``:
+          - ``is_idempotent_hit`` is False → anchor is a FRESH, free sibling.
+          - ``is_idempotent_hit`` is True → anchor names an EXISTING sibling whose
+            Mechanism text MATCHES ``claim_text`` (re-ingest of an already-
+            disambiguated claim); the caller must SKIP, not mint a duplicate.
+
+        Deterministic: walks successive 2-hex slices of SHA-1 of the claim text.
+        """
+        import hashlib
+
+        incoming = (claim_text or "").strip()
+        digest = hashlib.sha1(claim_text.encode("utf-8"), usedforsecurity=False).hexdigest()
+        for width in (2, 4, 6, len(digest)):
+            for i in range(0, max(1, len(digest) - width + 1)):
+                disc = digest[i: i + width]
+                candidate = f"{base_anchor}-{disc}"
+                cand_path = colliding_path.with_name(f"{candidate}.md")
+                if not cand_path.exists():
+                    return candidate, False  # fresh sibling
+                # Occupied — check if content matches (idempotent re-ingest).
+                try:
+                    existing_mech = self.extract_mechanism_text(cand_path.read_text())
+                except Exception:
+                    existing_mech = ""
+                if existing_mech.strip() == incoming:
+                    return candidate, True  # idempotent: already on disk, identical
+                # Differing content — keep walking.
+        # Pathological fallback: full digest is unique.
+        return f"{base_anchor}-{digest}", False
+
     # ── override points (simple, no-LLM defaults) ──
     def route(self, claim: dict[str, Any]) -> Path:
         title = claim.get("title") or claim.get("text") or "untitled"
