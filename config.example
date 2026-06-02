@@ -30,6 +30,9 @@ export ULTRA_MEMORY_WIKI_DIR="/abs/path/to/consumer/wiki"
 #   wiki_linter         = "module:function"       # OPTIONAL: a consumer linter supplying Stage-1
 #                                                 # findings (resolved with <project>/scripts on
 #                                                 # sys.path); absent → the engine's generic lint
+#   wiki_merge_decider  = "module:function"       # OPTIONAL: (cosine, claim, cand_text) -> bool —
+#                                                 # the grey-zone dedup merge decision (wire a
+#                                                 # calibrated judge); absent → auto-merge only
 #   wiki_graph_extractor = ["py", "extract.py", "{wiki_root}", "--out", "{graph_dir}"]  # OPTIONAL
 #   [maintenance.wiki]  # OPTIONAL: override any WikiSchemaConfig field; absent → reference defaults
 # A consumer whose wiki follows the reference Karpathy conventions needs none of the

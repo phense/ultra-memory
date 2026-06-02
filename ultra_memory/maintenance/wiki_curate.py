@@ -70,14 +70,15 @@ def _make_vec_loader(conn, schema: WikiSchemaConfig):
     return load_vecs
 
 
-def _resolve_linter(config):
-    """Resolve config.wiki_linter ("module:function") to a callable, with the project
-    dir + its scripts/ on sys.path so a consumer's in-tree linter is importable. Empty
-    / unresolvable → None (the engine's generic lint). Fail-open."""
+def _resolve_hook(config, spec: str, what: str):
+    """Resolve a consumer hook ("module:function") to a callable, with the project dir
+    + its scripts/ on sys.path so an in-tree module is importable. Empty / unresolvable
+    → None. Fail-open: a bad hook logs one line and degrades to the engine default,
+    never wedges maintenance."""
     import importlib
     import sys
 
-    spec = (getattr(config, "wiki_linter", "") or "").strip()
+    spec = (spec or "").strip()
     if not spec or ":" not in spec:
         return None
     mod_name, _, fn_name = spec.partition(":")
@@ -88,10 +89,21 @@ def _resolve_linter(config):
             sys.path.insert(0, p)
     try:
         return getattr(importlib.import_module(mod_name), fn_name)
-    except Exception as exc:  # noqa: BLE001 — a bad hook must never wedge maintenance
-        print(f"[wiki_curate] could not resolve wiki_linter {spec!r}: {exc!r} — "
-              f"using the generic lint", file=__import__("sys").stderr)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[wiki_curate] could not resolve {what} {spec!r}: {exc!r} — "
+              f"using the engine default", file=sys.stderr)
         return None
+
+
+def _resolve_linter(config):
+    """The Stage-1 lint hook (config.wiki_linter) → findings producer, else None."""
+    return _resolve_hook(config, getattr(config, "wiki_linter", ""), "wiki_linter")
+
+
+def _resolve_merge_decider(config):
+    """The grey-zone merge hook (config.wiki_merge_decider) → (cosine, claim, cand)->bool,
+    else None (the engine's auto-merge-only default)."""
+    return _resolve_hook(config, getattr(config, "wiki_merge_decider", ""), "wiki_merge_decider")
 
 
 def _collect_index_stems(roots: list[Path], schema: WikiSchemaConfig) -> list[str]:
@@ -139,7 +151,8 @@ def stage2_adjudicate(conn, config, *, worklist_path, schema=None, env=None):
     return adj.adjudicate(
         worklist_path, gateway=config.wiki_gateway, model=config.model, schema=schema,
         env=env, default_topic=default_topic, wiki_dir=roots[-1].name or "wiki",
-        index_stems=_collect_index_stems(roots, schema), fallback_cwd=roots[-1].parent)
+        index_stems=_collect_index_stems(roots, schema), fallback_cwd=roots[-1].parent,
+        merge_decider=_resolve_merge_decider(config))
 
 
 def beat(conn, config, ts, env):

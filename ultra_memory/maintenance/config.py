@@ -80,6 +80,11 @@ class MaintenanceConfig:
     # and <project_dir>/scripts on sys.path) that supplies the Stage-1 lint findings
     # from a richer/proven linter. Empty → the engine's generic lint.
     wiki_linter: str = ""
+    # An optional consumer grey-zone merge decider ("module:function" with the same
+    # resolution) — `(cosine, claim, cand_text) -> bool` deciding whether a grey-zone
+    # dedup pair MERGES. Empty → the engine default (auto-merge only at dedup_upper).
+    # A consumer wires its calibrated judge here to restore grey-band merges.
+    wiki_merge_decider: str = ""
 
     def beat_enabled(self, name: str) -> bool:
         return bool(self.beats.get(name, _DEFAULT_BEATS.get(name, False)))
@@ -150,6 +155,8 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
     graph_extractor = raw.get("wiki_graph_extractor")
     graph_extractor = [str(x) for x in graph_extractor] if isinstance(graph_extractor, list) else []
     wiki_linter = env.get("ULTRA_MEMORY_WIKI_LINTER") or raw.get("wiki_linter") or ""
+    wiki_merge_decider = (env.get("ULTRA_MEMORY_WIKI_MERGE_DECIDER")
+                          or raw.get("wiki_merge_decider") or "")
 
     beats = dict(_DEFAULT_BEATS)
     if isinstance(raw.get("beats"), dict):
@@ -178,4 +185,5 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
         wiki_schema=wiki_schema,
         wiki_graph_extractor=graph_extractor,
         wiki_linter=str(wiki_linter),
+        wiki_merge_decider=str(wiki_merge_decider),
     )

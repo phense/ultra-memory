@@ -178,3 +178,15 @@ def test_wiki_linter_loaded(tmp_path):
 
 def test_wiki_linter_default_empty(tmp_path):
     assert load_config(project_dir=tmp_path, env={}).wiki_linter == ""
+
+
+def test_wiki_merge_decider_loaded(tmp_path):
+    (tmp_path / ".ultra-memory").mkdir()
+    (tmp_path / ".ultra-memory" / "config.toml").write_text(
+        '[maintenance]\nwiki_merge_decider = "judge_adapter:merge_decider"\n')
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.wiki_merge_decider == "judge_adapter:merge_decider"
+
+
+def test_wiki_merge_decider_default_empty(tmp_path):
+    assert load_config(project_dir=tmp_path, env={}).wiki_merge_decider == ""

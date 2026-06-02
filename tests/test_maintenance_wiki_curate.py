@@ -122,6 +122,33 @@ def test_stage1_build_uses_injected_wiki_linter(tmp_path, monkeypatch):
     assert any(i["kind"] == "cross-link" and i["title"] == "inj" for i in w["items"])
 
 
+def test_stage2_threads_injected_merge_decider(tmp_path, monkeypatch):
+    # config.wiki_merge_decider ("module:func") is resolved and passed to adjudicate as
+    # the grey-zone merge decider (restores the calibrated judge over the default
+    # auto-merge-only). Verified by capturing adjudicate's merge_decider kwarg.
+    repo, root = _git_wiki(tmp_path)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "my_judge.py").write_text(
+        "def merge_decider(cosine, claim, cand):\n    return cosine >= 0.5\n")
+    out = tmp_path / "wl.json"
+    from ultra_memory.wiki_maintenance import worklist as wl
+    wl.write_worklist(wl.new_worklist(str(root), generated_at="2026-06-02"), out)
+
+    captured = {}
+    from ultra_memory.wiki_maintenance import adjudicate as adj
+    monkeypatch.setattr(adj, "adjudicate",
+                        lambda *a, **k: captured.update(k) or 0)
+    cfg = MaintenanceConfig(
+        project_dir=tmp_path, db_path=tmp_path / "m.db", export_dir=tmp_path / "e",
+        wiki_roots=[root], topics=["trading"], wiki_gateway=root.parent / "gw.py",
+        wiki_merge_decider="my_judge:merge_decider")
+    import sqlite3
+    wiki_curate.stage2_adjudicate(sqlite3.connect(":memory:"), cfg, worklist_path=out)
+    assert callable(captured.get("merge_decider"))
+    assert captured["merge_decider"](0.6, "a", "b") is True   # the injected judge
+
+
 def test_cli_stage1(tmp_path, monkeypatch):
     repo, root = _git_wiki(tmp_path)
     (root / "trading" / "concepts" / "lonely.md").write_text(
