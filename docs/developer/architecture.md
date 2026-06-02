@@ -36,7 +36,8 @@ not a rollback source for those.
 | `claude_cli.py` | The single OAuth-sanitised LLM chokepoint (engine uses no LLM; this is for future agents). |
 | `retention.py` | Bound `session_events`: roll rows older than `keep_days` into `sessions.summary`, then delete (spec §8 D11). |
 | `hooks/common.py` | Fail-open, no-LLM hook helpers: role-guard, `db_ready` bootstrap probe, payload parse, session-id. |
-| `hooks/checkpoint.py` | Stop hook: replay the raw transcript JSONL → record completed tasks as `task_done` events. Never blocks. |
+| `hooks/checkpoint.py` | Stop hook: replay the raw transcript JSONL → record completed tasks as `task_done` events; also **enqueues the finished session** for the `session_ingest` beat (gated `SESSION_INGEST_ENABLE`, default off). Never blocks. |
+| `maintenance/session_ingest.py` | **(Subsystem 4)** the session-as-ingestion-stream beat: a throttled OAuth pass mines each finished session's transcript digest (tool-output-free, redacted) for durable knowledge → memories + user corrections → `feedback`. Runs FIRST in the pipeline; ships-disabled (`SESSION_INGEST_ENABLE`). |
 | `hooks/rehydrate.py` | SessionStart hook: budgeted pure-SQL gist; shadow mode logs it, live mode injects `additionalContext`. |
 
 ## Session hooks (spec §9, §10) — the capture/replay edge
