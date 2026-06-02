@@ -1364,3 +1364,215 @@ Topic root index. Theme-indexes link here; atomic pages link to their theme-inde
 
     def confidence_label(self, claim: dict[str, Any]) -> str:
         return "Standard"
+
+
+# ── argparse CLI (verb wire contract: the maintenance beats shell out to this) ─
+
+def _cli_read_content(args) -> str:
+    """Read verb content from --from-file (preferred) or --message."""
+    if getattr(args, "from_file", None):
+        return Path(args.from_file).read_text()
+    return getattr(args, "message", None) or ""
+
+
+def cli(gateway_cls=None, argv=None, *, wiki_root: Path | None = None) -> int:
+    """Dispatch a wiki gateway CLI verb.
+
+    ``gateway_cls`` defaults to ``WikiGateway`` (the turnkey base). Subclasses
+    pass their own class so the consumer CLI shim is just::
+
+        if __name__ == "__main__":
+            from ultra_memory.wiki_gateway import cli
+            raise SystemExit(cli(TradingWikiGateway))
+
+    ``wiki_root`` lets tests inject a temp directory without needing a real wiki
+    tree on disk; when None (production path) it falls back to:
+      - the ``--wiki-root`` CLI arg if provided, else
+      - the default resolved by the gateway's ``_topic_root()`` / ``log_line()`` logic.
+    """
+    import argparse
+    import sys
+
+    if gateway_cls is None:
+        gateway_cls = WikiGateway
+
+    # shared_parent carries --wiki-root so each subparser inherits it cleanly
+    # (argparse's parents= mechanism avoids registering the same arg N times).
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument(
+        "--wiki-root",
+        default=None,
+        dest="wiki_root",
+        help="Wiki root directory (overrides auto-resolved default).",
+    )
+
+    parser = argparse.ArgumentParser(
+        prog="wiki_gateway",
+        description="Audited wiki write gateway — agent CLI verbs.",
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    # ── create-page ──────────────────────────────────────────────────────────
+    p_page = sub.add_parser(
+        "create-page",
+        parents=[shared],
+        help="Create a new wiki/concepts|synthesis page from a file.",
+    )
+    p_page.add_argument("--path", required=True, help="Destination path for the new page.")
+    p_page.add_argument("--topic", default="default", help="Topic (e.g. 'trading').")
+    p_page.add_argument("--from-file", required=True, dest="from_file",
+                        help="Path to a file whose contents become the page body.")
+    p_page.add_argument("--source-label", default="wiki_gateway-cli")
+
+    # ── append-validation-log ────────────────────────────────────────────────
+    p_vlog = sub.add_parser(
+        "append-validation-log",
+        parents=[shared],
+        help="Append an entry to a page's ## Empirical Validation Log.",
+    )
+    p_vlog.add_argument("--page", required=True, help="Path to the wiki page.")
+    p_vlog.add_argument("--from-file", required=True, dest="from_file",
+                        help="Path to a file whose contents become the log entry.")
+    p_vlog.add_argument("--topic", default="default")
+    p_vlog.add_argument("--source-label", default="wiki_gateway-cli")
+
+    # ── register-index ───────────────────────────────────────────────────────
+    p_ridx = sub.add_parser(
+        "register-index",
+        parents=[shared],
+        help="Register an atomic slug under its theme's <slug(theme)>-index.md.",
+    )
+    p_ridx.add_argument("--slug", required=True, help="Atomic slug to register, e.g. real-yields-4827.")
+    p_ridx.add_argument("--theme", required=True, help="Theme string, e.g. macro/monetary.")
+    p_ridx.add_argument("--summary", required=True, help="One-line summary for the bullet entry.")
+    p_ridx.add_argument("--topic", default="default")
+    p_ridx.add_argument("--source-label", default="wiki_gateway-cli")
+
+    # ── log ──────────────────────────────────────────────────────────────────
+    p_log = sub.add_parser(
+        "log",
+        parents=[shared],
+        help="Append a human run-summary line to wiki/log.md.",
+    )
+    g = p_log.add_mutually_exclusive_group(required=True)
+    g.add_argument("--message", help="Log message string.")
+    g.add_argument("--from-file", dest="from_file", help="Path to a file whose contents are the log message.")
+    p_log.add_argument("--source-label", default="wiki_gateway-cli")
+
+    args = parser.parse_args(argv)
+
+    # Resolve wiki_root: explicit kwarg > --wiki-root arg > None (gateway default).
+    resolved_root: Path | None = wiki_root
+    if resolved_root is None and getattr(args, "wiki_root", None):
+        resolved_root = Path(args.wiki_root)
+
+    topic = getattr(args, "topic", "default")
+    gw = gateway_cls(wiki_root=resolved_root, topic=topic)
+    # Emit audit rows into wiki_root/../briefings/maintenance-logs or the gateway default.
+
+    # NOTE on wiki_root vs topic root: the gateway verb methods (create_page,
+    # register_in_theme_index, etc.) treat their `wiki_root` parameter as the
+    # TOPIC root (i.e. <wiki_root>/<topic>), not the raw wiki root. Since we
+    # already initialized the gateway with self.wiki_root=resolved_root, the
+    # methods' default (wiki_root=None) correctly calls self._topic_root(topic)
+    # = self.wiki_root/topic. So we pass wiki_root=None to let the gateway
+    # handle the resolution — we only set resolved_root on the instance.
+
+    if args.cmd == "create-page":
+        gw._redactions_this_batch = 0
+        path = Path(args.path)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        try:
+            content = _cli_read_content(args)
+            gw.create_page(path, content, topic=topic)
+            gw._emit_audit(
+                "create-page",
+                getattr(args, "source_label", "wiki_gateway-cli"),
+                gw._redactions_this_batch,
+                {"path": str(path)},
+            )
+            print(f"created page {path}")
+            return 0
+        except Exception as e:
+            print(f"error: create-page failed: {e}", file=sys.stderr)
+            return 1
+
+    if args.cmd == "append-validation-log":
+        gw._redactions_this_batch = 0
+        page = Path(args.page)
+        if not page.is_absolute():
+            page = Path.cwd() / page
+        try:
+            entry = _cli_read_content(args)
+            result = gw.append_validation_log_entry(page, entry, topic=topic)
+            gw._emit_audit(
+                "validation-log",
+                getattr(args, "source_label", "wiki_gateway-cli"),
+                gw._redactions_this_batch,
+                {"page": str(page), "result": result},
+            )
+            if result == "already-logged":
+                print(f"validation-log entry already present in {page} (idempotent no-op)")
+            else:
+                print(f"appended validation-log entry to {page}")
+            return 0
+        except Exception as e:
+            print(f"error: append-validation-log failed: {e}", file=sys.stderr)
+            return 1
+
+    if args.cmd == "register-index":
+        gw._redactions_this_batch = 0
+        try:
+            gw.register_in_theme_index(
+                args.slug,
+                args.summary,
+                args.theme,
+                topic=topic,
+            )
+            gw._emit_audit(
+                "register-index",
+                getattr(args, "source_label", "wiki_gateway-cli"),
+                gw._redactions_this_batch,
+                {"slug": args.slug, "theme": args.theme},
+            )
+            print(f"registered [[{args.slug}]] in theme-index for '{args.theme}'")
+            return 0
+        except Exception as e:
+            print(f"error: register-index failed: {e}", file=sys.stderr)
+            return 1
+
+    if args.cmd == "log":
+        gw._redactions_this_batch = 0
+        try:
+            message = _cli_read_content(args)
+            result = gw.log_line(message)
+            gw._emit_audit(
+                "log",
+                getattr(args, "source_label", "wiki_gateway-cli"),
+                gw._redactions_this_batch,
+            )
+            print(f"appended wiki/log.md line ({result})")
+            return 0
+        except Exception as e:
+            print(f"error: log failed: {e}", file=sys.stderr)
+            return 1
+
+    return 2
+
+
+def main(argv=None) -> int:
+    """Entry point for ``python -m ultra_memory.wiki_gateway``.
+
+    Dispatches to the built-in ``WikiGateway`` CLI. To use a consumer subclass,
+    call ``cli(TradingWikiGateway)`` directly in the consumer's ``__main__``::
+
+        if __name__ == "__main__":
+            from ultra_memory.wiki_gateway import cli
+            raise SystemExit(cli(TradingWikiGateway))
+    """
+    return cli(WikiGateway, argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
