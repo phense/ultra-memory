@@ -55,7 +55,7 @@ class TestResolveGatewayNone:
         assert isinstance(prefix, list)
         assert len(prefix) >= 2
         # Must end up invoking the built-in module, not uv run <file>
-        assert prefix[0] == "python"
+        assert prefix[0] == sys.executable  # robust: the running interpreter, not bare "python" (may be off the cron PATH)
         joined = " ".join(prefix)
         assert "ultra_memory.wiki_gateway" in joined
 
@@ -100,7 +100,7 @@ class TestResolveGatewayModuleClass:
     def test_module_class_prefix_starts_with_python_m(self, tmp_path):
         _resolve_gateway = _import_resolver()
         prefix = _resolve_gateway("somemod:SomeClass", _cfg(tmp_path))
-        assert prefix[0] == "python"
+        assert prefix[0] == sys.executable  # robust: the running interpreter, not bare "python" (may be off the cron PATH)
         assert "-m" in prefix
 
     def test_module_class_prefix_can_be_extended_with_verb(self, tmp_path):

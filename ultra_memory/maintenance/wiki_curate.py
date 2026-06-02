@@ -124,7 +124,7 @@ def _resolve_gateway(spec, config) -> list[str]:
 
     # Unset / empty → built-in turnkey.
     if not spec:
-        return ["python", "-m", "ultra_memory.wiki_gateway"]
+        return [_sys.executable, "-m", "ultra_memory.wiki_gateway"]
 
     # Path-style (back-compat): no ":" at all, or ends in ".py", or it exists as a
     # filesystem path.  Must be checked BEFORE the module:Class split so an absolute
@@ -151,9 +151,9 @@ def _resolve_gateway(spec, config) -> list[str]:
         # Malformed → fall back to built-in, log a warning.
         print(f"[wiki_curate] _resolve_gateway: malformed spec {spec!r}, "
               "falling back to the built-in WikiGateway", file=_sys.stderr)
-        return ["python", "-m", "ultra_memory.wiki_gateway"]
+        return [_sys.executable, "-m", "ultra_memory.wiki_gateway"]
 
-    return ["python", "-m", "ultra_memory.wiki_gateway", "--gateway-class", spec]
+    return [_sys.executable, "-m", "ultra_memory.wiki_gateway", "--gateway-class", spec]
 
 
 def _resolve_linter(config):
