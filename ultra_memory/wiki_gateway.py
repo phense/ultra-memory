@@ -3,7 +3,11 @@ overrides only the project-specific hooks (route/theme_for/render_frontmatter/
 dedup_check/derive_anchor/confidence_label). The base provides correct, simple,
 no-LLM defaults so a pure install is turnkey."""
 from __future__ import annotations
+import contextlib
+import fcntl
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -21,12 +25,105 @@ class WikiGateway:
     EMBED_DIM: int = 384  # BAAI/bge-small-en-v1.5 native dim
     EMBED_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
 
+    # ── write-lock constants ──
+    _WIKI_LOCK_FILENAME: str = ".wiki-write.lock"
+    _WIKI_LOCK_TIMEOUT_S: float = 10.0
+    _WIKI_LOCK_POLL_S: float = 0.02
+
     def __init__(self, *, wiki_root: Path | None = None, topic: str = "default",
                  schema: WikiSchemaConfig | None = None):
         self.wiki_root = Path(wiki_root) if wiki_root else None
         self.topic = topic
         self.schema = schema or WikiSchemaConfig()
         self._embed_model = None  # lazy-loaded per instance
+        # Per-(thread, lock_path) reentrancy state: {(thread_id, lock_path): [fd, depth]}
+        self._wiki_lock_state: dict[tuple[int, str], list] = {}
+
+    # ── reentrant write-lock ────────────────────────────────────────────────────
+
+    @contextlib.contextmanager
+    def _wiki_write_lock(self):
+        """Advisory exclusive lock over this gateway's wiki tree's markdown
+        read-modify-writes.
+
+        Cross-process via ``fcntl.flock`` on ``<wiki_root>/.wiki-write.lock``;
+        reentrant within a single thread via a depth counter.
+
+        Reentrancy: flock is per-open-file-description, so a second
+        flock(LOCK_EX) on a different fd of the same file FROM THE SAME PROCESS
+        would deadlock. The verbs nest (register_in_theme_index →
+        _wire_theme_index_into_topic_index → _wire_topic_master_into_master_over_masters),
+        so the lock is made reentrant per-thread via a depth counter: the OS
+        flock is taken once on the outermost entry of a thread and released on
+        its outermost exit; inner re-entries are no-ops.
+
+        Fails OPEN on: no wiki_root, contention timeout, or any flock error
+        (stderr diagnostic, proceeds unlocked). The gateway is fail-open
+        everywhere — a write is never wedged.
+        """
+        import sys
+
+        # wiki_root=None → skip the lock entirely (fail-open).
+        if self.wiki_root is None:
+            yield
+            return
+
+        lock_path = str(self.wiki_root / self._WIKI_LOCK_FILENAME)
+        key = (threading.get_ident(), lock_path)
+        state = self._wiki_lock_state.get(key)
+        if state is not None:
+            # Reentrant inner acquire on this thread — no-op, just bump depth.
+            state[1] += 1
+            try:
+                yield
+            finally:
+                state[1] -= 1
+                if state[1] <= 0:
+                    self._wiki_lock_state.pop(key, None)
+            return
+
+        fd = None
+        acquired = False
+        try:
+            self.wiki_root.mkdir(parents=True, exist_ok=True)
+            fd = open(lock_path, "a+")
+            deadline = time.monotonic() + self._WIKI_LOCK_TIMEOUT_S
+            while True:
+                try:
+                    fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except (BlockingIOError, OSError):
+                    if time.monotonic() >= deadline:
+                        print(
+                            f"warning: wiki write-lock busy >{self._WIKI_LOCK_TIMEOUT_S}s "
+                            f"({lock_path}); proceeding unlocked (fail-open)",
+                            file=sys.stderr,
+                        )
+                        break
+                    time.sleep(self._WIKI_LOCK_POLL_S)
+        except Exception as e:  # fail-open: never wedge a write on a lock-setup error
+            print(
+                f"warning: wiki write-lock unavailable ({e}); proceeding unlocked",
+                file=sys.stderr,
+            )
+            acquired = False
+
+        self._wiki_lock_state[key] = [fd, 1]
+        try:
+            yield
+        finally:
+            self._wiki_lock_state.pop(key, None)
+            if fd is not None:
+                try:
+                    if acquired:
+                        fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
+                except Exception:
+                    pass
+                try:
+                    fd.close()
+                except Exception:
+                    pass
 
     # ── embedding + cosine machinery ──
 

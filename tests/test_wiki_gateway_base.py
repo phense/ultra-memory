@@ -215,3 +215,44 @@ def test_disambiguate_anchor_idempotent(tmp_path):
     anchor2, is_idem2 = gw._disambiguate_anchor("base-anchor-1234", "some claim text", col_path)
     assert anchor1 == anchor2  # deterministic
     assert is_idem1 is False   # nothing on disk → fresh
+
+
+# ── Task 6: reentrant fcntl write-lock ─────────────────────────────────────
+
+def test_lock_reentrant_no_deadlock(tmp_path):
+    """Re-entering the lock on the same thread is a no-op (depth counter);
+    no self-deadlock on nested calls."""
+    gw = WikiGateway(wiki_root=tmp_path, topic="t")
+    # Outer acquire.
+    with gw._wiki_write_lock():
+        # Inner reentrant acquire (same thread) must not deadlock.
+        with gw._wiki_write_lock():
+            pass  # depth = 2, OS lock held once
+        # Still inside outer — should be fine.
+    # After release, re-acquire must succeed immediately.
+    with gw._wiki_write_lock():
+        pass
+
+
+def test_lock_file_created_under_wiki_root(tmp_path):
+    """The lock file is created under wiki_root."""
+    gw = WikiGateway(wiki_root=tmp_path, topic="t")
+    with gw._wiki_write_lock():
+        assert (tmp_path / ".wiki-write.lock").exists()
+
+
+def test_lock_missing_wiki_root_fails_open(tmp_path):
+    """A missing lock dir fails open — no raise, proceeds unlocked."""
+    missing = tmp_path / "nonexistent_dir"
+    # missing_dir does not exist — the lock should create it or fail open, never raise.
+    gw = WikiGateway(wiki_root=missing, topic="t")
+    # Should not raise:
+    with gw._wiki_write_lock():
+        pass
+
+
+def test_lock_no_wiki_root_fails_open():
+    """wiki_root=None: lock context manager should proceed without error (fail-open)."""
+    gw = WikiGateway(wiki_root=None, topic="t")
+    with gw._wiki_write_lock():
+        pass
