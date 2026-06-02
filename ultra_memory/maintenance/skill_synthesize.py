@@ -29,6 +29,7 @@ from pathlib import Path
 from ultra_memory.claude_cli import run_claude  # noqa: E402  (the OAuth chokepoint)
 
 from ultra_memory.maintenance import skill_fs  # noqa: E402
+from ultra_memory.maintenance.parse_utils import strip_json_fence  # noqa: E402
 from ultra_memory.maintenance.aggressive_wall import (  # noqa: E402
     ForbiddenTargetError,
     MemoryUnit,
@@ -193,15 +194,7 @@ def parse_skill_plan(stdout: str, cluster: dict) -> skill_fs.GeneratedSkill | No
     """Parse the draft → a GeneratedSkill or None. GROUNDED-OR-DROPPED: drops the
     skill if the name != the derived slug, the description is invalid, or any cited
     source id is not in the cluster (a hallucinated citation)."""
-    text = (stdout or "").strip()
-    if text.startswith("```"):
-        nl = text.find("\n")
-        if nl != -1:
-            text = text[nl + 1:]
-        if text.rstrip().endswith("```"):
-            text = text.rstrip()[:-3]
-        text = text.strip()
-    data = json.loads(text)  # JSONDecodeError → ValueError → caller fails closed
+    data = json.loads(strip_json_fence(stdout))  # JSONDecodeError → ValueError → fails closed
     if not isinstance(data, dict) or "skill" not in data:
         raise ValueError("draft JSON missing top-level 'skill'")
     sk = data["skill"]

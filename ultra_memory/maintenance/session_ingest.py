@@ -30,6 +30,7 @@ from pathlib import Path
 
 from ultra_memory import memory_lib
 from ultra_memory.claude_cli import run_claude  # the OAuth chokepoint (injectable runner)
+from ultra_memory.maintenance.parse_utils import strip_json_fence
 
 PENDING_KIND = "session_ingest_pending"
 ENABLE_ENV = "SESSION_INGEST_ENABLE"
@@ -171,15 +172,7 @@ def parse_ingest(stdout: str, *, max_facts: int = DEFAULT_MAX_FACTS) -> dict:
     """Parse the drain JSON → {facts: [{title, body, topic}], correction|None}.
     GROUNDED-OR-DROPPED: factless entries dropped, facts capped, a correction kept
     only with a non-empty do_instead. Malformed JSON → ValueError (caller fails open)."""
-    text = (stdout or "").strip()
-    if text.startswith("```"):
-        nl = text.find("\n")
-        if nl != -1:
-            text = text[nl + 1:]
-        if text.rstrip().endswith("```"):
-            text = text.rstrip()[:-3]
-        text = text.strip()
-    data = json.loads(text)                       # JSONDecodeError ⊂ ValueError
+    data = json.loads(strip_json_fence(stdout))   # JSONDecodeError ⊂ ValueError
     if not isinstance(data, dict):
         raise ValueError("ingest JSON is not an object")
     facts = []

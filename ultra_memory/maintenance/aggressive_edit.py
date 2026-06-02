@@ -63,7 +63,6 @@ CONSUMER's (Trading-side) POLICY.
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -78,8 +77,12 @@ from ultra_memory.maintenance.aggressive_wall import (  # noqa: E402
     assert_mutable,
 )
 
-# The engine — generic, project-agnostic primitives (wiki_lib.py:24 precedent).
-from ultra_memory.claude_cli import run_claude  # noqa: E402  (the OAuth chokepoint)
+# Shared OAuth-call + JSON-extract plumbing (the OAuth chokepoint lives there).
+from ultra_memory.maintenance.aggressive_utils import (  # noqa: E402
+    call_model,
+    default_runner,
+    extract_json,
+)
 
 # --------------------------------------------------------------------------- #
 # §5.1 selection policy — the no-LLM "sharpen it" trigger band.
@@ -288,55 +291,6 @@ def build_reflection_prompt(traces: list[dict]) -> str:
 # 1c. Reflect — ONE batched call through the INJECTED runner, parse, ground-check.
 # --------------------------------------------------------------------------- #
 
-def _default_runner():
-    """The real-run runner — the OAuth claude CLI subprocess. Imported LAZILY so
-    the module imports clean with no CLI present, and so a test that injects its own
-    runner never touches this path. (subprocess is the only consumer; never the
-    anthropic SDK — OAuth-only.)"""
-    import subprocess
-    return subprocess.run
-
-
-def _call_model(prompt: str, *, runner, model: str, env=None) -> str:
-    """Issue the ONE batched OAuth call through the OAuth chokepoint `run_claude`
-    (`ultra_memory.claude_cli.run_claude`) so the child `claude`'s env is sanitized
-    in ONE place: it refuses if a stray metered-API key would outrank the OAuth token,
-    requires the OAuth token, drops the key, and strips the in-session recursion
-    markers. The `runner` seam is preserved (run_claude takes `runner=`); `env`
-    (None → os.environ) lets a test inject a fake OAuth env. Returns stdout text.
-    Raises on a non-zero exit / OAuth violation / runner error (the caller's fail-open
-    turns a raise into an EMPTY plan)."""
-    return run_claude(prompt, model=model, system=_REFLECT_SYSTEM,
-                      runner=runner, timeout=120, env=env)
-
-
-def _extract_json(text: str) -> dict | None:
-    """Pull the first balanced JSON object out of a model reply (tolerant of a
-    leading/trailing prose wrapper). Returns None if no object parses."""
-    if not isinstance(text, str):
-        return None
-    s = text.strip()
-    try:
-        return json.loads(s)
-    except Exception:
-        pass
-    # Tolerate a wrapped object — find the first '{' and its matching '}'.
-    start = s.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    for i in range(start, len(s)):
-        if s[i] == "{":
-            depth += 1
-        elif s[i] == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(s[start:i + 1])
-                except Exception:
-                    return None
-    return None
-
 
 def _is_grounded(edit: dict) -> bool:
     """An edit is GROUNDED iff it cites non-empty trace evidence (spec §5.1). An
@@ -349,7 +303,7 @@ def _parse_plan(text: str) -> dict:
     """Parse the model reply into a plan {edits: [...]}, KEEPING only well-formed,
     GROUNDED edits (an ungrounded or malformed edit is dropped — the eval-reject the
     spec calls for). Fail-open to {"edits": []} on any parse failure."""
-    obj = _extract_json(text)
+    obj = extract_json(text)
     if not isinstance(obj, dict):
         return {"edits": []}
     raw = obj.get("edits", [])
@@ -387,10 +341,10 @@ def reflect(traces: list[dict], *, runner=None, model: str = REFLECT_MODEL,
     maintenance run."""
     if not traces:
         return {"edits": []}
-    runner = runner or _default_runner()
+    runner = runner or default_runner()
     try:
         prompt = build_reflection_prompt(traces)
-        out = _call_model(prompt, runner=runner, model=model, env=env)
+        out = call_model(prompt, system=_REFLECT_SYSTEM, runner=runner, model=model, env=env)
     except Exception:
         return {"edits": []}                  # fail-open
     return _parse_plan(out)

@@ -55,6 +55,7 @@ from pathlib import Path
 from ultra_memory import memory_lib
 from ultra_memory._time import now_utc_zulu
 from ultra_memory.claude_cli import run_claude          # the OAuth chokepoint
+from ultra_memory.maintenance.parse_utils import strip_json_fence
 from ultra_memory.unified_query import unified_recall
 
 
@@ -204,15 +205,7 @@ def _parse_plan(stdout: str) -> list[dict]:
     """Parse the bundled LLM response into a list of decision dicts. Robust to a
     leading ```json fence. Raises ValueError on any deviation so the caller fails
     closed (no-op, candidates left un-resolved)."""
-    text = (stdout or "").strip()
-    if text.startswith("```"):
-        nl = text.find("\n")
-        if nl != -1:
-            text = text[nl + 1:]
-        if text.rstrip().endswith("```"):
-            text = text.rstrip()[:-3]
-        text = text.strip()
-    data = json.loads(text)  # JSONDecodeError is a ValueError subclass
+    data = json.loads(strip_json_fence(stdout))  # JSONDecodeError ⊂ ValueError
     if not isinstance(data, dict) or "decisions" not in data:
         raise ValueError("response JSON missing top-level 'decisions' list")
     decisions = data["decisions"]

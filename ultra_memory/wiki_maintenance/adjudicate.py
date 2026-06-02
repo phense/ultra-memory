@@ -32,6 +32,7 @@ from pathlib import Path
 
 from ultra_memory.wiki_maintenance import worklist
 from ultra_memory.wiki_maintenance.schema_config import WikiSchemaConfig
+from ultra_memory.wiki_maintenance.wiki_util import today_iso
 
 MAX_ITEMS = 60       # bundled-prompt safety cap (lowest priority int = highest priority)
 CHUNK_SIZE = 6       # items per bundled LLM call (OAuth CLI ~23s/item at effort=low)
@@ -204,13 +205,31 @@ def real_apply_fns(*, gateway, runner=subprocess.run, cwd: Path | None = None,
     schema = schema or WikiSchemaConfig()
     fallback = Path(cwd) if cwd is not None else Path.cwd()
     if today is None:
-        import datetime as _dt
-        today = _dt.date.today().isoformat()
+        today = today_iso()
     gateway = str(gateway)
 
     def _resolve(action: dict, rel: str) -> Path:
         p = Path(rel)
         return p if p.is_absolute() else _action_base(action, fallback=fallback) / p
+
+    def _run_gateway_verb(verb_args: list[str], content: str, *, suffix: str,
+                          run_cwd: Path, fail_label: str) -> None:
+        """Write `content` to a temp file, shell ``uv run <gateway> <verb_args…>
+        --from-file <tmp>`` in *run_cwd*, warn on a non-zero exit, always unlink. The
+        ``getattr`` reads tolerate an injected test `runner` that returns a non-
+        ``CompletedProcess`` shape."""
+        with tempfile.NamedTemporaryFile("w", suffix=suffix, delete=False,
+                                         encoding="utf-8") as tf:
+            tf.write(content)
+            tmp = tf.name
+        try:
+            proc = runner(["uv", "run", gateway, *verb_args, "--from-file", tmp],
+                          capture_output=True, text=True, cwd=str(run_cwd))
+            if getattr(proc, "returncode", 0) != 0:
+                print(f"warning: {fail_label}: "
+                      f"{(getattr(proc, 'stderr', '') or '')[:300]}", file=sys.stderr)
+        finally:
+            Path(tmp).unlink(missing_ok=True)
 
     def apply_edit(action: dict) -> None:
         page = _resolve(action, action["page"])
@@ -228,36 +247,15 @@ def real_apply_fns(*, gateway, runner=subprocess.run, cwd: Path | None = None,
 
     def apply_create_page(action: dict) -> None:
         content, path = action["content"], action["path"]
-        run_cwd = _action_base(action, fallback=fallback)
         topic = _topic_from_path(path, wiki_dir=wiki_dir, default_topic=default_topic)
-        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
-            tf.write(content)
-            tmp = tf.name
-        try:
-            proc = runner(
-                ["uv", "run", gateway, "create-page", "--path", path,
-                 "--from-file", tmp, "--topic", topic],
-                capture_output=True, text=True, cwd=str(run_cwd))
-            if getattr(proc, "returncode", 0) != 0:
-                print(f"warning: create-page failed for {path}: "
-                      f"{(getattr(proc, 'stderr', '') or '')[:300]}", file=sys.stderr)
-        finally:
-            Path(tmp).unlink(missing_ok=True)
+        _run_gateway_verb(["create-page", "--path", path, "--topic", topic], content,
+                          suffix=".md", run_cwd=_action_base(action, fallback=fallback),
+                          fail_label=f"create-page failed for {path}")
 
     def apply_log(action: dict) -> None:
-        message = action["message"]
-        run_cwd = _action_base(action, fallback=fallback)
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as tf:
-            tf.write(message)
-            tmp = tf.name
-        try:
-            proc = runner(["uv", "run", gateway, "log", "--from-file", tmp],
-                          capture_output=True, text=True, cwd=str(run_cwd))
-            if getattr(proc, "returncode", 0) != 0:
-                print(f"warning: log write failed: {(getattr(proc, 'stderr', '') or '')[:300]}",
-                      file=sys.stderr)
-        finally:
-            Path(tmp).unlink(missing_ok=True)
+        _run_gateway_verb(["log"], action["message"], suffix=".txt",
+                          run_cwd=_action_base(action, fallback=fallback),
+                          fail_label="log write failed")
 
     def apply_redirect_stub(action: dict) -> None:
         page = _resolve(action, action["page"])

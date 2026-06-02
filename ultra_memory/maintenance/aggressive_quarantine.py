@@ -62,7 +62,6 @@ the CONSUMER's (Trading-side) POLICY.
 """
 from __future__ import annotations
 
-import json
 import math
 import sys
 from pathlib import Path
@@ -81,7 +80,12 @@ from ultra_memory.maintenance.aggressive_wall import (  # noqa: E402
 
 # The engine — generic, project-agnostic primitives (wiki_lib.py:24 precedent).
 from ultra_memory import memory_lib  # noqa: E402
-from ultra_memory.claude_cli import run_claude  # noqa: E402  (the OAuth chokepoint)
+# Shared OAuth-call + JSON-extract plumbing (the OAuth chokepoint lives there).
+from ultra_memory.maintenance.aggressive_utils import (  # noqa: E402
+    call_model,
+    default_runner,
+    extract_json,
+)
 
 # --------------------------------------------------------------------------- #
 # §5.3 detection policy — the cosine BAND for the no-LLM pre-filter.
@@ -251,55 +255,6 @@ def build_adjudication_prompt(conn, near_pairs: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _default_runner():
-    """The real-run runner — the OAuth claude CLI subprocess. Imported LAZILY so the
-    module imports clean with no CLI present, and so a test that injects its own
-    runner never touches this path. (subprocess is the only consumer; never the
-    anthropic SDK — OAuth-only.)"""
-    import subprocess
-    return subprocess.run
-
-
-def _call_model(prompt: str, *, runner, model: str, env=None) -> str:
-    """Issue the ONE batched OAuth call through the OAuth chokepoint `run_claude`
-    (`ultra_memory.claude_cli.run_claude`) so the child `claude`'s env is sanitized
-    in ONE place: it refuses if a stray metered-API key would outrank the OAuth token,
-    requires the OAuth token, drops the key, and strips the in-session recursion
-    markers. The `runner` seam is preserved (run_claude takes `runner=`); `env`
-    (None → os.environ) lets a test inject a fake OAuth env. Returns stdout text.
-    Raises on a non-zero exit / OAuth violation / runner error (the caller's fail-open
-    turns a raise into an EMPTY plan)."""
-    return run_claude(prompt, model=model, system=_ADJUDICATE_SYSTEM,
-                      runner=runner, timeout=120, env=env)
-
-
-def _extract_json(text: str) -> dict | None:
-    """Pull the first balanced JSON object out of a model reply (tolerant of a
-    leading/trailing prose wrapper). Returns None if no object parses."""
-    if not isinstance(text, str):
-        return None
-    s = text.strip()
-    try:
-        return json.loads(s)
-    except Exception:
-        pass
-    start = s.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    for i in range(start, len(s)):
-        if s[i] == "{":
-            depth += 1
-        elif s[i] == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(s[start:i + 1])
-                except Exception:
-                    return None
-    return None
-
-
 def _parse_adjudication(text: str, near_pairs: list[dict]) -> list[dict]:
     """Parse the model reply into labeled pairs, KEEPING only well-formed entries
     with a VALID label whose (id_a, id_b) match a SURFACED near-pair (an
@@ -311,7 +266,7 @@ def _parse_adjudication(text: str, near_pairs: list[dict]) -> list[dict]:
     order (so the apply path always uses the real ids, never a model re-ordering)."""
     surfaced = {frozenset((p["id_a"], p["id_b"])): (p["id_a"], p["id_b"])
                 for p in near_pairs}
-    obj = _extract_json(text)
+    obj = extract_json(text)
     if not isinstance(obj, dict):
         return []
     raw = obj.get("adjudications", [])
@@ -350,10 +305,10 @@ def adjudicate_pairs(conn, near_pairs: list[dict], *, runner=None,
     violation degrades to an EMPTY list — never raises out into the maintenance run."""
     if not near_pairs:
         return []
-    runner = runner or _default_runner()
+    runner = runner or default_runner()
     try:
         prompt = build_adjudication_prompt(conn, near_pairs)
-        out = _call_model(prompt, runner=runner, model=model, env=env)
+        out = call_model(prompt, system=_ADJUDICATE_SYSTEM, runner=runner, model=model, env=env)
     except Exception:
         return []                             # fail-open
     return _parse_adjudication(out, near_pairs)
