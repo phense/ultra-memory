@@ -21,8 +21,11 @@ from dataclasses import dataclass, field
 
 from ultra_memory import memory_lib
 
-# Beat order (mirrors the bash Stage 2b → 2c → 2d sequence).
-BEAT_ORDER = ("consolidate", "aggressive", "synthesize")
+# Beat order (mirrors the bash Stage 2b → 2c → 2d sequence). `learnings` is the
+# Tier-1 no-LLM projection-regen beat — it runs LAST so it projects the lessons the
+# consolidate beat graduated this run and refreshes the blocks of any skill the
+# synthesize beat just created/superseded.
+BEAT_ORDER = ("consolidate", "aggressive", "synthesize", "learnings")
 
 
 def default_registry() -> dict:
@@ -43,6 +46,11 @@ def default_registry() -> dict:
     try:
         from ultra_memory.maintenance import synthesize_run
         registry["synthesize"] = synthesize_run.beat
+    except Exception:
+        pass
+    try:
+        from ultra_memory.maintenance import import_learnings
+        registry["learnings"] = import_learnings.beat
     except Exception:
         pass
     return registry

@@ -79,3 +79,26 @@ def test_fail_open_per_beat(tmp_path):
     assert "aggressive" in res.ran and "synthesize" in res.ran   # others still run
     # a failed beat does NOT stamp its clock → still due next time
     assert mr.is_due(conn, "consolidate", 168, "2026-06-01T02:00:00Z") is True
+
+
+# --------------------------------------------------------------------------- #
+# The learnings (projection-regen) beat — wired last, after synthesize.
+# --------------------------------------------------------------------------- #
+
+def test_beat_order_has_learnings_last():
+    assert mr.BEAT_ORDER[-1] == "learnings"
+    assert mr.BEAT_ORDER[:3] == ("consolidate", "aggressive", "synthesize")
+
+
+def test_default_registry_includes_learnings():
+    assert "learnings" in mr.default_registry()
+
+
+def test_learnings_runs_after_synthesize(tmp_path):
+    conn = _conn(tmp_path)
+    calls = []
+    registry = {b: (lambda c, cfg, ts, env, _b=b: (calls.append(_b), _b)[1])
+                for b in mr.BEAT_ORDER}
+    res = mr.run_pipeline(conn, _cfg(tmp_path), registry=registry, ts=TS)
+    assert calls == ["consolidate", "aggressive", "synthesize", "learnings"]
+    assert res.ran[-1] == "learnings"

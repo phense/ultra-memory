@@ -35,11 +35,15 @@ from pathlib import Path
 from ultra_memory.knowledge_mcp import db_path_from_env
 
 # Default cadences (hours): the heavy LLM beats are conservative; the light beats
-# run effectively every session (throttled by maintain.py's own 20h clock).
-_DEFAULT_CADENCE = {"consolidate": 168, "aggressive": 720, "synthesize": 720}
+# run effectively every session (throttled by maintain.py's own 20h clock). The
+# `learnings` projection-regen beat is no-LLM (Tier-1) and weekly — it rebuilds the
+# per-skill Learnings.md views + refreshes the Model B gen-skill managed blocks.
+_DEFAULT_CADENCE = {"consolidate": 168, "aggressive": 720, "synthesize": 720,
+                    "learnings": 168}
 # The autonomous posture (north-star decision 1): beats default ON, governed by the
 # wall (decision 2). A consumer can still gate any beat off in its config.
-_DEFAULT_BEATS = {"consolidate": True, "aggressive": True, "synthesize": True}
+_DEFAULT_BEATS = {"consolidate": True, "aggressive": True, "synthesize": True,
+                  "learnings": True}
 _DEFAULT_MODEL = "claude-sonnet-4-6"
 
 _WIKI_ROOTS_ENV = "ULTRA_MEMORY_WIKI_ROOTS"
@@ -59,6 +63,10 @@ class MaintenanceConfig:
     model: str = _DEFAULT_MODEL
     beats: dict = field(default_factory=lambda: dict(_DEFAULT_BEATS))
     cadence_hours: dict = field(default_factory=lambda: dict(_DEFAULT_CADENCE))
+    # The self-learning registry: (relative Learnings.md path, skill_tag) pairs the
+    # `learnings` projection-regen beat rebuilds. CONSUMER-declared (project-agnostic
+    # default empty); the gen-* glob supplies generated skills on top of this.
+    self_learning_files: list = field(default_factory=list)
 
     def beat_enabled(self, name: str) -> bool:
         return bool(self.beats.get(name, _DEFAULT_BEATS.get(name, False)))
@@ -82,6 +90,20 @@ def _abs(project_dir: Path, value) -> Path | None:
         return None
     p = Path(str(value)).expanduser()
     return p if p.is_absolute() else (project_dir / p)
+
+
+def _parse_self_learning_files(raw_value) -> list:
+    """Coerce the TOML `self_learning_files` array-of-arrays into a list of
+    (path, tag) tuples. Fail-open per entry: a non-[str, str] pair is dropped (a
+    malformed registry line must never crash the whole config load)."""
+    out: list = []
+    if not isinstance(raw_value, list):
+        return out
+    for entry in raw_value:
+        if (isinstance(entry, (list, tuple)) and len(entry) == 2
+                and all(isinstance(x, str) and x.strip() for x in entry)):
+            out.append((entry[0], entry[1]))
+    return out
 
 
 def load_config(project_dir=None, env=None) -> MaintenanceConfig:
@@ -134,4 +156,5 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
         model=str(model),
         beats=beats,
         cadence_hours=cadence,
+        self_learning_files=_parse_self_learning_files(raw.get("self_learning_files")),
     )

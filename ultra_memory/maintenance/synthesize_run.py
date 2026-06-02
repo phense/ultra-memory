@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+from ultra_memory import memory_export  # noqa: E402
 from ultra_memory import memory_lib  # noqa: E402
 
 from ultra_memory.maintenance import skill_eval as se  # noqa: E402
@@ -96,6 +97,13 @@ def apply_plan(conn, skill, incumbent, cluster, *, repo_root, ts,
         skill_fs.archive(incumbent["slug"], repo_root=repo_root, ts=ts,
                          audit_dir=audit_dir)
 
+    # Model B: SEED the managed auto-learnings block at create from the founding
+    # cluster — the SAME union-blend renderer the weekly refresh uses (source domain
+    # ∪ the gen-slug own-usage feed, de-duped), so the SKILL.md is substantive on day
+    # 1 and never relies on a pre-existing Learnings.md. The frozen description/trigger
+    # is untouched by this; only the body block is seeded.
+    skill.auto_learnings_block = memory_export.render_union_blend_block(
+        conn, hooks=[cluster["domain"], slug], now=ts)
     skill_fs.create(skill, repo_root=repo_root, ts=ts, audit_dir=audit_dir)
 
     memory_lib.save_memory(

@@ -234,6 +234,16 @@ Every public function. The caller owns connections and supplies timestamps.
   **R3 bughunt:** the git-tracked projection is written **atomically** (`<path>.tmp`
   → `os.replace`), mirroring the dump swap — a SIGKILL/crash mid-write can no longer
   leave a torn file for Stage 3 to commit.
+- `render_union_blend_block(conn, *, hooks, now, cap=20, halflife_days=45) -> str`
+  (Model B, projection-coupled skill evolution) — render the top-`cap` active
+  `node_type='learning'` lessons across a **UNION** of `index_hook`s (de-duped),
+  ranked by a recency-decayed outcome weight
+  (`score = outcome_weight * 0.5 ** (age_days / halflife_days)`, ties → most-recent
+  first). Returns the markdown block (no frontmatter, no markers — `skill_fs` owns
+  the `<!-- BEGIN/END auto-learnings -->` markers) for a generated SKILL.md's managed
+  region; an empty feed → the `_No learnings recorded yet._` sentinel. Time-dependent
+  **by design** (a decaying ranked view) so it takes an explicit `now` — deterministic
+  for a fixed `now`, no ambient clock. Zero LLM, no network.
 
 ## `wiki_sync` *(SP-3 Stage 5)*
 

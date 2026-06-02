@@ -279,3 +279,19 @@ def test_checkpoint_dirty_tree_plan_only(tmp_path):
                checkpoint_fn=dirty)
     assert res.applied is None and "checkpoint not ok" in res.reason
     assert not sf.skill_md_path(tmp_path / "repo", "gen-backtest").exists()
+
+
+def test_live_apply_seeds_auto_learnings_block(tmp_path):
+    """Model B: the SKILL.md is written WITH the managed block SEEDED from the
+    founding cluster lessons (so it is substantive on day 1, never relies on a
+    pre-existing Learnings.md). Same union-blend renderer as the weekly refresh."""
+    conn = _conn(tmp_path)
+    _lessons(conn, 3)
+    res = _run(conn, tmp_path, runner=_runner(_payload("gen-backtest", ["b0", "b1", "b2"])))
+    assert res.applied == "gen-backtest"
+    txt = sf.skill_md_path(tmp_path / "repo", "gen-backtest").read_text()
+    assert sf.AUTO_BEGIN in txt and sf.AUTO_END in txt
+    # the founding cluster lesson bodies seed the block region
+    assert "durable lesson" in txt[txt.index(sf.AUTO_BEGIN):]
+    # frozen trigger: the drafted description survives verbatim in the frontmatter
+    assert "Use when tuning the vol calendar." in txt

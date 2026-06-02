@@ -73,3 +73,53 @@ def test_absolute_paths_kept_absolute(tmp_path):
         f'[maintenance]\nprobe_corpus = "{abs_corpus}"\n')
     cfg = load_config(project_dir=tmp_path, env={})
     assert cfg.probe_corpus == abs_corpus
+
+
+# --------------------------------------------------------------------------- #
+# Model B / import_learnings migration — the self_learning_files registry seam
+# + the learnings (projection-regen) beat defaults.
+# --------------------------------------------------------------------------- #
+
+def test_self_learning_files_default_empty(tmp_path):
+    """Project-agnostic: with no config the registry is empty (a fresh install has
+    no skills to project; the gen-* glob still supplies generated skills)."""
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.self_learning_files == []
+
+
+def test_self_learning_files_parsed_from_toml(tmp_path):
+    (tmp_path / ".ultra-memory").mkdir()
+    (tmp_path / ".ultra-memory" / "config.toml").write_text(
+        '[maintenance]\n'
+        'self_learning_files = [\n'
+        '  [".claude/skills/backtest/Learnings.md", "backtest"],\n'
+        '  [".claude/skills/risk-manager/Learnings.md", "risk-manager"],\n'
+        ']\n'
+    )
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.self_learning_files == [
+        (".claude/skills/backtest/Learnings.md", "backtest"),
+        (".claude/skills/risk-manager/Learnings.md", "risk-manager"),
+    ]
+
+
+def test_self_learning_files_malformed_entries_skipped(tmp_path):
+    """Fail-open: a non-[path, tag] entry is dropped, not a crash."""
+    (tmp_path / ".ultra-memory").mkdir()
+    (tmp_path / ".ultra-memory" / "config.toml").write_text(
+        '[maintenance]\n'
+        'self_learning_files = [\n'
+        '  [".claude/skills/ok/Learnings.md", "ok"],\n'
+        '  ["only-one-element"],\n'
+        '  ["a", "b", "c"],\n'
+        '  "not-a-list",\n'
+        ']\n'
+    )
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.self_learning_files == [(".claude/skills/ok/Learnings.md", "ok")]
+
+
+def test_learnings_beat_default_on_weekly(tmp_path):
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.beat_enabled("learnings") is True
+    assert cfg.cadence_for("learnings") == 168

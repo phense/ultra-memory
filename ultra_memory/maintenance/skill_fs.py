@@ -41,6 +41,16 @@ except Exception:  # pragma: no cover
 GEN_PREFIX = "gen-"
 MAX_NAME_LEN = 64
 MAX_DESCRIPTION_LEN = 1024
+
+# Model B (projection-coupled skill evolution) — the managed body region. The
+# frontmatter trigger is FROZEN (eval-gated once); only the text BETWEEN these two
+# markers is rewritten weekly by the no-LLM projection regen (zero LLM tokens). The
+# markers + heading are owned here so render (at create) and the weekly splice emit a
+# byte-identical region shell.
+AUTO_BEGIN = "<!-- BEGIN auto-learnings -->"
+AUTO_END = "<!-- END auto-learnings -->"
+AUTO_HEADING = ("## Recent learnings (auto-generated — refreshed weekly from the "
+                "memory store; do not edit)")
 # Generated skill names: the gen- prefix + lowercase a-z/0-9 hyphen-separated
 # segments (open standard: lowercase, hyphens, no leading/trailing/double hyphen).
 _NAME_RE = re.compile(r"^gen-[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -61,6 +71,9 @@ class GeneratedSkill:
     paths: list[str] | None = None
     index_hook: str | None = None
     source_lesson_ids: list[str] = field(default_factory=list)
+    # Model B: the seeded managed-block content (the union-blend lessons markdown,
+    # rendered by memory_export.render_union_blend_block). None → render no block.
+    auto_learnings_block: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -114,11 +127,19 @@ def validate_frontmatter(slug: str, description: str, paths=None) -> str | None:
         return "description is empty"
     if len(description) > MAX_DESCRIPTION_LEN:
         return f"description too long ({len(description)}>{MAX_DESCRIPTION_LEN})"
+    # The FROZEN description must never contain the managed-block markers — a marker
+    # in the frontmatter would otherwise let a weekly refresh splice over it. (The
+    # body-scoped splice already protects an existing file; this rejects it at the
+    # source so a generated skill is never created with that hazard.)
+    if AUTO_BEGIN in description or AUTO_END in description:
+        return "description contains a reserved auto-learnings marker"
     if paths is not None:
         if not isinstance(paths, list) or not all(
             isinstance(x, str) and x.strip() for x in paths
         ):
             return "paths must be a list of non-empty strings"
+        if any(AUTO_BEGIN in p or AUTO_END in p for p in paths):
+            return "a path contains a reserved auto-learnings marker"
     return None
 
 
@@ -134,7 +155,87 @@ def render_skill_md(skill: GeneratedSkill, *, created_by: str = "background_revi
     block = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True,
                            default_flow_style=False).rstrip("\n")
     body = skill.body.rstrip("\n") + "\n"
+    if skill.auto_learnings_block is not None:
+        # The procedure shell, then the managed marked region (seeded at create).
+        body = body.rstrip("\n") + "\n\n" + _marked_block(skill.auto_learnings_block) + "\n"
     return f"---\n{block}\n---\n\n{body}"
+
+
+# --------------------------------------------------------------------------- #
+# Model B — the managed auto-learnings region (markers + splice + rewrite).
+# --------------------------------------------------------------------------- #
+
+def _marked_block(block: str) -> str:
+    """The full marked region: BEGIN marker + heading + block body + END marker.
+    Ends exactly at the END marker (no trailing newline) so a re-splice is
+    byte-idempotent. `block` is the lessons markdown (verbatim, already redacted at
+    the store write)."""
+    return f"{AUTO_BEGIN}\n{AUTO_HEADING}\n\n{block.rstrip()}\n{AUTO_END}"
+
+
+def _split_frontmatter(text: str):
+    """Return (frontmatter_head, body). The head is the leading `---\\n…\\n---\\n`
+    block (incl. its closing delimiter); the body is everything after. A document
+    with no leading frontmatter returns ("", text). Splitting here is what keeps the
+    marker search BODY-SCOPED — a marker string copied into the FROZEN frontmatter
+    description can never be the splice target."""
+    if text.startswith("---\n"):
+        close = text.find("\n---\n", 3)
+        if close != -1:
+            cut = close + len("\n---\n")
+            return text[:cut], text[cut:]
+    return "", text
+
+
+def splice_auto_block(text: str, block: str) -> str:
+    """Replace ONLY the `<!-- BEGIN/END auto-learnings -->` region of `text`'s BODY
+    with a freshly-marked `block`, leaving the frontmatter and the rest of the body
+    untouched. The search is body-scoped (after the frontmatter) so a marker that
+    appears inside the FROZEN frontmatter is never the target. If the body has no
+    markers (a SKILL.md predating Model B, or a hand-stripped one), the marked block
+    is APPENDED (self-heal). Pure string op — idempotent for an unchanged `block`."""
+    region = _marked_block(block)
+    head, body = _split_frontmatter(text)
+    if AUTO_BEGIN in body and AUTO_END in body:
+        start = body.index(AUTO_BEGIN)
+        end = body.index(AUTO_END) + len(AUTO_END)
+        return head + body[:start] + region + body[end:]
+    return text.rstrip("\n") + "\n\n" + region + "\n"
+
+
+def rewrite_auto_block(repo_root, slug: str, block: str, *, ts: str,
+                       audit_dir=None) -> Path:
+    """The on-disk gateway for the weekly block refresh. Structurally gated
+    (`is_generated_skill_path` — never a static/human skill), atomic (tmp +
+    os.replace), audited. The DB-side provenance gate (`aggressive_wall.assert_mutable`
+    on a SkillUnit) is the CALLER's responsibility (mirrors `create`); this module is
+    the structural + filesystem invariant. Raises SkillWriteError on a non-generated
+    target or a missing file. Returns the SKILL.md path."""
+    target = skill_md_path(repo_root, slug)
+    if not is_generated_skill_path(target):
+        raise SkillWriteError(f"refusing non-generated target: {target}")
+    if not target.is_file():
+        raise SkillWriteError(f"no SKILL.md to refresh at {target}")
+    text = target.read_text(encoding="utf-8")
+    # Fail-closed on a corrupted body: an orphan marker (BEGIN xor END) or a
+    # duplicated block would make the splice append-or-mis-target. Leave such a file
+    # UNTOUCHED for human repair rather than compound the corruption (the refresh
+    # caller turns this into a per-skill skip).
+    _head, _body = _split_frontmatter(text)
+    n_begin, n_end = _body.count(AUTO_BEGIN), _body.count(AUTO_END)
+    if n_begin != n_end or n_begin > 1:
+        raise SkillWriteError(
+            f"malformed auto-learnings markers in {target} "
+            f"(BEGIN={n_begin}, END={n_end}) — refusing to refresh")
+    new_text = splice_auto_block(text, block)
+    if new_text == text:
+        return target                       # unchanged → idempotent no-op
+    tmp = target.with_suffix(".md.tmp")
+    tmp.write_text(new_text, encoding="utf-8")
+    os.replace(tmp, target)                 # atomic rename (not a delete)
+    _emit_audit(audit_dir, ts, {"verb": "refresh-block", "slug": slug,
+                                "path": str(target)})
+    return target
 
 
 # --------------------------------------------------------------------------- #

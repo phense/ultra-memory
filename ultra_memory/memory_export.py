@@ -4,6 +4,7 @@ Writes memory.dump.sql + a VACUUM INTO snapshot + regenerated markdown views.
 Skip-if-unchanged on a content hash that EXCLUDES access telemetry, so
 reinforcement churn never drives a commit. Never git-adds the live .db.
 """
+import datetime
 import hashlib
 import os
 from pathlib import Path
@@ -209,3 +210,89 @@ def export_learnings_projection(conn, path, *, skill_tag, title=None):
     tmp.write_text(content)
     os.replace(tmp, out)
     return len(rows)
+
+
+# ---------------------------------------------------------------------------
+# Model B (projection-coupled skill evolution, spec 2026-06-02) — the UNION-BLEND
+# managed block. Distinct from export_learnings_projection above (which projects ALL
+# active rows of ONE index_hook, chronologically, into a standalone Learnings.md):
+# this renders the top-N learning lessons across a UNION of index_hooks, ranked by a
+# recency-decayed outcome weight, for the <!-- BEGIN/END auto-learnings --> region of
+# a generated SKILL.md. Locked params: feed = UNION of (source_domain, gen-<slug>)
+# de-duped; node_type='learning'; cap = 20; ranking = blend
+# score = outcome_weight * 0.5 ** (age_days / HALFLIFE_DAYS).
+#
+# Time-dependent BY DESIGN (a ranked view that decays) — so it takes an explicit
+# `now` (never an ambient clock): deterministic for a fixed `now`, testable, and the
+# beat threads the run timestamp. Zero LLM, no network — a pure store projection.
+# ---------------------------------------------------------------------------
+
+BLEND_HALFLIFE_DAYS = 45        # spec: recency decay half-life (default; tunable)
+BLEND_CAP = 20                  # spec: max lessons in the managed block
+_EMPTY_BLOCK = "_No learnings recorded yet._\n"
+
+
+def _parse_dt(value):
+    """Parse an ISO timestamp (with or without a 'Z'/offset, or date-only) to a
+    naive datetime (all treated as UTC for the diff). Fail-open: an unparseable /
+    empty value → None (the caller degrades to age 0 = no decay)."""
+    if not value:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(str(value).strip())
+    except (ValueError, TypeError):
+        return None
+    return dt.replace(tzinfo=None)
+
+
+def _age_days(created_at, now):
+    c = _parse_dt(created_at)
+    n = _parse_dt(now)
+    if c is None or n is None:
+        return 0.0
+    # A future created_at (clock skew) clamps to 0 so decay never exceeds 1.0.
+    return max(0.0, (n - c).total_seconds() / 86400.0)
+
+
+def _recency_decay(age_days, halflife_days):
+    if halflife_days <= 0:
+        return 1.0
+    return 0.5 ** (age_days / halflife_days)
+
+
+def render_union_blend_block(conn, *, hooks, now, cap=BLEND_CAP,
+                             halflife_days=BLEND_HALFLIFE_DAYS):
+    """Render the union-blend managed block (markdown, NO frontmatter, NO markers —
+    skill_fs owns the markers). `hooks` is the union of index_hooks to draw from
+    (e.g. [source_domain, 'gen-<slug>']); de-duped, falsy entries dropped. Selects
+    active `node_type='learning'` rows in those hooks, ranks by
+    outcome_weight * recency_decay(age vs `now`) descending (ties → most-recent
+    first, then id desc for stability), keeps the top `cap`, and renders each as a
+    `### {title}` entry with its body verbatim. An empty feed → the sentinel."""
+    seen = []
+    for h in hooks:
+        if h and h not in seen:
+            seen.append(h)
+    if not seen:
+        return _EMPTY_BLOCK
+    placeholders = ",".join("?" * len(seen))
+    rows = conn.execute(
+        f"SELECT id, title, body, outcome_weight, created_at FROM memories "
+        f"WHERE status='active' AND node_type='learning' "
+        f"AND index_hook IN ({placeholders})",
+        tuple(seen),
+    ).fetchall()
+    by_id = {r["id"]: r for r in rows}        # de-dup defensively across hooks
+    scored = []
+    for r in by_id.values():
+        w = r["outcome_weight"] if r["outcome_weight"] is not None else 1.0
+        decay = _recency_decay(_age_days(r["created_at"], now), halflife_days)
+        scored.append((float(w) * decay, r))
+    # Tie-break by recency (most-recent first) then id desc → deterministic. Stable
+    # base sort (recency/id desc) first, then a stable score-desc sort on top.
+    scored.sort(key=lambda t: ((t[1]["created_at"] or ""), t[1]["id"]), reverse=True)
+    scored.sort(key=lambda t: t[0], reverse=True)
+    top = scored[: max(0, cap)]
+    if not top:
+        return _EMPTY_BLOCK
+    return "\n".join(_learning_entry(t[1]) for t in top)
