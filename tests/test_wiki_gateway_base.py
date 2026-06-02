@@ -328,3 +328,97 @@ def test_emit_audit_redacts_source_label_and_detail(tmp_path):
     assert row["count"] == 3
     # no secret anywhere in the serialized row.
     assert "sk-ant-" not in json.dumps(row)
+
+
+# ── Task 8: 6 verb materializers + master-over-masters wiring (turnkey) ──────
+
+def test_create_page_writes_file_with_redaction(tmp_path):
+    """create_page writes content to <topic>/concepts/<slug>.md and applies redaction.
+    The base (turnkey) gateway accepts topic + path, writes the page, emits an audit row."""
+    gw = WikiGateway(wiki_root=tmp_path, topic="research")
+    audit_file = tmp_path / "audit.jsonl"
+    gw.audit_log_path = audit_file
+
+    dest = tmp_path / "research" / "concepts" / "test-page.md"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    content = "# Test\n\nSome content here.\n"
+    result = gw.create_page(dest, content, topic="research", wiki_root=tmp_path / "research")
+    assert result == "written"
+    assert dest.exists()
+    assert "Some content here." in dest.read_text()
+
+
+def test_create_page_refuses_to_clobber(tmp_path):
+    """create_page raises ValueError if the target already exists."""
+    gw = WikiGateway(wiki_root=tmp_path, topic="research")
+    dest = tmp_path / "research" / "concepts" / "existing.md"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text("already here")
+    import pytest
+    with pytest.raises(ValueError, match="clobber"):
+        gw.create_page(dest, "new content", topic="research", wiki_root=tmp_path / "research")
+
+
+def test_append_validation_log_entry_idempotent(tmp_path):
+    """append_validation_log_entry is idempotent: re-appending the same entry = no-op."""
+    gw = WikiGateway(wiki_root=tmp_path, topic="research")
+
+    # Create a simple wiki page with an ## Empirical Validation Log section
+    concepts = tmp_path / "research" / "concepts"
+    concepts.mkdir(parents=True)
+    page = concepts / "my-strategy.md"
+    page.write_text(
+        "---\ntype: mechanism\ntitle: My Strategy\n---\n\n# My Strategy\n\n"
+        "## Empirical Validation Log\n\n"
+    )
+
+    entry = "- 2026-06-01 | win | Good outcome\n"
+    root = tmp_path / "research"
+    result1 = gw.append_validation_log_entry(page, entry, topic="research", wiki_root=root)
+    assert result1 == "added"
+    text_after_first = page.read_text()
+    assert "Good outcome" in text_after_first
+
+    # Second append of same entry is idempotent
+    result2 = gw.append_validation_log_entry(page, entry, topic="research", wiki_root=root)
+    assert result2 == "already-logged"
+    # File unchanged
+    assert page.read_text() == text_after_first
+
+
+def test_log_line_appends_to_log_md(tmp_path):
+    """log_line appends a redacted line to log.md; returns 'no-log' when missing."""
+    gw = WikiGateway(wiki_root=tmp_path, topic="research")
+
+    # With no log.md → "no-log"
+    result = gw.log_line("test message", wiki_root=tmp_path)
+    assert result == "no-log"
+
+    # Create log.md
+    log = tmp_path / "log.md"
+    log.write_text("# Log\n")
+    result = gw.log_line("test message", wiki_root=tmp_path)
+    assert result == "added"
+    assert "test message" in log.read_text()
+
+
+def test_create_atomic_writes_and_redacts(tmp_path):
+    """create_atomic writes the file (mkdir included) and applies redaction."""
+    gw = WikiGateway(wiki_root=tmp_path, topic="research")
+    dest = tmp_path / "deep" / "dir" / "atom.md"
+    content = "some mechanism text"
+    result = gw.create_atomic(dest, content)
+    assert result == "written"
+    assert dest.exists()
+    assert dest.read_text() == "some mechanism text"
+
+
+def test_require_under_raises_on_escape(tmp_path):
+    """_require_under raises ValueError if the path escapes the allowed roots."""
+    import pytest
+    gw = WikiGateway(wiki_root=tmp_path, topic="research")
+    allowed = tmp_path / "concepts"
+    allowed.mkdir()
+    escape = tmp_path.parent / "outside.md"
+    with pytest.raises(ValueError):
+        gw._require_under(escape, allowed)

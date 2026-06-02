@@ -774,6 +774,577 @@ class WikiGateway:
         with target.open("a") as fh:
             fh.write(json.dumps(row) + "\n")
 
+    # ── write primitives + master-over-masters wiring (verb materializers) ──────
+
+    # Section headers for the standard wiki structure.
+    _VALIDATION_LOG_HEADER: str = "## Empirical Validation Log"
+    _TOPIC_INDEX_THEME_SECTION: str = "## Theme indexes"
+    _MASTER_TOPIC_SECTION: str = "## Topic masters"
+    _AUTO_ADDED_HEADER: str = "### Recently auto-added (uncategorized)"
+    _AUTO_ADDED_HINT: str = (
+        "*Entries below were direct-written by the wiki gateway. "
+        "Maintenance: move each into the proper topical section above and "
+        "recalibrate `[Confidence]` if needed.*"
+    )
+
+    # Templates for auto-created pages.
+    _THEME_INDEX_FRONTMATTER_TMPL: str = """\
+---
+type: theme-index
+title: {title}
+tags: [{theme}]
+created: {today}
+updated: {today}
+---
+
+# {title}
+
+"""
+    _THEME_INDEX_BODY_STUB: str = (
+        "*Auto-created theme index. Add topical sections above and move bullets from "
+        "`### Recently auto-added` as the index matures.*\n"
+    )
+    _TOPIC_INDEX_TMPL: str = """\
+---
+type: master-index
+title: {title}
+tags: [{topic}]
+created: {today}
+updated: {today}
+---
+
+# {title}
+
+Topic root index. Theme-indexes link here; atomic pages link to their theme-index.
+"""
+    _MASTER_OVER_MASTERS_TMPL: str = (
+        "# Wiki Index\n\n"
+        "The master index of this wiki — a **master-over-masters**: it links each topic's "
+        "master index (`wiki/<topic>/index.md`), never theme-indexes or atomics directly. "
+        "Browse top-down: this file -> a topic master -> a theme-index -> the one atomic page.\n\n"
+        "{section}\n\n"
+    )
+
+    @staticmethod
+    def _require_under(path: Path, *roots: Path) -> Path:
+        """Resolve `path` and assert it lives under at least one of `roots` (resolved).
+        Raises ValueError otherwise. The single path-escape guard for agent-supplied paths."""
+        rp = Path(path).resolve()
+        for root in roots:
+            try:
+                rp.relative_to(Path(root).resolve())
+                return rp
+            except ValueError:
+                continue
+        raise ValueError(f"path {path} is not under any of {[str(r) for r in roots]}")
+
+    def _topic_root(self, topic: str | None = None) -> Path:
+        """The content root for `topic`: ``<wiki_root>/<topic>``.
+
+        In the base class, topic is always a subdirectory of wiki_root.
+        Subclasses can override for multi-layer (project/global) routing.
+        """
+        t = topic or self.topic
+        if self.wiki_root is None:
+            return Path(t)
+        return self.wiki_root / t
+
+    @staticmethod
+    def _append_to_section(text: str, header: str, entry: str, *, hint: str | None = None) -> str:
+        """Append `entry` at the end of the `header` section of `text`, creating the
+        section (optionally with a one-line `hint` under the header) if it's missing.
+        """
+        if header in text:
+            header_idx = text.index(header)
+            after = text[header_idx + len(header):]
+            next_section = re.search(r"\n(##? )", after)
+            insertion_offset = (
+                header_idx + len(header) + (next_section.start() if next_section else len(after))
+            )
+            prefix = text[:insertion_offset].rstrip() + "\n"
+            suffix = text[insertion_offset:]
+            return prefix + entry + suffix
+        section = "\n\n" + f"{header}\n\n" + (f"{hint}\n\n" if hint else "") + f"{entry}"
+        return text.rstrip() + section
+
+    def create_atomic(self, path: Path, content: str) -> str:
+        """Write a new atomic mechanism file, redacting secrets at the boundary.
+
+        The ONLY mkdir site in the wiki-content write surface — sibling
+        observability outputs (borderline log, audit log) mkdir separately.
+        Routes content through _redact so a credential leaked into a claim never lands on disk.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self._redact(content))
+        return "written"
+
+    def _wire_topic_master_into_master_over_masters(
+        self, topic: str, *, master_root: Path | None = None
+    ) -> None:
+        """Link the topic master ``[[<topic>/index]]`` into ``<wiki_root>/index.md``.
+
+        Creates the master-over-masters if absent. Appends ``- [[<topic>/index]]``
+        under ``## Topic masters`` (creating the section if missing). Idempotent.
+        """
+        base = master_root if master_root is not None else self.wiki_root
+        if base is None:
+            return
+        master = base / "index.md"
+        self._require_under(master, base)
+
+        link = f"[[{topic}/index]]"
+        entry = f"- {link}\n"
+
+        with self._wiki_write_lock():
+            if not master.exists():
+                master.parent.mkdir(parents=True, exist_ok=True)
+                master.write_text(self._redact(
+                    self._MASTER_OVER_MASTERS_TMPL.format(
+                        section=f"{self._MASTER_TOPIC_SECTION}\n\n{entry}"
+                    )
+                ))
+                return
+
+            text = master.read_text()
+            if link in text:
+                return  # idempotent: already linked
+
+            new_text = self._append_to_section(text, self._MASTER_TOPIC_SECTION, entry)
+            master.write_text(self._redact(new_text))
+
+    def _wire_theme_index_into_topic_index(
+        self, theme: str, topic: str, root: Path
+    ) -> None:
+        """Link the theme-index ``[[<slug(theme)>-index]]`` into ``<root>/index.md``.
+
+        Creates the topic master if absent (then wires it into the
+        master-over-masters). Appends ``- [[<slug(theme)>-index]]`` under
+        ``## Theme indexes``. Idempotent.
+        """
+        topic_index = root / "index.md"
+        self._require_under(topic_index, root)
+
+        with self._wiki_write_lock():
+            if not topic_index.exists():
+                today = date.today().isoformat()
+                title = topic.replace("-", " ").replace("_", " ").title()
+                topic_index.parent.mkdir(parents=True, exist_ok=True)
+                topic_index.write_text(self._redact(
+                    self._TOPIC_INDEX_TMPL.format(title=title, topic=topic, today=today)
+                ))
+            # Wire the topic master into the master-over-masters (idempotent).
+            self._wire_topic_master_into_master_over_masters(topic)
+
+            text = topic_index.read_text()
+            link = f"[[{slugify(theme)}-index]]"
+            if link in text:
+                return  # idempotent
+
+            entry = f"- {link}\n"
+            new_text = self._append_to_section(text, self._TOPIC_INDEX_THEME_SECTION, entry)
+            new_text = re.sub(
+                r"^updated:\s*\S+",
+                f"updated: {date.today().isoformat()}",
+                new_text,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            topic_index.write_text(self._redact(new_text))
+
+    def theme_index_path(
+        self, theme: str, wiki_root: Path | None = None, *, topic: str | None = None
+    ) -> Path:
+        """Return the canonical path for a theme-index file.
+
+        ``<root>/concepts/<slugify(theme)>-index.md``
+        """
+        t = topic or self.topic
+        root = wiki_root if wiki_root is not None else self._topic_root(t)
+        return root / "concepts" / f"{slugify(theme)}-index.md"
+
+    def append_to_theme_index(
+        self,
+        index_path: Path,
+        anchor: str,
+        theme: str,
+        title: str,
+        claim: dict[str, Any],
+        confidence_label: str,
+    ) -> str:
+        """Idempotently append a one-line entry to the theme-index's
+        `### Recently auto-added (uncategorized)` section. Creates the section if missing.
+
+        Returns "added", "already-listed", or "error".
+        """
+        with self._wiki_write_lock():
+            try:
+                text = index_path.read_text()
+            except Exception:
+                return "error"
+
+            wikilink = f"[[{theme}/{anchor}]]"
+            if wikilink in text:
+                return "already-listed"
+
+            claim_text = (claim.get("claim") or "").strip()
+            first_sentence = re.split(r"(?<=[.!?])\s+", claim_text, maxsplit=1)[0]
+            if len(first_sentence) > 200:
+                first_sentence = first_sentence[:197] + "…"
+
+            entry = (
+                f"- **{anchor}** — {title} — {first_sentence} "
+                f"**[{confidence_label}]** → {wikilink}\n"
+            )
+
+            new_text = self._append_to_section(
+                text, self._AUTO_ADDED_HEADER, entry, hint=self._AUTO_ADDED_HINT
+            )
+
+            today_str = date.today().isoformat()
+            new_text = re.sub(
+                r"^updated:\s*\S+",
+                f"updated: {today_str}",
+                new_text,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+            index_path.write_text(self._redact(new_text))
+            return "added"
+
+    def register_in_theme_index(
+        self,
+        atomic_slug: str,
+        summary: str,
+        theme: str,
+        *,
+        topic: str | None = None,
+        wiki_root: Path | None = None,
+    ) -> None:
+        """Register a new atomic under the ``<slugify(theme)>-index.md`` theme-index.
+
+        Creates the index and wires it into the topic master if it doesn't exist.
+        Idempotent on the wikilink.
+        """
+        t = topic or self.topic
+        root = wiki_root if wiki_root is not None else self._topic_root(t)
+        target = self.theme_index_path(theme, root, topic=t)
+        self._require_under(target, root)
+
+        with self._wiki_write_lock():
+            created_index = False
+            if not target.exists():
+                today = date.today().isoformat()
+                title = slugify(theme).replace("-", " ").title()
+                page_body = (
+                    self._THEME_INDEX_FRONTMATTER_TMPL.format(
+                        title=title, theme=slugify(theme), today=today
+                    )
+                    + self._THEME_INDEX_BODY_STUB
+                    + "\n\n"
+                    + self._AUTO_ADDED_HEADER
+                    + "\n\n"
+                    + self._AUTO_ADDED_HINT
+                    + "\n"
+                )
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(self._redact(page_body))
+                created_index = True
+                self._wire_theme_index_into_topic_index(theme, t, root)
+
+            text = target.read_text()
+            wikilink = f"[[{atomic_slug}]]"
+            if wikilink in text:
+                self._emit_audit(
+                    "register-theme-index",
+                    "wiki_gateway/register_in_theme_index",
+                    self._redactions_this_batch,
+                    {"theme": theme, "atomic_slug": atomic_slug, "result": "already-listed"},
+                )
+                return
+
+            entry = f"- {wikilink} — {summary}\n"
+            new_text = self._append_to_section(
+                text, self._AUTO_ADDED_HEADER, entry, hint=self._AUTO_ADDED_HINT
+            )
+
+            today_str = date.today().isoformat()
+            new_text = re.sub(
+                r"^updated:\s*\S+",
+                f"updated: {today_str}",
+                new_text,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+            target.write_text(self._redact(new_text))
+            self._emit_audit(
+                "register-theme-index",
+                "wiki_gateway/register_in_theme_index",
+                self._redactions_this_batch,
+                {
+                    "theme": theme,
+                    "atomic_slug": atomic_slug,
+                    "index_created": created_index,
+                    "result": "added",
+                },
+            )
+
+    def append_validation_log_entry(
+        self,
+        page: Path,
+        entry: str,
+        *,
+        topic: str | None = None,
+        wiki_root: Path | None = None,
+    ) -> str:
+        """Append a (redacted) strategy-tagged entry to the page's
+        `## Empirical Validation Log` section, creating the section if missing and
+        bumping frontmatter `updated:`. Returns "added" or "already-logged".
+        Raises ValueError if `page` is not under `wiki_root` or does not exist.
+        """
+        root = wiki_root if wiki_root is not None else self.wiki_root
+        if root is None:
+            root = Path(".")
+        page = self._require_under(page, root)
+        if not page.exists():
+            raise ValueError(f"validation-log target page does not exist: {page}")
+        with self._wiki_write_lock():
+            text = page.read_text()
+            entry_line = entry if entry.endswith("\n") else entry + "\n"
+            redacted_entry = self._redact(entry_line).strip()
+            if redacted_entry and redacted_entry in text:
+                return "already-logged"
+            new_text = self._append_to_section(
+                text, self._VALIDATION_LOG_HEADER, entry_line
+            )
+            today_str = date.today().isoformat()
+            new_text = re.sub(
+                r"^updated:\s*\S+",
+                f"updated: {today_str}",
+                new_text,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            page.write_text(self._redact(new_text))
+            return "added"
+
+    def create_page(
+        self,
+        path: Path,
+        content: str,
+        *,
+        topic: str | None = None,
+        wiki_root: Path | None = None,
+    ) -> str:
+        """Create a NEW concepts/ or synthesis/ page from agent-authored content.
+        Returns "written". Raises ValueError if `path` is not under
+        `<root>/concepts|synthesis` or already exists (never clobbers).
+        """
+        t = topic or self.topic
+        root = wiki_root if wiki_root is not None else self._topic_root(t)
+        path = self._require_under(path, root / "concepts", root / "synthesis")
+        if path.exists():
+            raise ValueError(f"create-page refuses to clobber existing page: {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self._redact(content))
+        return "written"
+
+    def log_line(self, message: str, *, wiki_root: Path | None = None) -> str:
+        """Append a single (redacted) human-readable line to `<root>/log.md`.
+        Returns "no-log" when log.md is absent; "added" on success.
+        """
+        root = wiki_root if wiki_root is not None else self.wiki_root
+        if root is None:
+            return "no-log"
+        log_path = root / "log.md"
+        if not log_path.exists():
+            return "no-log"
+        today_str = date.today().isoformat()
+        line = f"\n## [{today_str}] {self._redact(message).strip()}\n"
+        with self._wiki_write_lock():
+            with log_path.open("a") as fh:
+                fh.write(line)
+        return "added"
+
+    def resolve_atomic_path(
+        self, routed_page: str, claim: dict[str, Any], *, topic: str | None = None
+    ) -> "tuple[Path, str]":
+        """Return (atomic_path, theme_slug) for a routed page + claim.
+
+        Base implementation: uses `route` hook to derive the canonical path.
+        Subclasses override this method for Trading-specific anchor/theme logic.
+        """
+        t = topic or self.topic
+        routed = self.route(claim)
+        anchor = slugify(claim.get("title") or claim.get("text") or "untitled")
+        theme = self.theme_for(claim)
+        atomic_path = self._topic_root(t) / "concepts" / theme / f"{anchor}.md"
+        return atomic_path, theme
+
+    def append_video_to_sources(
+        self,
+        existing_path: Path,
+        claim: dict[str, Any],
+        source: dict[str, Any],
+        section_anchor: str | None = None,
+    ) -> str:
+        """Public wrapper for appending a video citation to an existing atomic file.
+
+        The base implementation is a no-op stub — the video-citation format is
+        Trading-specific (``channel_name``, ``video_id`` fields). A subclass
+        (TradingWikiGateway) overrides ``_append_video_to_sources_locked`` with
+        the actual RMW logic. Returns "no-sources" by default.
+        """
+        with self._wiki_write_lock():
+            return self._append_video_to_sources_locked(
+                existing_path, claim, source, section_anchor
+            )
+
+    def _append_video_to_sources_locked(
+        self,
+        existing_path: Path,
+        claim: dict[str, Any],
+        source: dict[str, Any],
+        section_anchor: str | None = None,
+    ) -> str:
+        """Inner (locked) body of append_video_to_sources.
+
+        Base returns "no-sources" — overridden in TradingWikiGateway.
+        """
+        return "no-sources"
+
+    def integrate_to_wiki(
+        self,
+        proposals_new: "list[dict[str, Any]]",
+        proposals_merge: "list[dict[str, Any]]",
+        dry_run: bool = False,
+        *,
+        topic: str | None = None,
+        wiki_root: Path | None = None,
+    ) -> "dict[str, int]":
+        """Apply all proposals directly to the wiki.
+
+        For each NEW: write the atomic file (via create_atomic + render_frontmatter hook);
+        append a one-line entry to the theme-index.
+        For each MERGE: call append_video_to_sources (override hook).
+
+        Returns a stats dict with counters.
+        """
+        import sys as _sys
+
+        t = topic or self.topic
+        root = wiki_root if wiki_root is not None else self.wiki_root
+
+        stats: dict[str, Any] = {
+            "new_written": 0,
+            "new_skipped_existing": 0,
+            "merged_added": 0,
+            "merged_already_cited": 0,
+            "merged_no_sources": 0,
+            "index_updated": 0,
+            "index_already_listed": 0,
+            "index_missing": 0,
+            "errors": 0,
+            "anchor_collisions_disambiguated": 0,
+            "orphans": [],
+        }
+
+        for p in proposals_new:
+            atomic_path: Path = p["atomic_path"]
+            anchor: str = p.get("anchor", slugify(p.get("title", "untitled")))
+            if atomic_path.exists():
+                try:
+                    existing_mech = self.extract_mechanism_text(atomic_path.read_text())
+                except Exception:
+                    existing_mech = ""
+                incoming_mech = (p["claim"].get("claim") or "").strip()
+                if existing_mech.strip() == incoming_mech:
+                    stats["new_skipped_existing"] += 1
+                    print(
+                        f"warning: atomic already exists, skipping: {atomic_path}",
+                        file=_sys.stderr,
+                    )
+                    continue
+                anchor, is_idempotent_hit = self._disambiguate_anchor(
+                    anchor, incoming_mech, atomic_path
+                )
+                atomic_path = atomic_path.with_name(f"{anchor}.md")
+                if is_idempotent_hit:
+                    stats["new_skipped_existing"] += 1
+                    continue
+                stats["anchor_collisions_disambiguated"] += 1
+
+            # Use render_frontmatter hook (override point) for frontmatter dict,
+            # then format a simple generic body. Subclasses override render_frontmatter
+            # OR override integrate_to_wiki entirely for richer bodies.
+            fm = self.render_frontmatter(p["claim"])
+            fm_lines = "\n".join(f"{k}: {v}" for k, v in fm.items())
+            content = f"---\n{fm_lines}\n---\n\n{p['claim'].get('claim', '')}\n"
+
+            if dry_run:
+                print(f"[dry-run] would write: {atomic_path}")
+            else:
+                try:
+                    self.create_atomic(atomic_path, content)
+                except Exception as e:
+                    stats["errors"] += 1
+                    print(f"error: failed to write {atomic_path}: {e}", file=_sys.stderr)
+                    continue
+            stats["new_written"] += 1
+
+        for p in proposals_merge:
+            existing_path: Path = p["atomic_path"]
+            if dry_run:
+                stats["merged_added"] += 1
+                continue
+
+            result = self.append_video_to_sources(
+                existing_path, p["claim"], p["source"],
+                section_anchor=p.get("section_anchor"),
+            )
+            if result == "added":
+                stats["merged_added"] += 1
+            elif result == "already-cited":
+                stats["merged_already_cited"] += 1
+            elif result == "no-sources":
+                stats["merged_no_sources"] += 1
+            else:
+                stats["errors"] += 1
+
+        return stats
+
+    def ingest(
+        self,
+        proposals_new: "list[dict[str, Any]]",
+        proposals_merge: "list[dict[str, Any]]",
+        *,
+        dry_run: bool = False,
+        dedup_threshold: float = 0.83,
+        source_label: str = "wiki_gateway",
+        topic: str | None = None,
+        wiki_root: Path | None = None,
+    ) -> "dict[str, int]":
+        """Run cross-video dedup -> integrate -> audit in the correct order.
+
+        Resets the per-batch redaction counter; runs dedup_cross_video before
+        integrate_to_wiki (C4 contract); emits an audit row regardless of dry_run.
+        """
+        self._redactions_this_batch = 0
+        self.dedup_cross_video(proposals_new, proposals_merge, dedup_threshold)
+        stats = self.integrate_to_wiki(
+            proposals_new, proposals_merge, dry_run=dry_run,
+            topic=topic, wiki_root=wiki_root,
+        )
+        self._emit_audit(
+            "ingest", source_label, self._redactions_this_batch,
+            {
+                "new_written": stats.get("new_written", 0),
+                "merged_added": stats.get("merged_added", 0),
+            },
+        )
+        return stats
+
     # ── override points (simple, no-LLM defaults) ──
     def route(self, claim: dict[str, Any]) -> Path:
         title = claim.get("title") or claim.get("text") or "untitled"
