@@ -39,10 +39,11 @@ of content (archive-never-delete).
 """
 from __future__ import annotations
 
-import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from ultra_memory.maintenance import gate_commons
 
 # --------------------------------------------------------------------------- #
 # §4c — per-run caps (conservative defaults; spec §4c / fork B "conservative").
@@ -176,26 +177,14 @@ def enforce_caps(plan, *, conn=None, period=None, period_cap_edits=None,
 # --------------------------------------------------------------------------- #
 
 def _period_key(period: str, cls: str) -> str:
-    return f"{_PERIOD_META_PREFIX}:{period}:{cls}"
+    return gate_commons.period_meta_key(_PERIOD_META_PREFIX, period, cls)
 
 
 def _period_used(conn, *, period: str, cls: str) -> int:
     """Read how many actions of `cls` were already applied in `period`. Missing
-    counter → 0. Fail-closed-to-safety: a read error is treated as "budget already
-    exhausted" so an unreadable counter cannot accidentally unlock more writes."""
-    try:
-        row = conn.execute(
-            "SELECT value FROM meta WHERE key=?", (_period_key(period, cls),)
-        ).fetchone()
-    except Exception:
-        # Cannot read the budget → assume exhausted (refuse rather than over-write).
-        return 10 ** 9
-    if row is None:
-        return 0
-    try:
-        return int(row[0])
-    except (TypeError, ValueError):
-        return 0
+    counter → 0; a read error → a huge sentinel (fail-CLOSED-to-safety). Thin wrapper
+    over the shared gate_commons primitive (the one audited fail-closed read)."""
+    return gate_commons.period_used(conn, prefix=_PERIOD_META_PREFIX, period=period, cls=cls)
 
 
 def period_remaining(conn, *, period: str, cls: str, period_cap: int) -> int:
@@ -220,13 +209,8 @@ def commit_period_usage(conn, *, period: str, applied: dict, ts: str) -> None:
     the `meta` KV is intentionally lightweight and not itself audited.)"""
     for cls in _CLASS_CAPS:
         n = len(applied.get(cls, []) or [])
-        if n == 0:
-            continue
-        key = _period_key(period, cls)
-        used = _period_used(conn, period=period, cls=cls)
-        conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            (key, str(used + n)))
+        gate_commons.add_period_usage(
+            conn, prefix=_PERIOD_META_PREFIX, period=period, cls=cls, n=n)
     conn.commit()
 
 
@@ -337,14 +321,12 @@ _DRYRUN_ENV = "SP7_AGGRESSIVE_DRYRUN"
 
 def is_disabled(env=None) -> bool:
     """True iff SP7_AGGRESSIVE_DISABLE is present (set to anything, incl. '')."""
-    env = os.environ if env is None else env
-    return env.get(_DISABLE_ENV) is not None
+    return gate_commons.is_env_present(_DISABLE_ENV, env)
 
 
 def is_dry_run(env=None) -> bool:
     """True iff SP7_AGGRESSIVE_DRYRUN is present (set to anything, incl. '')."""
-    env = os.environ if env is None else env
-    return env.get(_DRYRUN_ENV) is not None
+    return gate_commons.is_env_present(_DRYRUN_ENV, env)
 
 
 @dataclass

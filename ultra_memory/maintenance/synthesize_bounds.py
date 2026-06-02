@@ -13,11 +13,11 @@ fail-CLOSED-to-safety everywhere. NO LLM, NO anthropic SDK.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 
+from ultra_memory.maintenance import gate_commons  # noqa: E402
 from ultra_memory.maintenance.aggressive_bounds import GateDecision  # noqa: E402  (reuse the generic dataclass)
 
 MAX_SKILLS_INDUCED_PER_RUN = 1
@@ -29,12 +29,12 @@ _DRYRUN_ENV = "SP10_SYNTHESIS_DRYRUN"
 _PERIOD_META_PREFIX = "sp10_synthesis_period"
 
 
-def is_disabled() -> bool:
-    return os.environ.get(_DISABLE_ENV) is not None
+def is_disabled(env=None) -> bool:
+    return gate_commons.is_env_present(_DISABLE_ENV, env)
 
 
-def is_dry_run() -> bool:
-    return os.environ.get(_DRYRUN_ENV) is not None
+def is_dry_run(env=None) -> bool:
+    return gate_commons.is_env_present(_DRYRUN_ENV, env)
 
 
 def run_gate(*, log=lambda _m: None) -> GateDecision:
@@ -67,25 +67,20 @@ def run_gate(*, log=lambda _m: None) -> GateDecision:
 # §4c — the 'skills' cap (halt-on-exceed) + per-period aggregate.
 # --------------------------------------------------------------------------- #
 
+# The single SP-10 budget class — modeled as one 'skills' class so it shares the
+# generic per-period counter (the key stays "<prefix>:<period>:skills", byte-identical).
+_SKILLS_CLS = "skills"
+
+
 def _period_key(period: str) -> str:
-    return f"{_PERIOD_META_PREFIX}:{period}:skills"
+    return gate_commons.period_meta_key(_PERIOD_META_PREFIX, period, _SKILLS_CLS)
 
 
 def _period_used(conn, period: str) -> int:
-    """Skills already induced in `period`. Fail-CLOSED-to-safety: a read error →
-    a huge sentinel (treat the budget as exhausted), so an unreadable counter can
-    never unlock more skill writes."""
-    try:
-        row = conn.execute("SELECT value FROM meta WHERE key=?",
-                           (_period_key(period),)).fetchone()
-    except Exception:
-        return 10 ** 9
-    if row is None:
-        return 0
-    try:
-        return int(row[0])
-    except (TypeError, ValueError):
-        return 0
+    """Skills already induced in `period`. Missing → 0; a read error → a huge sentinel
+    (fail-CLOSED-to-safety). Thin wrapper over the shared gate_commons primitive."""
+    return gate_commons.period_used(
+        conn, prefix=_PERIOD_META_PREFIX, period=period, cls=_SKILLS_CLS)
 
 
 def enforce_skill_cap(plan, *, conn=None, period=None,
@@ -121,7 +116,6 @@ def commit_period_usage(conn, *, period: str, applied_count: int, ts: str = "") 
     """Add the applied count to the per-period 'skills' counter (idempotent-additive)."""
     if applied_count <= 0:
         return
-    used = _period_used(conn, period)
-    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-                 (_period_key(period), str(used + applied_count)))
+    gate_commons.add_period_usage(
+        conn, prefix=_PERIOD_META_PREFIX, period=period, cls=_SKILLS_CLS, n=applied_count)
     conn.commit()

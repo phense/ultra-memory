@@ -343,7 +343,9 @@ def test_run_gate_failopen_on_env_read_error(monkeypatch):
     a crash (fail-open + fail-CLOSED-to-safety: an error means do-nothing)."""
     def _boom(*a, **k):
         raise RuntimeError("env explode")
-    monkeypatch.setattr(ab.os.environ, "get", _boom)
+    # The env read now lives in the shared gate_commons.is_env_present (reached via
+    # ab.gate_commons); patch it there to simulate the read error.
+    monkeypatch.setattr(ab.gate_commons.os.environ, "get", _boom)
     log = []
     decision = ab.run_gate(log=log.append)
     assert decision.mode == "noop"
