@@ -85,20 +85,23 @@ def test_fail_open_per_beat(tmp_path):
 # The learnings (projection-regen) beat — wired last, after synthesize.
 # --------------------------------------------------------------------------- #
 
-def test_beat_order_has_learnings_last():
-    assert mr.BEAT_ORDER[-1] == "learnings"
-    assert mr.BEAT_ORDER[:3] == ("consolidate", "aggressive", "synthesize")
+def test_beat_order_ingest_first_learnings_last():
+    assert mr.BEAT_ORDER[0] == "session_ingest"    # the ingestion source runs first
+    assert mr.BEAT_ORDER[-1] == "learnings"         # the projection regen runs last
+    assert mr.BEAT_ORDER[1:4] == ("consolidate", "aggressive", "synthesize")
 
 
-def test_default_registry_includes_learnings():
-    assert "learnings" in mr.default_registry()
+def test_default_registry_includes_learnings_and_session_ingest():
+    reg = mr.default_registry()
+    assert "learnings" in reg and "session_ingest" in reg
 
 
-def test_learnings_runs_after_synthesize(tmp_path):
+def test_full_pipeline_runs_in_order(tmp_path):
     conn = _conn(tmp_path)
     calls = []
     registry = {b: (lambda c, cfg, ts, env, _b=b: (calls.append(_b), _b)[1])
                 for b in mr.BEAT_ORDER}
     res = mr.run_pipeline(conn, _cfg(tmp_path), registry=registry, ts=TS)
-    assert calls == ["consolidate", "aggressive", "synthesize", "learnings"]
-    assert res.ran[-1] == "learnings"
+    assert calls == ["session_ingest", "consolidate", "aggressive", "synthesize",
+                     "learnings"]
+    assert res.ran[0] == "session_ingest" and res.ran[-1] == "learnings"

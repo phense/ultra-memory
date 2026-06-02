@@ -21,11 +21,12 @@ from dataclasses import dataclass, field
 
 from ultra_memory import memory_lib
 
-# Beat order (mirrors the bash Stage 2b → 2c → 2d sequence). `learnings` is the
-# Tier-1 no-LLM projection-regen beat — it runs LAST so it projects the lessons the
-# consolidate beat graduated this run and refreshes the blocks of any skill the
-# synthesize beat just created/superseded.
-BEAT_ORDER = ("consolidate", "aggressive", "synthesize", "learnings")
+# Beat order. `session_ingest` runs FIRST — it is the ingestion source (mines each
+# finished session's transcript into the store), so its knowledge is present before
+# the downstream beats. `learnings` runs LAST — the Tier-1 no-LLM projection-regen
+# that projects the lessons consolidate graduated + refreshes the blocks of any skill
+# synthesize created/superseded this run.
+BEAT_ORDER = ("session_ingest", "consolidate", "aggressive", "synthesize", "learnings")
 
 
 def default_registry() -> dict:
@@ -33,6 +34,11 @@ def default_registry() -> dict:
     ('unregistered') — so an un-migrated beat is a no-op until it lands. Imported
     lazily so the orchestrator module stays cheap and cycle-free."""
     registry: dict = {}
+    try:
+        from ultra_memory.maintenance import session_ingest
+        registry["session_ingest"] = session_ingest.beat
+    except Exception:  # a beat module that fails to import must not wedge the rest
+        pass
     try:
         from ultra_memory.maintenance import consolidate
         registry["consolidate"] = consolidate.beat

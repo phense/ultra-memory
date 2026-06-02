@@ -12,11 +12,13 @@ Real transcript shapes (verified against live transcripts, not assumed):
 So we recover id→subject from tool_result text and fold status from TaskUpdate.
 """
 import json
+import os
 import re
 from pathlib import Path
 
 from ultra_memory import memory_lib
 from ultra_memory.hooks import common
+from ultra_memory.maintenance import session_ingest
 
 _EDIT_TOOLS = {"Edit", "Write", "NotebookEdit"}
 _CREATE_RE = re.compile(r"^Task #(\d+) created successfully:\s*(.+)$")
@@ -118,6 +120,12 @@ def run(payload, *, db_path, ts):
                     conn, session_id=session_id, kind="task_done",
                     title=subject or tid, ts=ts, detail=None,
                 )
+            # Subsystem 4: enqueue this finished session for the throttled ingestion
+            # pass (mine the transcript for durable knowledge + corrections). Gated by
+            # SESSION_INGEST_ENABLE (default OFF → a no-op), fail-open — never blocks.
+            session_ingest.enqueue_if_enabled(
+                conn, session_id=session_id, transcript_path=str(transcript),
+                ts=ts, env=os.environ)
         finally:
             conn.close()
     except Exception:
