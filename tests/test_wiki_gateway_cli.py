@@ -190,3 +190,142 @@ def test_main_is_callable_and_returns_int(tmp_path):
         main(["--help"])
     # --help exits with code 0.
     assert exc_info.value.code == 0
+
+
+# ── Task 11: turnkey pure-plugin install writes a page end-to-end (subprocess) ─
+
+
+def test_turnkey_create_page_subprocess(tmp_path):
+    """Spec §7 turnkey-integration proof: NO consumer gateway, run the built-in
+    via subprocess.  create-page must land a valid frontmatter'd, redacted page
+    AND write an audit row in briefings/maintenance-logs/wiki-writes-*.jsonl.
+
+    The page content includes a credential-shaped token (sk-ant-xxx) to verify
+    that the redaction chokepoint fires end-to-end through the subprocess path.
+    """
+    import subprocess
+    import sys
+
+    # Set up the temp wiki tree: the destination must live under
+    # <wiki_root>/<topic>/concepts/ for create_page's _require_under guard.
+    topic = "research"
+    concepts_dir = tmp_path / topic / "concepts"
+    concepts_dir.mkdir(parents=True)
+
+    dest = concepts_dir / "liquidity-spiral.md"
+
+    # Content includes a credential-shaped token to prove redaction fires.
+    content_file = tmp_path / "content.md"
+    content_file.write_text(
+        "---\ntype: mechanism\ntitle: Liquidity Spiral\n---\n\n"
+        "**Mechanism**: Forced selling amplifies price drops. "
+        "api_key=sk-ant-abc123 is redacted.\n"
+    )
+
+    python = sys.executable  # the test-runner's Python = plugin venv
+    result = subprocess.run(
+        [
+            python, "-m", "ultra_memory.wiki_gateway",
+            "create-page",
+            "--path", str(dest),
+            "--topic", topic,
+            "--from-file", str(content_file),
+            "--wiki-root", str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"create-page subprocess failed (rc={result.returncode}):\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+    # The page must exist and contain valid YAML frontmatter.
+    assert dest.exists(), "create-page did not write the destination file"
+    page_text = dest.read_text()
+    assert page_text.startswith("---\n"), "page missing YAML frontmatter fence"
+    assert "type:" in page_text, "page frontmatter missing 'type:' key"
+    assert "Liquidity Spiral" in page_text, "page missing expected title text"
+
+    # Redaction: the raw credential token must not appear on disk.
+    assert "sk-ant-abc123" not in page_text, (
+        "redaction failed: raw credential token found in written page"
+    )
+    # The rest of the content should be present (only the secret is stripped).
+    assert "Forced selling" in page_text, "page content unexpectedly mangled"
+
+    # Audit row: briefings/maintenance-logs/wiki-writes-<date>.jsonl must exist
+    # and contain a row with op=create-page for this path.
+    audit_dir = tmp_path.parent / "briefings" / "maintenance-logs"
+    # The gateway writes audit rows to wiki_root/../briefings/maintenance-logs/.
+    # Since wiki_root=tmp_path, the audit dir is tmp_path.parent/briefings/...
+    jsonl_files = list(audit_dir.glob("wiki-writes-*.jsonl")) if audit_dir.exists() else []
+    assert jsonl_files, (
+        f"no wiki-writes-*.jsonl audit file found under {audit_dir}"
+    )
+    audit_text = "".join(f.read_text() for f in jsonl_files)
+    audit_rows = [json.loads(line) for line in audit_text.splitlines() if line.strip()]
+    create_rows = [r for r in audit_rows if r.get("op") == "create-page"]
+    assert create_rows, "no audit row with op='create-page' found"
+    assert any(str(dest) in r.get("path", "") for r in create_rows), (
+        "create-page audit row missing the expected path"
+    )
+
+
+def test_turnkey_append_validation_log_idempotent_subprocess(tmp_path):
+    """Spec §7 turnkey append-validation-log idempotency: run twice via subprocess,
+    the second call must succeed (rc=0) and NOT duplicate the entry.
+    """
+    import subprocess
+    import sys
+
+    topic = "research"
+    concepts_dir = tmp_path / topic / "concepts"
+    concepts_dir.mkdir(parents=True)
+
+    # Seed the page with a validation-log section so the gateway can append to it.
+    page = concepts_dir / "vol-contraction.md"
+    page.write_text(
+        "---\ntype: mechanism\ntitle: Vol Contraction\nupdated: 2026-01-01\n---\n\n"
+        "## Empirical Validation Log\n\n"
+    )
+
+    entry_file = tmp_path / "entry.md"
+    entry_file.write_text("- 2026-06-02 | win | IV crush post-earnings +8%\n")
+
+    python = sys.executable
+
+    def _run_append():
+        return subprocess.run(
+            [
+                python, "-m", "ultra_memory.wiki_gateway",
+                "append-validation-log",
+                "--page", str(page),
+                "--topic", topic,
+                "--from-file", str(entry_file),
+                "--wiki-root", str(tmp_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+    # First call: must return 0 and append the entry.
+    r1 = _run_append()
+    assert r1.returncode == 0, (
+        f"first append-validation-log failed (rc={r1.returncode}):\n"
+        f"stdout: {r1.stdout}\nstderr: {r1.stderr}"
+    )
+    text_after_first = page.read_text()
+    assert "IV crush" in text_after_first, "entry not appended after first call"
+
+    # Second call (idempotent): must also return 0 and NOT duplicate.
+    r2 = _run_append()
+    assert r2.returncode == 0, (
+        f"second append-validation-log failed (rc={r2.returncode}):\n"
+        f"stdout: {r2.stdout}\nstderr: {r2.stderr}"
+    )
+    text_after_second = page.read_text()
+    # Entry must appear exactly once.
+    assert text_after_second.count("IV crush") == 1, (
+        "idempotency violated: entry duplicated on second append"
+    )
