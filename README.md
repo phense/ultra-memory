@@ -166,25 +166,26 @@ Full architecture lives in [`docs/`](docs/) — [`user/`](docs/user/) (overview 
 
 ## Comparison
 
-How ultra-memory stacks up against the most popular Claude/AI-memory projects. **Honest:** we lead on
-architecture today and we say plainly where we don't — the field's real advantage over us is
-**adoption** (we're pre-public) and **self-learning that's *on* today** (ours is built but ships
-opt-in).
+How ultra-memory stacks up against the most popular Claude/AI memory **and knowledge** projects —
+including [STORM](https://github.com/stanford-oval/storm), the ~28k★ "LLM-writes-a-wiki" system from
+Stanford, to test our knowledge-wiki claim against a *real* LLM-wiki. **Honest:** we lead on
+architecture today and say plainly where we don't — the field's real advantage over us is **adoption**
+(we're pre-public), and our self-learning loop, though built and test-covered, **ships opt-in**.
 
 Legend: ✅ shipped & live · ⚠️ partial / opt-in / caveated (see notes) · ❌ absent
 
-| Capability | **ultra-memory** | [claude-mem](https://github.com/thedotmack/claude-mem) (~80k★) | [mem0](https://github.com/mem0ai/mem0) (~56k★) | [Basic Memory](https://github.com/basicmachines-co/basic-memory) (~2.8k★) | [MCP Memory Service](https://github.com/doobidoo/mcp-memory-service) (~1.9k★) |
+| Capability | **ultra-memory** | [claude-mem](https://github.com/thedotmack/claude-mem) (~80k★) | [mem0](https://github.com/mem0ai/mem0) (~56k★) | [Basic Memory](https://github.com/basicmachines-co/basic-memory) (~2.8k★) | [STORM](https://github.com/stanford-oval/storm) (~28k★) |
 |---|:--:|:--:|:--:|:--:|:--:|
-| **Durable expert-knowledge wiki** (separate half-life from session memory) | ✅ ⁷ | ❌ | ❌ | ⚠️ ¹ | ❌ |
+| **Durable expert-knowledge wiki** (separate half-life from session memory) | ✅ ⁷ | ❌ | ❌ | ⚠️ ¹ | ⚠️ ⁸ |
 | **Cross-store unified recall** (memory + wiki, one ranked list) | ✅ | ❌ | ⚠️ ² | ⚠️ ² | ❌ |
-| **Knowledge graph / typed links** | ✅ | ❌ | ✅ | ✅ | ✅ |
-| **Autonomous self-learning** (dedup · consolidate · self-correct · synthesize) | ⚠️ ³ | ⚠️ | ⚠️ | ⚠️ | ✅ |
+| **Knowledge graph / typed links** | ✅ | ❌ | ✅ | ✅ | ⚠️ ⁹ |
+| **Autonomous self-learning** (dedup · consolidate · self-correct · synthesize) | ⚠️ ³ | ⚠️ | ⚠️ | ⚠️ | ❌ |
 | **Audited write + secret redaction** (single gateway) | ✅ | ⚠️ | ❌ | ⚠️ | ❌ |
-| **Role × topic privilege wall** (fail-closed) | ✅ | ❌ | ⚠️ | ❌ | ⚠️ |
-| **Local-first, no paid API key** | ✅ | ✅ | ❌ | ✅ | ✅ |
-| **Git-trackable plaintext storage** | ✅ | ⚠️ ⁴ | ❌ | ✅ | ⚠️ ⁴ |
-| **Claude-Code-native, one-command install** | ⚠️ ⁵ | ✅ | ❌ | ✅ | ⚠️ |
-| **Adoption / community** | ❌ ⁶ | ✅ | ✅ | ⚠️ | ⚠️ |
+| **Role × topic privilege wall** (fail-closed) | ✅ | ❌ | ⚠️ | ❌ | ❌ |
+| **Local-first, no paid API key** | ✅ | ✅ | ❌ | ✅ | ❌ |
+| **Git-trackable plaintext storage** | ✅ | ⚠️ ⁴ | ❌ | ✅ | ⚠️ ¹⁰ |
+| **Claude-Code-native, one-command install** | ⚠️ ⁵ | ✅ | ❌ | ✅ | ❌ |
+| **Adoption / community** | ❌ ⁶ | ✅ | ✅ | ⚠️ | ✅ |
 
 <sub>
 ¹ Basic Memory's Markdown notes are durable, but it's one flat store — it doesn't split fast-moving
@@ -193,10 +194,10 @@ session memory from durable expert knowledge.
 store and a session store into one ranked list the way <code>unified_recall</code> does.
 ³ ultra-memory's four-beat loop (consolidate → attribute → self-correct → synthesize) is fully built
 and test-covered but <strong>ships disabled by default</strong> — you arm it after reviewing dry-run
-digests. MCP Memory Service's autonomous consolidation is on by default (it wins the "running right
-now" claim); our loop is broader but opt-in.
-⁴ claude-mem (Chroma) and MCP Memory Service (sqlite-vec) keep local but <em>binary</em> vector
-stores — not human-readable/diffable like Markdown or a redacted SQL dump.
+digests. (Honesty: some niche memory tools, e.g. <a href="https://github.com/doobidoo/mcp-memory-service">doobidoo/mcp-memory-service</a>,
+run autonomous consolidation live today; ours is broader in scope but opt-in.)
+⁴ claude-mem keeps a local but <em>binary</em> Chroma vector store — not human-readable/diffable like
+Markdown or a redacted SQL dump.
 ⁵ Native zero-config plugin, but <strong>not yet public</strong> — a 2026-06-02 audit lists a few
 release blockers (see <a href="BACKLOG.md">BACKLOG §5.2</a>). Marked ⚠️ until published.
 ⁶ Pre-public, zero stars. This is the field's clearest advantage over us today — claude-mem (~80k★)
@@ -205,6 +206,13 @@ and mem0 (~56k★, funded, hosted dashboard, 14M+ downloads) have distribution w
 curation/maintenance pipeline (5 detectors + grey-zone judge + consolidation); the structured write
 gateway is wired via a consumer config seam (reference implementation included). Genuinely first-class
 and git-canonical, but bring-your-own-wiki rather than a turnkey authoring UI.
+⁸ STORM autonomously <em>writes</em> citation-grounded, Wikipedia-style articles (genuine LLM
+curation) — but each run emits a <strong>standalone report</strong>: no <code>[[wikilinks]]</code>, no
+cross-article knowledge base, no topic-partitioned store that accumulates and is re-queried over time.
+⁹ Only Co-STORM builds a hierarchical "mind map," and it is <strong>per-session and ephemeral</strong>
+— not a persistent typed-edge graph that retrieval traverses.
+¹⁰ STORM emits Markdown/JSON you can commit, but these are generated <strong>report artifacts</strong>
+read/edited elsewhere — not a git-tracked store agents continuously read from and write back to.
 </sub>
 
 **Bottom line:** ultra-memory is the only Claude-memory layer that ships the *full fabric in one box* —
