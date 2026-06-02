@@ -5,13 +5,15 @@ no-LLM defaults so a pure install is turnkey."""
 from __future__ import annotations
 import contextlib
 import fcntl
+import json
 import re
 import threading
 import time
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ultra_memory.redact_secrets import strip_secrets  # noqa: F401 — used in later tasks
+from ultra_memory.redact_secrets import strip_secrets
 from ultra_memory.wiki_maintenance.schema_config import WikiSchemaConfig
 
 
@@ -38,6 +40,17 @@ class WikiGateway:
         self._embed_model = None  # lazy-loaded per instance
         # Per-(thread, lock_path) reentrancy state: {(thread_id, lock_path): [fd, depth]}
         self._wiki_lock_state: dict[tuple[int, str], list] = {}
+        # Per-batch redaction counter. Reset at ingest() entry (the batch boundary);
+        # each content-write primitive increments it via _redact when it actually scrubs.
+        self._redactions_this_batch: int = 0
+        # Audit log path: a FILE path (test override) or a DIRECTORY (default).
+        # _emit_audit writes one wiki-writes-<date>.jsonl per day under a directory.
+        if self.wiki_root is not None:
+            self.audit_log_path: Path = (
+                self.wiki_root.parent / "briefings" / "maintenance-logs"
+            )
+        else:
+            self.audit_log_path = Path("briefings") / "maintenance-logs"
 
     # ── reentrant write-lock ────────────────────────────────────────────────────
 
@@ -700,6 +713,66 @@ class WikiGateway:
                 # Differing content — keep walking.
         # Pathological fallback: full digest is unique.
         return f"{base_anchor}-{digest}", False
+
+    # ── redaction chokepoint + audit row (Task 7 / D7 / §15) ───────────────────
+
+    def _redact(self, text: str) -> str:
+        """Strip credential-shaped substrings before any wiki write (mandatory chokepoint).
+
+        Secret-free prose passes through unchanged (strip_secrets is conservative), so the
+        golden corpus is byte-identical. Counts each write that DID change into the
+        per-batch counter for the audit line. The counter is only meaningful within an
+        ingest()-bounded batch (ingest resets it); a primitive called outside ingest
+        accumulates without reset and emits no audit row.
+        """
+        cleaned = strip_secrets(text)
+        if cleaned != text:
+            self._redactions_this_batch += 1
+        return cleaned
+
+    def _emit_audit(
+        self,
+        op: str,
+        source_label: str,
+        redactions: int,
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        """Append one structured JSON row per gateway write/batch (§15 heartbeat).
+
+        Row = {ts, op, source_label, redactions, **detail}. ``op`` names the operation
+        ("ingest", "validation-log", "create-page", "log"); ``detail`` carries op-specific
+        fields (e.g. {new_written, merged_added} for ingest, {page} for validation-log,
+        {path} for create-page). ``detail`` keys MUST NOT shadow the reserved keys
+        ts/op/source_label/redactions.
+        Honors both a ``.jsonl`` FILE audit_log_path (test override) and a DIRECTORY (default).
+        """
+        target = (
+            self.audit_log_path
+            if str(self.audit_log_path).endswith(".jsonl")
+            else self.audit_log_path / f"wiki-writes-{date.today().isoformat()}.jsonl"
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # FIX 5 (r2-bughunt): source_label (CLI --source-label) and detail (the
+        # agent-supplied --path/--page) are agent-settable, so a credential-shaped
+        # value would otherwise land VERBATIM in wiki-writes-*.jsonl — unlike every
+        # content-write primitive, which scrubs via _redact. Route them through
+        # strip_secrets here too. Note: use strip_secrets directly (NOT _redact) so the
+        # audit-line scrub does not perturb the per-batch redaction COUNTER, which only
+        # tracks content writes.
+        safe_source_label = strip_secrets(source_label)
+        row: dict[str, Any] = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "op": op,
+            "source_label": safe_source_label,
+            "redactions": redactions,
+        }
+        if detail:
+            row.update({
+                k: (strip_secrets(v) if isinstance(v, str) else v)
+                for k, v in detail.items()
+            })
+        with target.open("a") as fh:
+            fh.write(json.dumps(row) + "\n")
 
     # ── override points (simple, no-LLM defaults) ──
     def route(self, claim: dict[str, Any]) -> Path:

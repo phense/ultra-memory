@@ -256,3 +256,75 @@ def test_lock_no_wiki_root_fails_open():
     gw = WikiGateway(wiki_root=None, topic="t")
     with gw._wiki_write_lock():
         pass
+
+
+# ── Task 7: redaction chokepoint + audit row ────────────────────────────────
+
+def test_redact_strips_known_token(tmp_path):
+    """_redact strips a credential-shaped string (sk-ant-...) → [REDACTED]."""
+    gw = WikiGateway(wiki_root=tmp_path, topic="t")
+    raw = "Some text with token=sk-ant-aaaaaaaaaaaaaaaaaaaaaa in it."
+    result = gw._redact(raw)
+    assert "sk-ant-" not in result
+    assert "[REDACTED]" in result
+
+
+def test_redact_increments_counter(tmp_path):
+    """_redact increments _redactions_this_batch when it actually scrubs."""
+    gw = WikiGateway(wiki_root=tmp_path, topic="t")
+    gw._redactions_this_batch = 0
+    raw = "token=sk-ant-aaaaaaaaaaaaaaaaaaaaaa leaks here"
+    gw._redact(raw)
+    assert gw._redactions_this_batch == 1
+
+
+def test_redact_no_change_no_counter_increment(tmp_path):
+    """_redact does NOT increment the counter when text is already clean."""
+    gw = WikiGateway(wiki_root=tmp_path, topic="t")
+    gw._redactions_this_batch = 0
+    gw._redact("Clean text with no secrets.")
+    assert gw._redactions_this_batch == 0
+
+
+def test_emit_audit_writes_jsonl_row(tmp_path):
+    """_emit_audit writes one JSON row to the audit path (file form)."""
+    import json
+    gw = WikiGateway(wiki_root=tmp_path, topic="t")
+    audit_file = tmp_path / "audit.jsonl"
+    gw.audit_log_path = audit_file
+    gw._emit_audit("create-page", "scripts/test.py", 0, {"path": "/wiki/concepts/x.md"})
+    rows = [json.loads(l) for l in audit_file.read_text().splitlines()]
+    assert rows[-1]["op"] == "create-page"
+    assert rows[-1]["source_label"] == "scripts/test.py"
+    assert "path" in rows[-1]
+    assert "ts" in rows[-1]
+
+
+def test_emit_audit_redacts_source_label_and_detail(tmp_path):
+    """FIX 5: _emit_audit must redact agent-settable source_label and detail strings."""
+    import json
+    gw = WikiGateway(wiki_root=tmp_path, topic="t")
+    audit_file = tmp_path / "audit.jsonl"
+    gw.audit_log_path = audit_file
+
+    secret_label = "src token=sk-ant-aaaaaaaaaaaaaaaaaaaaaa here"
+    secret_path = "/wiki/concepts/leak-token=sk-ant-bbbbbbbbbbbbbbbbbbbbbb.md"
+    gw._emit_audit(
+        "create-page",
+        secret_label,
+        0,
+        {"path": secret_path, "page": secret_path, "count": 3},
+    )
+    row = json.loads(audit_file.read_text().splitlines()[-1])
+
+    # source_label scrubbed.
+    assert "sk-ant-" not in row["source_label"]
+    assert "[REDACTED]" in row["source_label"]
+    # string detail values scrubbed.
+    assert "sk-ant-" not in row["path"]
+    assert "[REDACTED]" in row["path"]
+    assert "sk-ant-" not in row["page"]
+    # non-string detail values pass through untouched.
+    assert row["count"] == 3
+    # no secret anywhere in the serialized row.
+    assert "sk-ant-" not in json.dumps(row)
