@@ -58,6 +58,13 @@ class WikiSchemaConfig:
     # Auto-fix patterns.
     autoadded_section_name: str = "Recently auto-added (uncategorized)"
     anchor_suffix_digits: int = 4
+    # Graph-health detector seams.
+    graph_contradiction_predicate: str = "contradicts"
+    graph_source_predicate: str = "sourced_from"
+    graph_orphan_min_inbound: int = 10        # > N inbound and 0 outbound → orphan
+    graph_cluster_min_subjects: int = 5       # >= N subjects share a source → cluster
+    graph_ontology_file: str = "ontology.yaml"
+    synthesis_subdir: str = "synthesis"
     # Worklist taxonomy.
     kinds: tuple = KINDS_DEFAULT
 
