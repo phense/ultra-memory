@@ -29,9 +29,14 @@ def cosine(a, b):
 
 
 def cosine_search(query_vec, items, *, top_k=None):
-    """Rank (id, vector) items by cosine to query_vec. Returns [(id, score)] desc."""
+    """Rank (id, vector) items by cosine to query_vec. Returns [(id, score)] desc.
+
+    Ties break by `id` ascending, so the result is a deterministic TOTAL order:
+    equal-score items can no longer reorder run-to-run on the caller's (arbitrary)
+    input order, which would otherwise flip top_k membership downstream in
+    unified_recall. (ids within one call are homogeneous — all int or all str.)"""
     scored = [(item_id, cosine(query_vec, vec)) for item_id, vec in items]
-    scored.sort(key=lambda t: t[1], reverse=True)
+    scored.sort(key=lambda t: (-t[1], t[0]))
     return scored if top_k is None else scored[:top_k]
 
 
