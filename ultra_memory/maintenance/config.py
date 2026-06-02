@@ -39,13 +39,13 @@ from ultra_memory.knowledge_mcp import db_path_from_env
 # `learnings` projection-regen beat is no-LLM (Tier-1) and weekly — it rebuilds the
 # per-skill Learnings.md views + refreshes the Model B gen-skill managed blocks.
 _DEFAULT_CADENCE = {"session_ingest": 24, "consolidate": 168, "aggressive": 720,
-                    "synthesize": 720, "learnings": 168}
+                    "synthesize": 720, "learnings": 168, "wiki_maintenance": 24}
 # The autonomous posture (north-star decision 1): beats default ON, governed by the
 # wall (decision 2). A consumer can still gate any beat off in its config. The
 # `session_ingest` beat is additionally gated by SESSION_INGEST_ENABLE in its own
 # code (default OFF) — the ships-active posture flip is the consumer's explicit step.
 _DEFAULT_BEATS = {"session_ingest": True, "consolidate": True, "aggressive": True,
-                  "synthesize": True, "learnings": True}
+                  "synthesize": True, "learnings": True, "wiki_maintenance": True}
 _DEFAULT_MODEL = "claude-sonnet-4-6"
 
 _WIKI_ROOTS_ENV = "ULTRA_MEMORY_WIKI_ROOTS"
@@ -69,6 +69,13 @@ class MaintenanceConfig:
     # `learnings` projection-regen beat rebuilds. CONSUMER-declared (project-agnostic
     # default empty); the gen-* glob supplies generated skills on top of this.
     self_learning_files: list = field(default_factory=list)
+    # The wiki-maintenance schema seam: the consumer's `[maintenance.wiki]` overrides,
+    # fed to wiki_maintenance.load_wiki_schema. Empty → the reference wiki schema.
+    wiki_schema: dict = field(default_factory=dict)
+    # The graph extractor command template (consumer-specific tool that builds the
+    # graph.sqlite the graph detector queries). Empty → no graph rebuild (query the
+    # existing graph if present). `{wiki_root}` placeholders are substituted by the beat.
+    wiki_graph_extractor: list = field(default_factory=list)
 
     def beat_enabled(self, name: str) -> bool:
         return bool(self.beats.get(name, _DEFAULT_BEATS.get(name, False)))
@@ -135,6 +142,10 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
     model = env.get("ULTRA_MEMORY_MODEL") or raw.get("model") or _DEFAULT_MODEL
     topics = raw.get("topics") if isinstance(raw.get("topics"), list) else []
 
+    wiki_schema = raw.get("wiki") if isinstance(raw.get("wiki"), dict) else {}
+    graph_extractor = raw.get("wiki_graph_extractor")
+    graph_extractor = [str(x) for x in graph_extractor] if isinstance(graph_extractor, list) else []
+
     beats = dict(_DEFAULT_BEATS)
     if isinstance(raw.get("beats"), dict):
         beats.update({k: bool(v) for k, v in raw["beats"].items()})
@@ -159,4 +170,6 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
         beats=beats,
         cadence_hours=cadence,
         self_learning_files=_parse_self_learning_files(raw.get("self_learning_files")),
+        wiki_schema=wiki_schema,
+        wiki_graph_extractor=graph_extractor,
     )

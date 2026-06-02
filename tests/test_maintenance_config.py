@@ -123,3 +123,46 @@ def test_learnings_beat_default_on_weekly(tmp_path):
     cfg = load_config(project_dir=tmp_path, env={})
     assert cfg.beat_enabled("learnings") is True
     assert cfg.cadence_for("learnings") == 168
+
+
+def test_wiki_maintenance_beat_default_on_daily(tmp_path):
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.beat_enabled("wiki_maintenance") is True
+    assert cfg.cadence_for("wiki_maintenance") == 24
+
+
+def test_wiki_schema_table_loaded(tmp_path):
+    (tmp_path / ".ultra-memory").mkdir()
+    (tmp_path / ".ultra-memory" / "config.toml").write_text(
+        '[maintenance.wiki]\n'
+        'page_soft_cap_lines = 250\n'
+        'atomics_subdir = "atoms"\n'
+        'index_types = ["theme-index", "master-index"]\n'
+    )
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.wiki_schema["page_soft_cap_lines"] == 250
+    assert cfg.wiki_schema["atomics_subdir"] == "atoms"
+    # the loaded dict feeds load_wiki_schema → a real WikiSchemaConfig
+    from ultra_memory.wiki_maintenance.schema_config import load_wiki_schema
+    schema = load_wiki_schema(cfg.wiki_schema)
+    assert schema.page_soft_cap_lines == 250 and schema.atomics_subdir == "atoms"
+
+
+def test_wiki_schema_default_empty(tmp_path):
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.wiki_schema == {}
+
+
+def test_wiki_graph_extractor_loaded(tmp_path):
+    (tmp_path / ".ultra-memory").mkdir()
+    (tmp_path / ".ultra-memory" / "config.toml").write_text(
+        '[maintenance]\n'
+        'wiki_graph_extractor = ["python3", "scripts/extract.py", "{wiki_root}"]\n'
+    )
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.wiki_graph_extractor == ["python3", "scripts/extract.py", "{wiki_root}"]
+
+
+def test_wiki_graph_extractor_default_empty(tmp_path):
+    cfg = load_config(project_dir=tmp_path, env={})
+    assert cfg.wiki_graph_extractor == []
