@@ -1,0 +1,41 @@
+[
+  {"query": "Backtest this moving-average crossover strategy against 10 years of SPY history and report the Sharpe", "expect": "backtest", "should_trigger": true},
+  {"query": "Design a mean-reversion strategy thesis and lay out how to test it historically", "expect": "backtest", "should_trigger": true},
+  {"query": "What's the current price of AAPL right now?", "expect": "backtest", "should_trigger": false},
+
+  {"query": "Commit this finished work, push the branch, and open a pull request", "expect": "commit-push-pr", "should_trigger": true},
+  {"query": "Run the end-of-task git workflow: commit then push then PR", "expect": "commit-push-pr", "should_trigger": true},
+  {"query": "Explain what a git rebase does", "expect": "commit-push-pr", "should_trigger": false},
+
+  {"query": "Draw an Excalidraw diagram of this pipeline architecture", "expect": "excalidraw-diagram", "should_trigger": true},
+  {"query": "Visualize this workflow as a labelled diagram", "expect": "excalidraw-diagram", "should_trigger": true},
+  {"query": "Summarize the architecture in a paragraph of prose", "expect": "excalidraw-diagram", "should_trigger": false},
+
+  {"query": "Write a Pine Script v5 strategy with a stop loss and percent-of-equity sizing", "expect": "pine-script", "should_trigger": true},
+  {"query": "Debug this TradingView Pine v5 indicator that won't compile", "expect": "pine-script", "should_trigger": true},
+  {"query": "Convert this idea to a Python pandas backtest", "expect": "pine-script", "should_trigger": false},
+
+  {"query": "I want to place an order to short 5 SPY puts — size the position and set a stop", "expect": "risk-manager", "should_trigger": true},
+  {"query": "Check whether this trade is safe before I enter it and compute the R-multiple position size", "expect": "risk-manager", "should_trigger": true},
+  {"query": "Explain the history of options markets", "expect": "risk-manager", "should_trigger": false},
+
+  {"query": "Audit this trading bot for exposed API keys and wallet hygiene before I deploy it", "expect": "security-audit", "should_trigger": true},
+  {"query": "Check this execution script for leaked secrets and smart-contract risk", "expect": "security-audit", "should_trigger": true},
+  {"query": "Refactor this function to be more readable", "expect": "security-audit", "should_trigger": false},
+
+  {"query": "Stress-test this strategy with walk-forward and Monte Carlo before promoting it to paper", "expect": "strategy-audit", "should_trigger": true},
+  {"query": "Run an overfitting and parameter-sensitivity analysis on my backtest results", "expect": "strategy-audit", "should_trigger": true},
+  {"query": "What is a Sharpe ratio?", "expect": "strategy-audit", "should_trigger": false},
+
+  {"query": "Log this completed trade with entry, exit, rules followed and lessons", "expect": "trade-journal", "should_trigger": true},
+  {"query": "Do a loss autopsy on my last three losing trades and find the pattern", "expect": "trade-journal", "should_trigger": true},
+  {"query": "Place a new market order for me", "expect": "trade-journal", "should_trigger": false},
+
+  {"query": "Read from the knowledge store and write this matured insight into the wiki through the gateway", "expect": "using-knowledge", "should_trigger": true},
+  {"query": "Query the durable expert-knowledge store before answering this", "expect": "using-knowledge", "should_trigger": true},
+  {"query": "Remember my name for next time", "expect": "using-knowledge", "should_trigger": false},
+
+  {"query": "Look up the trading wiki for what we know about this indicator and cite the atomic pages", "expect": "using-trading-knowledge", "should_trigger": true},
+  {"query": "Graduate this matured trading-skill lesson into wiki/trading via the wiki_lib gateway", "expect": "using-trading-knowledge", "should_trigger": true},
+  {"query": "What's the weather today?", "expect": "using-trading-knowledge", "should_trigger": false}
+]

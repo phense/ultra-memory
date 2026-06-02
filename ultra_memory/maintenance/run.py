@@ -40,7 +40,11 @@ def default_registry() -> dict:
         registry["aggressive"] = aggressive_run.beat
     except Exception:
         pass
-    # synthesize registers here when the SP-10 cluster is migrated.
+    try:
+        from ultra_memory.maintenance import synthesize_run
+        registry["synthesize"] = synthesize_run.beat
+    except Exception:
+        pass
     return registry
 
 

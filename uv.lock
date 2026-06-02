@@ -1193,6 +1193,9 @@ version = "0.0.1"
 source = { editable = "." }
 
 [package.optional-dependencies]
+maintenance = [
+    { name = "pyyaml" },
+]
 mcp = [
     { name = "mcp" },
 ]
@@ -1209,8 +1212,9 @@ dev = [
 requires-dist = [
     { name = "fastembed", marker = "extra == 'retrieval'", specifier = ">=0.3" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2" },
+    { name = "pyyaml", marker = "extra == 'maintenance'", specifier = ">=6" },
 ]
-provides-extras = ["retrieval", "mcp"]
+provides-extras = ["retrieval", "mcp", "maintenance"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]
