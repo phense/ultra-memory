@@ -649,6 +649,8 @@ def set_status(conn, *, id, status, ts, reason):
 # ---------------------------------------------------------------------------
 
 _LINK_KEY_COLS = ("src_kind", "src_id", "predicate", "dst_kind", "dst_id")
+# The edge-key WHERE clause is constant — built once at import, not per call.
+_LINK_KEY_WHERE = " AND ".join(f"{c}=?" for c in _LINK_KEY_COLS)
 
 
 def record_link(conn, *, src_kind, src_id, predicate, dst_kind, dst_id,
@@ -670,9 +672,8 @@ def record_link(conn, *, src_kind, src_id, predicate, dst_kind, dst_id,
 
     def work():
         key_vals = (src_kind, src_id, predicate, dst_kind, dst_id)
-        where = " AND ".join(f"{c}=?" for c in _LINK_KEY_COLS)
         prior = conn.execute(
-            f"SELECT rowid, * FROM links WHERE {where}", key_vals).fetchone()
+            f"SELECT rowid, * FROM links WHERE {_LINK_KEY_WHERE}", key_vals).fetchone()
         if prior is None:
             conn.execute(
                 "INSERT INTO links (src_kind, src_id, src_type, predicate, "
@@ -684,7 +685,7 @@ def record_link(conn, *, src_kind, src_id, predicate, dst_kind, dst_id,
         else:
             conn.execute(
                 f"UPDATE links SET src_type=?, dst_type=?, evidence=?, "
-                f"confidence=?, created_at=? WHERE {where}",
+                f"confidence=?, created_at=? WHERE {_LINK_KEY_WHERE}",
                 (src_type, dst_type, evidence, confidence, ts, *key_vals),
             )
         # Audit against the source unit (the edge "belongs" to its source).

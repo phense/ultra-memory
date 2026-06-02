@@ -517,8 +517,9 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
         if kind == "memory":
             w = mem_weight.get(key, 1.0)
         else:
-            row = kn_by_slug.get(key)
-            ow = row["outcome_weight"] if row is not None else None
+            # `key` is always a by_slug key (every ranked slug is sourced from
+            # by_slug), so the lookup never misses; outcome_weight may be NULL.
+            ow = kn_by_slug[key]["outcome_weight"]
             w = ow if ow is not None else 1.0
         weighted[(kind, key)] = base * w
 

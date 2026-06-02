@@ -288,10 +288,10 @@ def render_union_blend_block(conn, *, hooks, now, cap=BLEND_CAP,
         w = r["outcome_weight"] if r["outcome_weight"] is not None else 1.0
         decay = _recency_decay(_age_days(r["created_at"], now), halflife_days)
         scored.append((float(w) * decay, r))
-    # Tie-break by recency (most-recent first) then id desc → deterministic. Stable
-    # base sort (recency/id desc) first, then a stable score-desc sort on top.
-    scored.sort(key=lambda t: ((t[1]["created_at"] or ""), t[1]["id"]), reverse=True)
-    scored.sort(key=lambda t: t[0], reverse=True)
+    # One compound-key sort: score desc, ties → most-recent first, then id desc.
+    # All three keys descend together, so a single sort is equivalent to the prior
+    # stable two-pass (recency/id desc, then score desc) — and half the work.
+    scored.sort(key=lambda t: (t[0], t[1]["created_at"] or "", t[1]["id"]), reverse=True)
     top = scored[: max(0, cap)]
     if not top:
         return _EMPTY_BLOCK

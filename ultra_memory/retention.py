@@ -17,6 +17,8 @@ _SUMMARY_MAX_LINES = 200
 # that evidence and leaves a dangling link — so such events are EXCLUDED from prune.
 # Module constant so the predicate set stays maintainable alongside attribution.py.
 _ATTRIBUTION_PREDICATES = ("validated_as", "superseded_by", "informed_by")
+# Constant placeholder list for the predicate IN-clause — built once at import.
+_ATTRIBUTION_PRED_PH = ",".join("?" for _ in _ATTRIBUTION_PREDICATES)
 
 
 def _cutoff(ts, keep_days):
@@ -33,12 +35,11 @@ def prune_session_events(conn, *, keep_days, ts):
     # the downstream EWMA fold reads — deleting or rolling-and-dropping it would lose
     # outcome_signal and dangle the link). Applied to BOTH the roll SELECT and the
     # DELETE so a preserved event is neither summarized-away nor deleted.
-    pred_ph = ",".join("?" for _ in _ATTRIBUTION_PREDICATES)
     not_referenced = (
         "NOT EXISTS (SELECT 1 FROM links l "
         "WHERE l.src_kind='session_event' "
         "AND CAST(l.src_id AS INTEGER) = session_events.id "
-        f"AND l.predicate IN ({pred_ph}))"
+        f"AND l.predicate IN ({_ATTRIBUTION_PRED_PH}))"
     )
     # Snapshot + roll-up + delete all run inside ONE BEGIN IMMEDIATE so a row
     # inserted between selecting and deleting can't be deleted-without-archiving.
