@@ -148,11 +148,18 @@ def stage2_adjudicate(conn, config, *, worklist_path, schema=None, env=None):
         return None
     schema = schema or load_wiki_schema(config.wiki_schema)
     default_topic = config.topics[0] if config.topics else "default"
+    # Positively log which grey-zone decider is active so the cron log surfaces a
+    # silent degradation (a fail-open hook resolution that fell back to the default).
+    md = _resolve_merge_decider(config)
+    import sys as _sys
+    print(f"[wiki_curate] stage2 merge_decider: "
+          f"{'calibrated:' + config.wiki_merge_decider if md else 'engine-default (auto-merge-only)'}",
+          file=_sys.stderr)
     return adj.adjudicate(
         worklist_path, gateway=config.wiki_gateway, model=config.model, schema=schema,
         env=env, default_topic=default_topic, wiki_dir=roots[-1].name or "wiki",
         index_stems=_collect_index_stems(roots, schema), fallback_cwd=roots[-1].parent,
-        merge_decider=_resolve_merge_decider(config))
+        merge_decider=md)
 
 
 def beat(conn, config, ts, env):
