@@ -1410,6 +1410,21 @@ def cli(gateway_cls=None, argv=None, *, wiki_root: Path | None = None) -> int:
         prog="wiki_gateway",
         description="Audited wiki write gateway — agent CLI verbs.",
     )
+    # --gateway-class is a top-level flag (before the subcommand) that lets the
+    # maintenance beats invoke a consumer subclass through the built-in CLI.
+    # Form: "module:Class" — e.g. "wiki_lib:TradingWikiGateway".  The module is
+    # imported with <project_dir>/scripts + <project_dir> prepended to sys.path
+    # (the same sys.path setup as _resolve_hook in wiki_curate.py).
+    parser.add_argument(
+        "--gateway-class",
+        default=None,
+        dest="gateway_class",
+        metavar="MODULE:CLASS",
+        help=(
+            "Consumer gateway subclass to bind, e.g. 'wiki_lib:TradingWikiGateway'. "
+            "The module is imported with the scripts/ directory on sys.path."
+        ),
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     # ── create-page ──────────────────────────────────────────────────────────
@@ -1460,6 +1475,30 @@ def cli(gateway_cls=None, argv=None, *, wiki_root: Path | None = None) -> int:
     p_log.add_argument("--source-label", default="wiki_gateway-cli")
 
     args = parser.parse_args(argv)
+
+    # --gateway-class overrides the gateway_cls argument (the beats pass this flag
+    # when they resolved a "module:Class" spec via _resolve_gateway).
+    if getattr(args, "gateway_class", None):
+        spec = args.gateway_class
+        import importlib
+        mod_name, _, cls_name = spec.partition(":")
+        if mod_name and cls_name:
+            # Prepend scripts/ and project dir to sys.path so an in-tree module
+            # is importable (same setup as _resolve_hook in wiki_curate.py).
+            import os
+            project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", str(Path.cwd())))
+            for p in (str(project_dir / "scripts"), str(project_dir)):
+                if p not in sys.path:
+                    sys.path.insert(0, p)
+            try:
+                resolved_cls = getattr(importlib.import_module(mod_name), cls_name)
+                gateway_cls = resolved_cls
+            except Exception as exc:
+                print(
+                    f"warning: --gateway-class could not load {spec!r}: {exc!r}; "
+                    "falling back to WikiGateway",
+                    file=sys.stderr,
+                )
 
     # Resolve wiki_root: explicit kwarg > --wiki-root arg > None (gateway default).
     resolved_root: Path | None = wiki_root

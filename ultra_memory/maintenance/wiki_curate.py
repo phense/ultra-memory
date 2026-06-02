@@ -95,6 +95,65 @@ def _resolve_hook(config, spec: str, what: str):
         return None
 
 
+def _resolve_gateway(spec, config) -> list[str]:
+    """Resolve a wiki gateway spec to an argv prefix list for the beats.
+
+    Three spec forms are supported:
+
+    * ``None`` / empty string → the **built-in** ``WikiGateway`` (turnkey):
+      returns ``["python", "-m", "ultra_memory.wiki_gateway"]``.  The beats
+      extend this prefix with the verb + args:
+      ``["python", "-m", "ultra_memory.wiki_gateway", "create-page", …]``.
+
+    * ``"module:Class"`` → a consumer subclass on the scripts path (the Phase-1C
+      Trading form is ``"wiki_lib:TradingWikiGateway"``):  returns
+      ``["python", "-m", "ultra_memory.wiki_gateway", "--gateway-class", spec]``.
+      The base CLI's ``--gateway-class`` flag imports the class and binds it so
+      the verb runs through the consumer's overrides.
+
+    * A file-system path (no ``":"`` after a slash, or file exists) → **back-compat
+      uv-run** from before Phase-1B:  returns ``["uv", "run", <path>]``.
+
+    Fail-open: a bad spec falls back to the built-in rather than wedging the beat.
+    """
+    import sys as _sys
+
+    spec = (spec or "").strip()
+
+    # Unset / empty → built-in turnkey.
+    if not spec:
+        return ["python", "-m", "ultra_memory.wiki_gateway"]
+
+    # Path-style (back-compat): no ":" at all, or ends in ".py", or it exists as a
+    # filesystem path.  Must be checked BEFORE the module:Class split so an absolute
+    # path like "/some/dir/wiki_lib.py" (which contains a ":") on Windows is still
+    # handled (Python on macOS/Linux paths never contain ":"); on POSIX systems an
+    # absolute path starts with "/" and ":" can only appear after the leading slash in
+    # drive letters (Windows), so a simple heuristic is: no ":" OR the part before ":"
+    # looks like a filesystem path.
+    parts = spec.split(":", 1)
+    is_path = (
+        len(parts) == 1                  # no colon → definitely a path
+        or spec.startswith("/")          # absolute POSIX path
+        or spec.startswith("./")
+        or spec.startswith("../")
+        or spec.endswith(".py")          # explicit script extension
+        or Path(spec).exists()           # actual file on disk
+    )
+    if is_path:
+        return ["uv", "run", spec]
+
+    # module:Class form.
+    mod_name, cls_name = parts[0], parts[1]
+    if not mod_name or not cls_name:
+        # Malformed → fall back to built-in, log a warning.
+        print(f"[wiki_curate] _resolve_gateway: malformed spec {spec!r}, "
+              "falling back to the built-in WikiGateway", file=_sys.stderr)
+        return ["python", "-m", "ultra_memory.wiki_gateway"]
+
+    return ["python", "-m", "ultra_memory.wiki_gateway", "--gateway-class", spec]
+
+
 def _resolve_linter(config):
     """The Stage-1 lint hook (config.wiki_linter) → findings producer, else None."""
     return _resolve_hook(config, getattr(config, "wiki_linter", ""), "wiki_linter")
