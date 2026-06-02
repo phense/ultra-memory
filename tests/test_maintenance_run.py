@@ -87,8 +87,8 @@ def test_fail_open_per_beat(tmp_path):
 
 def test_beat_order_ingest_first_learnings_last():
     assert mr.BEAT_ORDER[0] == "session_ingest"    # the ingestion source runs first
-    assert mr.BEAT_ORDER[-1] == "learnings"         # the projection regen runs last
-    assert mr.BEAT_ORDER[1:4] == ("consolidate", "aggressive", "synthesize")
+    assert mr.BEAT_ORDER[-1] == "wiki_maintenance"  # the wiki-curation beat runs last
+    assert mr.BEAT_ORDER[1:5] == ("consolidate", "aggressive", "synthesize", "learnings")
 
 
 def test_default_registry_includes_learnings_and_session_ingest():
@@ -103,5 +103,5 @@ def test_full_pipeline_runs_in_order(tmp_path):
                 for b in mr.BEAT_ORDER}
     res = mr.run_pipeline(conn, _cfg(tmp_path), registry=registry, ts=TS)
     assert calls == ["session_ingest", "consolidate", "aggressive", "synthesize",
-                     "learnings"]
-    assert res.ran[0] == "session_ingest" and res.ran[-1] == "learnings"
+                     "learnings", "wiki_maintenance"]
+    assert res.ran[0] == "session_ingest" and res.ran[-1] == "wiki_maintenance"

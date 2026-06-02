@@ -133,7 +133,14 @@ def run_stage1(
         nodes = wiki_root / "graph" / "nodes.jsonl"
         db = wiki_root / "graph" / "graph.sqlite"
         if detect_graph.needs_rebuild(wiki_root, nodes, schema=schema):
-            rc = detect_graph.rebuild(wiki_root, extractor_cmd=graph_extractor_cmd)
+            # Substitute per-root placeholders so one extractor template serves every
+            # root (e.g. ["uv","run","extract.py","{wiki_root}","--out","{graph_dir}"]).
+            extractor = None
+            if graph_extractor_cmd:
+                extractor = [str(e).replace("{wiki_root}", str(wiki_root))
+                             .replace("{graph_dir}", str(wiki_root / "graph"))
+                             for e in graph_extractor_cmd]
+            rc = detect_graph.rebuild(wiki_root, extractor_cmd=extractor)
             if rc not in (0, 3):
                 print(f"[run_stage1] graph rebuild exited {rc} — continuing with existing graph",
                       file=sys.stderr)

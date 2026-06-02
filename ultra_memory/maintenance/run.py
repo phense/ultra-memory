@@ -26,7 +26,8 @@ from ultra_memory import memory_lib
 # the downstream beats. `learnings` runs LAST — the Tier-1 no-LLM projection-regen
 # that projects the lessons consolidate graduated + refreshes the blocks of any skill
 # synthesize created/superseded this run.
-BEAT_ORDER = ("session_ingest", "consolidate", "aggressive", "synthesize", "learnings")
+BEAT_ORDER = ("session_ingest", "consolidate", "aggressive", "synthesize", "learnings",
+              "wiki_maintenance")
 
 
 def default_registry() -> dict:
@@ -57,6 +58,11 @@ def default_registry() -> dict:
     try:
         from ultra_memory.maintenance import import_learnings
         registry["learnings"] = import_learnings.beat
+    except Exception:
+        pass
+    try:
+        from ultra_memory.maintenance import wiki_curate
+        registry["wiki_maintenance"] = wiki_curate.beat
     except Exception:
         pass
     return registry
