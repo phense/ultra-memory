@@ -59,6 +59,24 @@ def split_frontmatter(text: str) -> tuple[dict, str, str]:
     return (parsed, raw_fm, body)
 
 
+def rel_atomic_path(md_file, wiki_root) -> str:
+    """The worklist `atomic_path` shape: the page path relative to the repo root
+    (`wiki_root.parent`), e.g. 'wiki/concepts/foo.md' — the form the Stage-2 apply
+    resolver resolves against. Falls back to '<wiki_dir>/<rel-to-wiki>' when the page
+    is not under the repo root, then to the raw path. The leading dir component is the
+    actual wiki-dir name (not a hardcoded 'wiki/'), so a consumer whose wiki dir is
+    named 'kb' emits 'kb/...'."""
+    wiki_root = Path(wiki_root)
+    md_file = Path(md_file)
+    try:
+        return str(md_file.relative_to(wiki_root.parent))
+    except ValueError:
+        try:
+            return f"{wiki_root.name}/{md_file.relative_to(wiki_root)}"
+        except ValueError:
+            return str(md_file)
+
+
 def git_lines(*args: str, repo_root) -> list[str]:
     """Run ``git <args>`` in `repo_root` → non-empty stdout lines. `repo_root` is a
     REQUIRED parameter (no consumer-path default). Raises CalledProcessError on a

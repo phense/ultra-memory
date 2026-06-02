@@ -54,7 +54,7 @@ class WikiSchemaConfig:
     # Lifecycle / stale markers.
     stale_status_marker: str = "superseded"
     conflict_section_headings: tuple = ("Conflicts-with", "Variant")
-    resolution_marker_regex: str = r"<!--\s*resolved:.*?-->"
+    resolution_marker_regex: str = r"<!--\s*resolved\s*:"
     # Auto-fix patterns.
     autoadded_section_name: str = "Recently auto-added (uncategorized)"
     anchor_suffix_digits: int = 4
