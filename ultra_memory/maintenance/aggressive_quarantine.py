@@ -62,7 +62,6 @@ the CONSUMER's (Trading-side) POLICY.
 """
 from __future__ import annotations
 
-import math
 import sys
 from pathlib import Path
 
@@ -79,7 +78,7 @@ from ultra_memory.maintenance.aggressive_wall import (  # noqa: E402
 )
 
 # The engine — generic, project-agnostic primitives (wiki_lib.py:24 precedent).
-from ultra_memory import memory_lib  # noqa: E402
+from ultra_memory import memory_lib, retrieval_core  # noqa: E402
 # Shared OAuth-call + JSON-extract plumbing (the OAuth chokepoint lives there).
 from ultra_memory.maintenance.aggressive_utils import (  # noqa: E402
     call_model,
@@ -140,19 +139,6 @@ def _agent_authored_active(conn) -> list[dict]:
 # 1. The embedding pre-filter (NO LLM) — cosine-band near pairs.
 # --------------------------------------------------------------------------- #
 
-def _cosine(u: list[float], v: list[float]) -> float:
-    """Cosine similarity of two equal-length vectors. 0.0 for a zero vector (no
-    direction → not 'near' anything). Defensive on a length mismatch (→ 0.0)."""
-    if not u or not v or len(u) != len(v):
-        return 0.0
-    dot = sum(a * b for a, b in zip(u, v))
-    nu = math.sqrt(sum(a * a for a in u))
-    nv = math.sqrt(sum(b * b for b in v))
-    if nu == 0.0 or nv == 0.0:
-        return 0.0
-    return dot / (nu * nv)
-
-
 def select_near_pairs(conn, *, embedder, band_lo: float = BAND_LO,
                       band_hi: float = BAND_HI,
                       max_pairs: int = MAX_NEAR_PAIRS) -> list[dict]:
@@ -182,7 +168,7 @@ def select_near_pairs(conn, *, embedder, band_lo: float = BAND_LO,
     for i in range(n):
         for j in range(i + 1, n):
             try:
-                c = _cosine(vecs[i], vecs[j])
+                c = retrieval_core.cosine(vecs[i], vecs[j])
             except Exception:
                 continue                      # fail-open per pair
             if band_lo <= c <= band_hi:

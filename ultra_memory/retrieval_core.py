@@ -17,7 +17,12 @@ EMBED_DIM = 384
 
 
 def cosine(a, b):
-    """Cosine similarity of two equal-length float vectors. 0.0 if either is zero."""
+    """Cosine similarity of two float vectors. 0.0 if either is a zero vector OR the
+    lengths differ (a defensive guard so a malformed/length-mismatched pair scores
+    'not near' rather than silently comparing a zip-truncated prefix). Equal-length
+    callers are unaffected."""
+    if len(a) != len(b):
+        return 0.0
     dot = na = nb = 0.0
     for x, y in zip(a, b):
         dot += x * y
