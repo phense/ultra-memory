@@ -23,8 +23,9 @@ def _transcript(tmp_path, name="t.jsonl"):
     return p
 
 
-def _payload(facts=None, correction=None):
+def _payload(facts=None, correction=None, skill_learnings=None):
     return {"extracted_knowledge": facts or [],
+            "skill_learnings": skill_learnings or [],
             "correction_detected": correction is not None,
             "correction": correction}
 
@@ -77,6 +78,33 @@ def test_parse_ingest_malformed_raises():
     import pytest
     with pytest.raises(ValueError):
         si.parse_ingest("not json at all")
+
+
+# --------------------------------------------------------------------------- #
+# parse_ingest — skill_learnings (grounded to skills_used).
+# --------------------------------------------------------------------------- #
+
+def test_parse_ingest_extracts_skill_learnings_grounded():
+    out = json.dumps(_payload(skill_learnings=[
+        {"skill": "backtest", "title": "Fill at bid/ask", "body": "Never the mid."},
+        {"skill": "not-used", "title": "x", "body": "y"}]))   # not in skills_used → dropped
+    r = si.parse_ingest(out, skills_used={"backtest", "risk-manager"})
+    assert [s["skill"] for s in r["skill_learnings"]] == ["backtest"]
+    assert r["skill_learnings"][0]["title"] == "Fill at bid/ask"
+
+
+def test_parse_ingest_drops_incomplete_skill_learnings():
+    out = json.dumps(_payload(skill_learnings=[
+        {"skill": "backtest", "title": "", "body": "b"},      # no title
+        {"skill": "", "title": "t", "body": "b"},             # no skill
+        {"skill": "backtest", "title": "ok", "body": "real"}]))
+    r = si.parse_ingest(out, skills_used={"backtest"})
+    assert [s["title"] for s in r["skill_learnings"]] == ["ok"]
+
+
+def test_parse_ingest_skill_learnings_default_empty_without_skills_used():
+    out = json.dumps(_payload(skill_learnings=[{"skill": "backtest", "title": "t", "body": "b"}]))
+    assert si.parse_ingest(out)["skill_learnings"] == []   # skills_used=None → ground to empty
 
 
 # --------------------------------------------------------------------------- #

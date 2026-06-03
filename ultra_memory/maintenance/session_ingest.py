@@ -36,6 +36,7 @@ PENDING_KIND = "session_ingest_pending"
 ENABLE_ENV = "SESSION_INGEST_ENABLE"
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_FACTS = 8
+DEFAULT_MAX_SKILL_LEARNINGS = 8   # per-session cap on skill-tagged learnings
 DEFAULT_LIMIT = 10          # max pending sessions drained per pass
 DEFAULT_TIMEOUT = 300       # one OAuth call per session
 
@@ -168,10 +169,15 @@ def build_prompt(digest: str) -> str:
     )
 
 
-def parse_ingest(stdout: str, *, max_facts: int = DEFAULT_MAX_FACTS) -> dict:
-    """Parse the drain JSON → {facts: [{title, body, topic}], correction|None}.
+def parse_ingest(stdout: str, *, max_facts: int = DEFAULT_MAX_FACTS,
+                 max_skill_learnings: int = DEFAULT_MAX_SKILL_LEARNINGS,
+                 skills_used=None) -> dict:
+    """Parse the drain JSON → {facts, correction|None, skill_learnings}.
     GROUNDED-OR-DROPPED: factless entries dropped, facts capped, a correction kept
-    only with a non-empty do_instead. Malformed JSON → ValueError (caller fails open)."""
+    only with a non-empty do_instead; a skill_learning kept only when complete AND its
+    `skill` is in `skills_used` (the session actually used it — the grounding enforced
+    in CODE, not just the prompt). `skills_used=None` → no skill the session can be
+    proven to have used → skill_learnings is empty. Malformed JSON → ValueError."""
     data = json.loads(strip_json_fence(stdout))   # JSONDecodeError ⊂ ValueError
     if not isinstance(data, dict):
         raise ValueError("ingest JSON is not an object")
@@ -194,7 +200,20 @@ def parse_ingest(stdout: str, *, max_facts: int = DEFAULT_MAX_FACTS) -> dict:
         do = str(c.get("do_instead", "")).strip()
         if do:
             corr = {"behavior": str(c.get("behavior", "")).strip(), "do_instead": do}
-    return {"facts": facts, "correction": corr}
+    allowed = set(skills_used or ())
+    skill_learnings = []
+    for s in (data.get("skill_learnings") or []):
+        if not isinstance(s, dict):
+            continue
+        skill = str(s.get("skill", "")).strip()
+        title = str(s.get("title", "")).strip()
+        body = str(s.get("body", "")).strip()
+        if not skill or not title or not body or skill not in allowed:
+            continue   # GROUNDED-OR-DROPPED: never a skill the session did not use
+        skill_learnings.append({"skill": skill, "title": title, "body": body})
+        if len(skill_learnings) >= max_skill_learnings:
+            break
+    return {"facts": facts, "correction": corr, "skill_learnings": skill_learnings}
 
 
 def _fact_id(title: str, body: str) -> str:
