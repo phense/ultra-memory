@@ -231,7 +231,7 @@ def parse_skill_plan(stdout: str, cluster: dict) -> skill_fs.GeneratedSkill | No
 def draft(conn, *, repo_root, runner=subprocess.run, static_descriptions=None,
           n: int = DEFAULT_N, theta_w: float = DEFAULT_THETA_W, ts: str,
           model: str | None = None, claude_bin: str = "claude",
-          timeout: int = 720, env=None) -> dict:
+          timeout: int = 720, env=None, draft_attempts: int = 2) -> dict:
     """The induction pipeline (planning only). Picks the top eligible domain with a
     material delta, funnels every source lesson through the SP-10 source gate
     (provenance-agnostic read eligibility — backfill_import/import/human all OK; only a
@@ -257,10 +257,27 @@ def draft(conn, *, repo_root, runner=subprocess.run, static_descriptions=None,
         if not has_material_delta(incumbent, cluster["lesson_ids"]):
             continue  # no change since the incumbent — skip this domain
         prompt = build_prompt(cluster, static_descriptions)
-        stdout = run_claude(prompt, model=model or DEFAULT_MODEL,
-                            system=build_sys(), claude_bin=claude_bin,
-                            timeout=timeout, runner=runner, env=env)
-        skill = parse_skill_plan(stdout, cluster)
+        # ONE draft per attempt; retry on UNPARSEABLE JSON only (LLM output is fragile —
+        # a long markdown body can emit an unescaped char that breaks json.loads; the
+        # non-deterministic retry recovers it → reliable autonomous yield instead of a
+        # whole-run fail-open). A parse that SUCCEEDS but yields no durable skill (None)
+        # is a legitimate verdict, not a retry. NOT retried: a ForbiddenTargetError
+        # (already raised before this point) or a runner/OAuth error (propagates).
+        skill = None
+        last_err = None
+        for _ in range(max(1, draft_attempts)):
+            stdout = run_claude(prompt, model=model or DEFAULT_MODEL,
+                                system=build_sys(), claude_bin=claude_bin,
+                                timeout=timeout, runner=runner, env=env)
+            try:
+                skill = parse_skill_plan(stdout, cluster)
+                break  # parsed (skill may be None — a legit "no durable skill")
+            except ValueError as exc:  # JSONDecodeError subclasses ValueError
+                last_err = exc
+                continue
+        else:
+            return {"skill": None, "cluster": cluster, "incumbent": incumbent,
+                    "reason": f"draft unparseable after {max(1, draft_attempts)} tries: {last_err}"}
         if skill is None:
             return {"skill": None, "cluster": cluster, "incumbent": incumbent,
                     "reason": "draft returned no durable skill"}

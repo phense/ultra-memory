@@ -201,6 +201,39 @@ def test_draft_halts_on_pinned_source(tmp_path):
                  ts=TS, env=FAKE_ENV)
 
 
+def _flaky_runner(outputs):
+    """Runner returning a different raw stdout per call (last value repeats)."""
+    state = {"i": 0}
+    def runner(cmd, **kw):
+        i = state["i"]; state["i"] += 1
+        return types.SimpleNamespace(returncode=0,
+                                     stdout=outputs[min(i, len(outputs) - 1)], stderr="")
+    return runner
+
+
+def test_draft_retries_on_unparseable_json(tmp_path):
+    # LLM JSON output is fragile (long markdown body → an unescaped char breaks json.loads).
+    # A within-run retry recovers the common non-deterministic case → reliable autonomous yield.
+    conn = _conn(tmp_path)
+    for i in range(3):
+        _lesson(conn, f"b{i}", "backtest")
+    good = json.dumps(_good_payload("gen-backtest", ["b0", "b1", "b2"]))
+    out = ss.draft(conn, repo_root=tmp_path / "repo",
+                   runner=_flaky_runner(["{ not valid json ,,,", good]),  # bad → good
+                   ts=TS, env=FAKE_ENV)
+    assert out["skill"] is not None and out["skill"].slug == "gen-backtest"
+
+
+def test_draft_gives_up_after_unparseable_attempts(tmp_path):
+    # Always-malformed draft → returns skill=None (fail-soft), never raises a JSONDecodeError.
+    conn = _conn(tmp_path)
+    for i in range(3):
+        _lesson(conn, f"b{i}", "backtest")
+    out = ss.draft(conn, repo_root=tmp_path / "repo",
+                   runner=_flaky_runner(["{ still bad"]), ts=TS, env=FAKE_ENV)
+    assert out["skill"] is None and "unparseable" in out["reason"]
+
+
 def _incumbent(conn, domain, lesson_ids):
     slug = ss.derive_slug(domain)
     memory_lib.save_memory(conn, id=ss.backing_memory_id(slug, lesson_ids),
