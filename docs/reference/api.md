@@ -32,11 +32,17 @@ Every public function. The caller owns connections and supplies timestamps.
     the durable write; a raising hook never aborts the write (fail-open). The engine
     has no wiki dependency.
   - `created_by` (SP-3 D16) is the write's provenance: `human` (the safe-immutable
-    default) / `agent` / `background_review` / `import`. Stamped on both INSERT and
-    UPDATE (an `agent` re-save stays `agent`). Provenance is **never DOWNGRADED**: a
-    re-save over an existing `human` row with a non-`human` `created_by` preserves
-    `human` (a human-owned row stays human unless a human edits it) — mirrors the
-    status/pin preservation already in place on re-save.
+    default) / `agent` / `background_review` / `import` / `backfill_import`. Stamped
+    on both INSERT and UPDATE (an `agent` re-save stays `agent`). Provenance is
+    **never DOWNGRADED**: a re-save over an existing `human` row with a non-`human`
+    `created_by` preserves `human` (a human-owned row stays human unless a human
+    edits it) — mirrors the status/pin preservation already in place on re-save.
+    `import_memory_dir` reinforces this by skipping any live `human` row entirely, so
+    a re-import is edit-safe. **`created_by` gates MUTABILITY, not synthesis
+    visibility (2026-06-03):** the SP-7 provenance gate may rewrite only
+    `('agent','background_review')` rows; SP-10 synthesis selects clusters by
+    `node_type='learning'` (provenance-agnostic), so a `backfill_import` lesson can
+    feed a generated skill while staying un-rewritable.
 - `make_keyword_router(keyword_map) -> router` — build a deterministic, **generic**,
   content-free fallback topic router from `{topic: (kw, …)}`. Whole-word match,
   map-insertion-order priority; abstains to `None` on no hit; `user`/`feedback`
@@ -69,10 +75,12 @@ Every public function. The caller owns connections and supplies timestamps.
 - `record_session_event(conn, *, session_id, kind, title, ts, detail=None,
   files=None, refs=None, session_fields=None, outcome_signal=None) -> event_key` —
   ensure session row, append event idempotently (UNIQUE `event_key`).
-  `outcome_signal` (SP-3 D13, §7a substrate) is an optional deterministic per-event
-  hint; it is **payload, excluded from `event_key`**, so events differing only in
-  the signal still dedupe (first write wins). Inert by default (`NULL`); spooled +
-  replayed. **Redaction (SP-8 bughunt):** title, detail, AND every string element of
+  `outcome_signal` (SP-3 D13) is an optional deterministic per-event hint (e.g.
+  `tests_passed` / `trade_win` / `commit_landed`); it is **payload, excluded from
+  `event_key`**, so events differing only in the signal still dedupe (first write
+  wins). `NULL` when unsupplied; set by the consumer-side Stop-hook capture (the
+  engine never sets it). Spooled + replayed. **Redaction (SP-8 bughunt):** title,
+  detail, AND every string element of
   `files`/`refs` pass through `strip_secrets` before persist + spool — honoring the
   module guarantee that *all persisted text* is redacted first (the `event_key` is
   keyed on the RAW pre-redaction text so a rule change can't un-dedupe a replay).
@@ -106,11 +114,11 @@ Every public function. The caller owns connections and supplies timestamps.
   `tier` ∈ {`durable`, `volatile`}; `ValueError` otherwise, `KeyError` if absent.
 - `set_outcome_weight(conn, *, id, weight, ts, reason="outcome aggregate")` —
   **SP-7 generic support.** Set `memories.outcome_weight = weight` (the **first
-  writer** of the migration-0004 column; until now read-only/inert at its `1.0`
-  default in unified ranking). SP-7's deterministic EWMA aggregate writes its
-  regression signal through here (sub-`1.0` demotes a unit's recall rank, `>1.0`
-  promotes it); the engine neither computes nor bounds the weight. `KeyError` if
-  absent. Audited; spooled + replayed.
+  writer** of the migration-0004 column; `1.0` is the multiplicatively-neutral
+  default). The autonomous self-correct beat's deterministic EWMA aggregate (folded
+  from SP-8 `informed_by` edges) writes its regression signal through here (sub-`1.0`
+  demotes a unit's recall rank, `>1.0` promotes it); the engine neither computes nor
+  bounds the weight. `KeyError` if absent. Audited; spooled + replayed.
 - `set_status(conn, *, id, status, ts, reason)` — **SP-7 generic support.** Set
   `memories.status = status`, validated against `_KNOWN_STATUSES` =
   `('active','redirect','deleted','quarantined','reverted')` — SP-7 **adds**
@@ -225,12 +233,12 @@ Every public function. The caller owns connections and supplies timestamps.
   outcome_signal` (the attribution evidence) — so an audited weight/signal write
   re-exports rather than going stale in the git-committed rollback dump.
 - `export_learnings_projection(conn, path, *, skill_tag, title=None) -> int`
-  (SP-3 D14/D15, §7a substrate) — regenerate a Learnings-style markdown
-  **projection** from the store: active `memories` whose `index_hook == skill_tag`,
-  ordered by `(created_at, id)` → byte-identical on re-run. Both `path` and
-  `skill_tag` are **consumer-supplied** (no Trading/skill literal). This is a
-  read-only projection capability (the DB is the system of record); the §7a **loop
-  is NOT built** — this only materializes the surface the loop will later feed.
+  (SP-3 D14/D15) — regenerate a `Learnings.md`-style markdown **projection** from the
+  store: active `memories` whose `index_hook == skill_tag`, ordered by
+  `(created_at, id)` → byte-identical on re-run. Both `path` and `skill_tag` are
+  **consumer-supplied** (no Trading/skill literal). The DB is the system of record;
+  each `Learnings.md` is a regenerated view. This is the read surface the autonomous
+  consolidate beat feeds (graduations land as `memories` rows, then re-project here).
   **R3 bughunt:** the git-tracked projection is written **atomically** (`<path>.tmp`
   → `os.replace`), mirroring the dump swap — a SIGKILL/crash mid-write can no longer
   leave a torn file for Stage 3 to commit.
@@ -282,7 +290,8 @@ consumer's wiki (no topic-model module, not even PyYAML).
 
 The cross-store **warm** retrieval surface; one ranked list spanning `memories` +
 the `unified_index` knowledge mirror, scoped by (type × topic), fused with FU-4
-best-rank-per-backend RRF, weighted by `outcome_weight` (inert 1.0). No LLM.
+best-rank-per-backend RRF, weighted by `outcome_weight` (`1.0` for units the
+self-correct beat has not yet scored). No LLM.
 
 > **Decision D-S6 (auditable).** Spec §5.6 says "reuse the wiki_query backends".
 > But `wiki_query` is a *Trading-side* module and the project-agnostic NFR forbids
@@ -336,7 +345,8 @@ best-rank-per-backend RRF, weighted by `outcome_weight` (inert 1.0). No LLM.
   the type wall (`allowed_types_for(caller_class)`) and the topic scope, rank the
   memory backend (`query_memories`) + the two knowledge backends (generic BM25 +
   cached-vector cosine over `unified_index`), fuse with `_best_rank_rrf`, ×
-  `outcome_weight`, audit each hit via `record_access`. `agent_topics`: a set ⇒
+  `outcome_weight` (the self-correct beat's recall demotion/promotion signal), audit
+  each hit via `record_access`. `agent_topics`: a set ⇒
   topic-scoped; `None` ⇒ all topics (orchestrator / trusted CLI); the **empty set**
   ⇒ fail-closed (only `topic IS NULL` operational memories of allowed types, **zero
   topiced knowledge**). **R3 bughunt:** the scoped set is first normalized — `None`
@@ -461,6 +471,59 @@ downstream consumer (Trading-side, not the engine) folds those edges into an EWM
   `{replayed, failed, errors}`. Fail-open: a replay error is logged and maintenance
   continues. `_set_meta` (the `last_maintenance` stamp) routes through
   `memory_lib._with_immediate_retry` (the same bounded busy-retry as the write path).
+
+## Self-learning beats (autonomous since 2026-06-03)
+
+The four-beat loop runs **autonomously but conservatively** — full autonomy in
+WHETHER a beat fires, conservatism in HOW it acts (gentlest verb first, bounded,
+archived-never-deleted, eval-gated). The LLM beats are OAuth-only (`claude_cli`,
+never the SDK/API), the capture + learnings-projection beats are no-LLM, and all are
+fail-open. The two aggressive beats carry a present-by-default kill switch; the
+earlier "ships-disabled / dry-run-first" posture is **superseded**.
+
+- **Capture** (consumer-side Stop hook, no LLM): records a deterministic
+  `outcome_signal` and enqueues `skill_learning_candidate` rows in `session_events`.
+- **Consolidate** (conservative, weekly): reads un-resolved candidates, dedups via
+  `unified_recall`, makes ONE batched OAuth call, and per candidate **graduates** (a
+  durable memory or wiki page via `wiki_gateway`), **merges** (append-validation-log),
+  or **skip-transients**. Each graduation writes a `validated_as` edge; the candidate
+  is marked `resolved=1`. ADD-only: it never rewrites, and the apply path refuses any
+  `created_by='human'`/`pinned` target.
+- **Self-correct** (aggressive, weekly): folds SP-8 `informed_by` edges into an EWMA,
+  then proposes **auto-edit**, **self-reversion** (FORK A — flagged for Peter, never
+  auto-reverted), or **quarantine** on `('agent','background_review')` lessons whose
+  evidence is net-negative. Behind the 6-mechanism wall (provenance gate, archive-
+  never-delete FSM transitions, bounded blast radius ≤3 edits/≤3 reversions/≤5
+  quarantines per run with per-period caps in `meta`, pre-run git checkpoint, audit
+  digest, kill switch). The wall is enforced in the **apply path (code)**, not the
+  prompt.
+- **Synthesize** (weekly): induces a native skill (`.claude/skills/gen-<slug>/
+  SKILL.md`) from a cluster of ≥3 graduated `node_type='learning'` lessons grouped by
+  `index_hook` with mean `outcome_weight ≥ 1.0`. Reuses the 6-mechanism wall (max 1
+  skill/run) **plus the eval-gate** below. **Net-new domains only:** a domain that IS
+  an existing skill (lessons tagged `index_hook='<static-skill>'`) is skipped — a
+  `gen-<static-skill>` would compete with the static skill and the eval-gate would
+  (correctly) reject it. Those lessons augment the static skill's `Learnings.md`
+  instead; synthesis mints skills only for novel domains from the forward loop.
+
+### Skill eval-gate (the 7th SP-10 mechanism)
+
+Proves a generated skill does NOT hijack a static skill's auto-trigger before it
+ships. Two tiers, zero-tolerance (`candidate_fp == 0`):
+
+- **Tier-A** (`THETA_DESC=0.6`): reject if the candidate description's token-cosine to
+  any static-skill description exceeds the threshold (cheap, no LLM).
+- **Tier-B**: a behavioral trigger-probe — `RUNS_PER_QUERY` (default 3) concurrent
+  `claude -p` command-file-proxy probes per corpus query through the OAuth-sanitized
+  child env; fire if ANY sample routes to the candidate over the static skill.
+- **Parallelization (`ULTRA_MEMORY_PROBE_WORKERS`, default `PROBE_MAX_WORKERS=6`):**
+  probes run in a bounded `ThreadPoolExecutor`, each with a **unique per-probe temp
+  command file** (`<slug>-probe-<nonce>.md`) so parallel runs never race a shared
+  filename. This brought a full eval pass from ~50 min (serial, overran the 60 min
+  maintenance window) down to ~12 min, comfortably inside budget.
+- **Coverage is complete by construction** (`coverage_gaps() == []`): if no curated
+  `probe_corpus` is configured, `build_probe_corpus(descriptions)` auto-derives one
+  hijack-direction probe per discovered skill — never fail-closed on a coverage gap.
 
 ## `knowledge_mcp` (read-only MCP)
 

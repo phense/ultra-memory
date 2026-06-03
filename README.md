@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![version](https://img.shields.io/badge/version-0.0.2-informational.svg)](.claude-plugin/plugin.json)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-1044%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-1160%20passing-brightgreen.svg)](tests/)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-8A63D2.svg)](https://docs.claude.com/en/docs/claude-code)
 
 Most "memory for Claude" tools give you one bucket: they capture a session, compress it,
@@ -15,9 +15,10 @@ and squirt it back next time. ultra-memory gives you a **knowledge fabric** — 
 with *different half-lives* (fast-moving session memory **and** a curated, git-canonical
 expert-knowledge wiki), a **typed-edge graph** that spans both, **one ranked recall** that
 fuses them, a **single audited write gateway** that redacts secrets on the way in *and* out,
-and an opt-in **self-learning loop** that consolidates, self-corrects, and even synthesizes
-new skills from what it learns. All of it runs on your machine, on your Claude subscription —
-no vector cloud, no metered API key, ever.
+and a **self-learning loop** that consolidates, self-corrects, and even synthesizes
+new skills from what it learns — autonomous, but governed by a code safety wall (provenance-gated,
+archive-never-delete, bounded, reversible). All of it runs on your machine, on your Claude
+subscription — no vector cloud, no metered API key, ever.
 
 > **The boundary (this repo is published; your data is not):** this repository holds **only code**
 > and is **content-free**. Your `memory.db`, exports, paths, the knowledge base it indexes, and any
@@ -42,10 +43,12 @@ be *graduated* into a wiki page and the edge is recorded — recall traverses it
 process raises a hard `OAuthViolation` — the engine never touches the metered API or the SDK), and a
 single audited write gateway that strips secrets at both persist and export.
 
-♻️ **It improves itself — on your terms.** An opt-in, wall-governed self-learning loop
+♻️ **It improves itself — safely.** A wall-governed self-learning loop
 (consolidate → attribute → self-correct → synthesize) that can dedup, reinforce, revert, and even
-induce new Claude skills from matured lessons. Built, tested, and shipped behind explicit arming
-gates so *you* stay in control.
+induce new Claude skills from matured lessons. The autonomy is *structural*: the code **cannot**
+mutate a human/pinned fact, **cannot** delete (only archive + redirect-stub), and is bounded
+(≤3 edits / ≤3 reversions / ≤5 quarantines / ≤1 new skill per run) — so mistakes are rare *and*
+cheap to revert. You stay in the audit loop, not the write loop.
 
 ⚡ **It installs in one step and stays out of your way.** A zero-config Claude Code plugin: a
 ~15 ms SessionStart rehydration gist, a Stop-checkpoint, throttled background maintenance — fail-open
@@ -132,15 +135,18 @@ list via deterministic Reciprocal-Rank-Fusion (stable under `PYTHONHASHSEED`), s
 fail-closed **role × topic** privilege wall — a subagent literally cannot recall another topic's or a
 higher-privilege caller's rows.
 
-### 3. A Hermes-style self-learning skill loop (opt-in)
+### 3. A Hermes-style self-learning skill loop
 The fourth beat is what makes it an *organism*: a four-stage loop —
 **consolidate** (graduate matured lessons) → **attribute** (credit outcomes back to recalled memories)
 → **self-correct** (auto-edit / revert / quarantine *agent-authored* knowledge, never your pinned
-rules) → **synthesize** (induce a new `gen-*/SKILL.md` from a cluster of graduated lessons). It's
-**built, tested (part of the 1044-test suite), and wall-governed** — provenance-gated (human/pinned
-rows are physically immutable), bounded-blast-radius, archive-never-delete, git-checkpointed,
-OAuth-only — and it **ships disabled by default** so you arm it deliberately after reviewing dry-run
-digests. (See [Status](#status--honest-roadmap) for exactly what's live vs. armed-by-you.)
+rules) → **synthesize** (induce a new `gen-*/SKILL.md` from a cluster of graduated lessons, behind an
+eval-gate that proves the new skill won't hijack an existing one). It's **built, tested (part of the
+1160-test suite), and wall-governed** — the autonomy is in *whether* it acts; the conservatism is in
+*how*. Seven mechanisms enforce that in **code, not prose**: a provenance gate (human/pinned rows are
+physically immutable), archive-never-delete, bounded blast radius, a pre-run git checkpoint, an
+audit + human digest, a kill switch, and (for synthesis) a behavioral eval-gate. Because every action
+is reversible and bounded, mistakes are rare *and* cheap to undo. (See
+[Status](#status--honest-roadmap) for exactly what's live.)
 
 ---
 
@@ -184,7 +190,8 @@ How ultra-memory stacks up against the most popular Claude/AI memory **and knowl
 including [STORM](https://github.com/stanford-oval/storm), the ~28k★ "LLM-writes-a-wiki" system from
 Stanford, to test our knowledge-wiki claim against a *real* LLM-wiki. **Honest:** we lead on
 architecture today and say plainly where we don't — the field's real advantage over us is **adoption**
-(we're pre-public), and our self-learning loop, though built and test-covered, **ships opt-in**.
+(we're pre-public), and our self-learning loop runs **autonomously but conservatively** behind a
+code-enforced safety wall.
 
 Legend: ✅ shipped & live · ⚠️ partial / opt-in / caveated (see notes) · ❌ absent
 
@@ -193,7 +200,7 @@ Legend: ✅ shipped & live · ⚠️ partial / opt-in / caveated (see notes) · 
 | **Durable expert-knowledge wiki** (separate half-life from session memory) | ✅ ⁷ | ❌ | ❌ | ⚠️ ¹ | ⚠️ ⁸ |
 | **Cross-store unified recall** (memory + wiki, one ranked list) | ✅ | ❌ | ⚠️ ² | ⚠️ ² | ❌ |
 | **Knowledge graph / typed links** | ✅ | ❌ | ✅ | ✅ | ⚠️ ⁹ |
-| **Autonomous self-learning** (dedup · consolidate · self-correct · synthesize) | ⚠️ ³ | ⚠️ | ⚠️ | ⚠️ | ❌ |
+| **Autonomous self-learning** (dedup · consolidate · self-correct · synthesize) | ✅ ³ | ⚠️ | ⚠️ | ⚠️ | ❌ |
 | **Audited write + secret redaction** (single gateway) | ✅ | ⚠️ | ❌ | ⚠️ | ❌ |
 | **Role × topic privilege wall** (fail-closed) | ✅ | ❌ | ⚠️ | ❌ | ❌ |
 | **Local-first, no paid API key** | ✅ | ✅ | ❌ | ✅ | ❌ |
@@ -206,10 +213,13 @@ Legend: ✅ shipped & live · ⚠️ partial / opt-in / caveated (see notes) · 
 session memory from durable expert knowledge.
 ² mem0 and Basic Memory do hybrid retrieval *within one store*; neither fuses a separate durable-wiki
 store and a session store into one ranked list the way <code>unified_recall</code> does.
-³ ultra-memory's four-beat loop (consolidate → attribute → self-correct → synthesize) is fully built
-and test-covered but <strong>ships disabled by default</strong> — you arm it after reviewing dry-run
-digests. (Honesty: some niche memory tools, e.g. <a href="https://github.com/doobidoo/mcp-memory-service">doobidoo/mcp-memory-service</a>,
-run autonomous consolidation live today; ours is broader in scope but opt-in.)
+³ ultra-memory's four-beat loop (consolidate → attribute → self-correct → synthesize) runs
+<strong>autonomously</strong> behind a code safety wall — provenance-gated, bounded, reversible,
+archive-never-delete, eval-gated for synthesis. The autonomy is in <em>whether</em> it acts; the
+conservatism (gentlest verbs first, bounded blast radius, immutable human facts) is enforced in code,
+so it acts but makes the safest call first. (Honesty: some niche memory tools, e.g.
+<a href="https://github.com/doobidoo/mcp-memory-service">doobidoo/mcp-memory-service</a>, also run
+autonomous consolidation; ours is broader in scope — self-correction + skill synthesis, not just dedup.)
 ⁴ claude-mem keeps a local but <em>binary</em> Chroma vector store — not human-readable/diffable like
 Markdown or a redacted SQL dump.
 ⁵ Native zero-config plugin, but <strong>not yet public</strong> — a 2026-06-02 audit lists a few
@@ -266,12 +276,15 @@ of "the docs match reality":
 - ✅ **Live today:** the two-store fabric, `unified_recall` RRF fusion, the typed-edge graph, the
   single audited write gateway + redaction, OAuth-only enforcement, SessionStart/Stop hooks, the
   read-only `knowledge` MCP with the role × topic wall, the wiki-curation maintenance pipeline,
-  zero-config install, **1044 green tests**, content-free repo.
-- 🔵 **Built + tested, ships disabled (you arm it):** the self-learning loop —
-  consolidate (SP-6), usage-attribution (SP-8 substrate), aggressive self-correct (SP-7), skill
-  synthesis (SP-10), session-ingest. Each is behind an explicit arming gate; `outcome_weight` stays
-  inert at `1.0` until you enable attribution. This is deliberate: the highest-blast-radius autonomy
-  is opt-in, dry-run-first, human-in-the-audit-loop.
+  zero-config install, **1160 green tests**, content-free repo.
+- ✅ **Self-learning loop — autonomous, conservative (as of 2026-06-03):** consolidate (SP-6),
+  usage-attribution (SP-8), aggressive self-correct (SP-7), and skill synthesis (SP-10) run on a
+  weekly cadence behind the seven-mechanism code wall (provenance gate · archive-never-delete ·
+  bounded blast radius · git checkpoint · audit digest · kill switch · synthesis eval-gate). The
+  defaults are deliberately tight (3 edits / 3 reversions / 5 quarantines / 1 new skill per run);
+  loosen them in config and watch the effect in the next digest. Each beat is also individually
+  gated by a kill-switch env flag, and outcome-attribution / session-ingest ship gated-off until
+  you opt in.
 - ⬜ **Open before a clean public release** (tracked in [`BACKLOG.md`](BACKLOG.md) §5.2): a fresh-install
   MCP fix, scrubbing an internal audit dir, the public-marketplace install path above, and a version
   bump. Single-root today; global cross-project root activation is designed, not yet enabled.

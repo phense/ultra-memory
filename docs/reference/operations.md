@@ -42,7 +42,10 @@ Engine env seams the wrapper / consumer can also set (SP-3):
 | `ULTRA_MEMORY_CALLER_TOPIC` | Comma/`:`/`;`-separated topic list — the **topic** axis of the access wall (the interim source until SP-0 spike #7 resolves per-subagent identity). Fail-closed: unset + no `agent_topic_bindings` row ⇒ the empty topic set. |
 | `ULTRA_MEMORY_AGENT_NAME` | Agent name for the `agent_topic_bindings` lookup (`topic_scope_from_env`). |
 | `ULTRA_MEMORY_REBUILD_INDEX` | `=1` ⇒ `maintain` forces a one-pass re-population of every `unified_index` row regardless of `content_sha256` (the SP-6 `bm25_text` backfill, equivalent to `maintain --rebuild`). Implies force (bypasses the throttle). |
-| `ULTRA_MEMORY_BACKFILL_CMD` | A consumer's **cold-start session-cache backfill** runner (e.g. `./scripts/run_backfill.sh`). Set ⇒ `/memory-setup` prints a one-time *hint* to run it (never auto-runs). Unset ⇒ never offered (greenfield-safe). Independent of the `import_complete` gate — see [`backfill_complete`](#the-import_complete-gate). |
+| `ULTRA_MEMORY_BACKFILL_CMD` | A consumer's **cold-start session-cache backfill** runner (e.g. `./scripts/run_backfill.sh`). Set ⇒ `/memory-setup` prints a one-time *hint* to run it (never auto-runs). Unset ⇒ never offered (greenfield-safe). Independent of the `import_complete` gate — see [`backfill_complete`](#the-import_complete-gate). Backfilled rows are `created_by='backfill_import'`. |
+| `ULTRA_MEMORY_PROBE_WORKERS` | Bounded thread-pool size for the SP-10 eval-gate's hijack-direction probes (default `6`). Caps concurrent `claude -p` probe subprocesses so a full eval pass fits the maintenance window (~50 min serial → ~12 min parallel) without swamping the OAuth CLI. |
+| `SP7_AGGRESSIVE_DISABLE` / `SP10_SYNTHESIS_DISABLE` | Kill switches for the autonomous self-correct / synthesize beats — any value makes the whole beat a no-op + one log line. **Present-by-default in cron** until a consumer arms the beat; remove the var to run live. `SP7_AGGRESSIVE_DRYRUN` / `SP10_SYNTHESIS_DRYRUN` plan+eval+digest but apply nothing. |
+| `SESSION_INGEST_ENABLE` | Additional gate for the `session_ingest` beat (capture + SP-8 attribution); default OFF — the enqueue/fold is a no-op until set. |
 
 `/memory-setup` builds the runtime venv under `${CLAUDE_PLUGIN_DATA}/venv`,
 optionally imports a legacy memory dir **once**, stamps the DB ready (the
@@ -164,6 +167,57 @@ full-body BM25 column added in migration `0005`) on rows written by the pre-SP-6
 `wiki_sync`. A rebuild implies force (else the ~20h throttle would skip the run it
 was invoked to perform). A normal nightly sync repopulates `bm25_text` lazily on the
 next content change of each page.
+
+## Self-learning maintenance beats (autonomous, OAuth-gated)
+
+Beyond the pure-Python prune+export+`wiki_sync` above, the maintenance pipeline runs
+the four-beat self-learning loop. The heavy beats make ONE OAuth call each (via
+`claude_cli`, never the SDK/API), are **autonomous but conservative**, and are
+governed by the code safety wall rather than a human approval step. The earlier
+"ships-disabled / dry-run-first" posture is **superseded** (2026-06-03).
+
+Each beat is enabled in `config.toml [maintenance.beats]` (every beat defaults
+**ON**) and throttled by `[maintenance.cadence_hours]`. The two aggressive beats
+carry an additional **present-by-default kill switch** — remove the env var (the
+consumer's wrapper does this when arming) to run live; a `*_DRYRUN` variant
+plans+evals+digests but applies nothing.
+
+| Beat | Default cadence | LLM | What it does | Extra gate (beyond `beats`) |
+|---|---|---|---|---|
+| consolidate | 168h (weekly) | one batched call | graduate / merge / skip un-resolved `skill_learning_candidate` rows; writes `validated_as` edges; ADD-only (never rewrites) | — |
+| learnings | 168h (weekly) | none (Tier-1) | regenerate each `Learnings.md` projection from `memories` rows | — |
+| session_ingest | 24h (daily) | one call | capture + SP-8 attribution fold; writes `informed_by` edges | `SESSION_INGEST_ENABLE` env |
+| aggressive (self-correct) | 720h (monthly) | one call | auto-edit / propose-revert / quarantine net-negative agent lessons | `SP7_AGGRESSIVE_DISABLE` kill switch (present by default) |
+| synthesize | 720h (monthly) | one call | induce a `gen-<slug>` skill from a matured lesson cluster | `SP10_SYNTHESIS_DISABLE` kill switch (present by default) |
+
+A consumer may tighten the aggressive/synthesize cadence (e.g. to 168h) in its own
+`config.toml`. After the consolidate drain graduates lessons, the `learnings` beat
+re-projects the augmented `Learnings.md` files on its own weekly schedule.
+
+**The apply path enforces the wall in CODE, not the prompt** (the LLM proposes, the
+code disposes):
+
+1. **Provenance gate** — re-reads the live row; refuses any action on
+   `created_by='human'`/`import`/`backfill_import` or `pinned` (a single forbidden-
+   target attempt halts the whole run).
+2. **Archive-never-delete** — every verb is a reversible FSM transition
+   (`active → redirect`/`quarantined`/`reverted`); no `rm` anywhere.
+3. **Bounded blast radius** — ≤3 edits / ≤3 reversions / ≤5 quarantines per run, max
+   1 synthesized skill/run; per-period (`YYYY-MM`) caps live in `meta`; halt-on-exceed.
+4. **Pre-run git checkpoint** — tags the attempt + snapshots the DB; refuses to apply
+   on a dirty/untracked tree.
+5. **Audit + human digest** — every action lands in `briefings_dir` (Peter is in the
+   audit loop, never the write loop).
+6. **Kill switch** — the present-by-default `*_DISABLE` env vars above.
+7. **(synthesize only) eval-gate** — a behavioral trigger-probe proving the generated
+   skill does not hijack a static skill, parallelized via `ULTRA_MEMORY_PROBE_WORKERS`
+   (see [api.md](api.md#skill-eval-gate-the-7th-sp-10-mechanism)).
+
+**Net-new domains only (synthesize).** A domain that IS an existing skill is skipped —
+the cold-start backfill seeds lessons tagged with the skills they were learned *while
+using*, so every backfill cluster is a same-domain competitor the eval-gate rejects.
+Those lessons augment the static skill's `Learnings.md` (live); synthesis mints new
+skills only for novel forward-loop domains.
 
 ## Topic backfill (gated) {#topic-backfill-gated}
 
@@ -288,7 +342,12 @@ are float32 BLOBs. Use the canonical `EMBED_MODEL` string everywhere.
 ## Migrations
 
 Forward-only, ordered by the numeric filename prefix, each applied + version-bumped
-in one transaction. To add one: drop `NNNN_name.sql` in `ultra_memory/migrations/`,
-make it idempotent where possible, and add a test. An automatic export should run
-before any migration in production so a failed migration has a non-lossy fallback
-(wiring is part of the bootstrap plan).
+in **one explicit `BEGIN/COMMIT`** transaction — so a mid-migration crash rolls back
+the whole step rather than leaving the schema and `user_version` desynchronized.
+`ADD COLUMN` statements use `IF NOT EXISTS` (replay-tolerant), and the dump appends
+`PRAGMA user_version` so a restore→reopen round-trips the version without re-running
+migrations. The full list (`0001`–`0008`) with per-version DDL scope lives in
+[schema.md](schema.md#migrations). To add one: drop `NNNN_name.sql` in
+`ultra_memory/migrations/`, make it idempotent, and add a test (including a mid-
+migration-crash rollback regression). An automatic export should run before any
+migration in production so a failed migration has a non-lossy fallback.

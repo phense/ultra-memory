@@ -42,7 +42,7 @@ The durable typed notes.
 | `title`, `body` | TEXT | redacted at write time |
 | `description` | TEXT | one-line summary (from frontmatter) |
 | `index_hook` | TEXT | the `MEMORY.md` "— hook" (distinct from `description`) |
-| `node_type` | TEXT | default `'memory'` |
+| `node_type` | TEXT | default `'memory'`; also `'procedure'` (Fork A captured procedures), `'learning'` (a skill lesson — the SP-10 synthesis induction unit, selected provenance-agnostically), `'generated_skill'` (a `gen-*` skill's backing rows, excluded from induction to prevent self-seeding) |
 | `file_slug` | TEXT | the harness FILENAME stem (underscored); drives export filename + MEMORY.md links — **not** derivable from `id` |
 | `sort_order` | INTEGER | the `MEMORY.md` line index → preserves curated order on export |
 | `created_at`, `updated_at` | TEXT | canonical tz-aware UTC `%Y-%m-%dT%H:%M:%SZ` (r4 FIX 5 — import sets these from file mtime in this format, matching the CLI/save + maintain/retention paths, so raw-string `ORDER BY` is chronological; drives staleness) |
@@ -54,8 +54,8 @@ The durable typed notes.
 | `supersedes` | TEXT | canonical id when `status='redirect'` |
 | `pinned` | INTEGER | default 0 |
 | `topic` | TEXT | **(0004)** nullable. `NULL` = cross-topic / visible-to-all (composes with the §5 access wall as `topic IS NULL`); a non-NULL topic walls the row. `user`/`feedback` operational rows stay `NULL` (D11). |
-| `created_by` | TEXT | **(0004)** provenance; `NOT NULL DEFAULT 'human'`. `human` (CLI / `/memory-*`) / `agent` / `background_review` / `import`. The §7a provenance gate (SP-7) may auto-edit only non-`human` rows; the safe default treats un-marked rows as immutable. |
-| `outcome_weight` | REAL | **(0004)** `NOT NULL DEFAULT 1.0`. Multiplied into the unified-recall score (`1.0` is multiplicatively neutral). **First writer (SP-7):** `set_outcome_weight` (the EWMA regression signal); inert until written. |
+| `created_by` | TEXT | **(0004)** provenance; `NOT NULL DEFAULT 'human'`. Values: `human` (CLI / `/memory-*`) / `agent` (session-ingest capture) / `background_review` (the consolidate beat's graduations) / `import` (legacy markdown) / `backfill_import` (cold-start session-cache backfill). **Gates MUTABILITY, not synthesis visibility (2026-06-03):** the SP-7 provenance gate may auto-edit only `('agent','background_review')` rows — `human`/`import`/`backfill_import`/`pinned` rows are immutable; but SP-10 synthesis selects induction clusters by `node_type='learning'` (provenance-agnostic), so a `backfill_import` lesson CAN feed a generated skill while still being un-rewritable. |
+| `outcome_weight` | REAL | **(0004)** `NOT NULL DEFAULT 1.0`. Multiplied into the unified-recall score (`1.0` is multiplicatively neutral; `<1.0` demotes, `>1.0` promotes). **Written by `set_outcome_weight`** (SP-7, the deterministic EWMA regression signal folded from SP-8 attribution edges); the default `1.0` is the neutral state before any signal lands. |
 
 ### `sessions`
 `id` (UUID) PK, `started_at`, `ended_at`, `status`, `branch`, `cwd`,
@@ -70,11 +70,12 @@ write time** (`strip_secrets`, SP-8 bughunt) — the `event_key` is keyed on the
 pre-redaction text so a redaction-rule change can't shift the key and un-dedupe a
 replay.
 **(0004)** `outcome_signal TEXT` — an optional per-event deterministic outcome
-hint (e.g. `tests_passed` / `trade_win` / `commit_landed`); it is **payload, not
-part of `event_key`**, so two otherwise-identical events differing only in
-`outcome_signal` still dedupe to one row (first write wins). The §7a substrate;
-**inert this cycle** — no engine writer sets it (the consumer-side capture hook
-will).
+hint (e.g. `tests_passed` / `trade_win` / `trade_loss` / `commit_landed`); it is
+**payload, not part of `event_key`**, so two otherwise-identical events differing
+only in `outcome_signal` still dedupe to one row (first write wins). **Written by
+the consumer-side Stop-hook capture** (the engine accepts it but never sets it —
+the agnostic boundary holds); the SP-8 attribution join reads it as the EWMA fold's
+evidence.
 **Retention preservation (SP-8 bughunt):** `retention.prune_session_events`
 **excludes** any event still referenced by an SP-8 attribution edge (a `links` row
 with `src_kind='session_event'` and predicate in `('validated_as',
@@ -115,9 +116,11 @@ so a reader can filter without a join. `*_kind` is the store side
 is `(src_kind, src_id, predicate, dst_kind, dst_id)`; there is **no UNIQUE on it**
 (adding one would need a destructive rebuild of the pre-existing table), so
 idempotency is enforced in code by `record_link` (SELECT-then-UPDATE-or-INSERT in
-one txn). Until SP-3 this table was **defined and read but never written**
-(north-star Risk §14.8); `record_link` (Stage 3) is its first writer. **SP-8 A2**
-adds the usage-outcome edge: an `informed_by` row with `src_kind='session_event'`,
+one txn). `record_link` is its first writer. The autonomous self-learning beats
+write two predicate families here: **`validated_as`** (every consolidate/synthesize
+graduation links the source lesson to the durable memory or wiki page it matured
+into — the provenance trail for a reversion) and **`informed_by`** (SP-8 A2's
+usage-outcome edge): an `informed_by` row with `src_kind='session_event'`,
 `src_id = str(<session_events.id>)`, `dst_kind='memory'` — written by
 `attribution.attribute_usage` to join a session's outcome event to the memories it
 recalled. The consumer reads it with
@@ -134,7 +137,8 @@ exception can't copy an unredacted secret from a wiki page into this queryable
 mirror (`content_sha256` stays computed on the raw page text).
 `slug TEXT PK`, `topic`, `page_type` (frontmatter `type:`), `title`, `snippet`,
 `frontmatter` (JSON), `path`, `content_sha256` (sha-skip idempotency),
-`outcome_weight REAL NOT NULL DEFAULT 1.0` (reserved §7a; inert), `updated_at`,
+`outcome_weight REAL NOT NULL DEFAULT 1.0` (reserved knowledge-side weight; not yet
+written — the self-correct beat scores `memories.outcome_weight`), `updated_at`,
 **(0005)** `bm25_text TEXT`. `snippet` is the ~400-char **display preview**;
 `bm25_text` is the **FULL collapsed body** used as the knowledge-side BM25
 document (`unified_query._knowledge_doc_text`) so a query term in a page's back
@@ -161,13 +165,20 @@ engine is forward-compatible with.
 
 ### `procedures`
 Reserved for learned procedures: `id`, `name`, `steps`, `trigger`,
-`source_sessions`, `times_seen`, `created_at`, `updated_at`. **Still unwired dead
-weight** (no reader, no writer) — SP-3 routes captured procedures through
-`memories` with `node_type='procedure'` (Fork A / D12) rather than wiring this
-table; dropping it is deferred to the SP-5 doc/schema overhaul.
+`source_sessions`, `times_seen`, `created_at`, `updated_at`. **Unwired** (no reader,
+no writer) — captured procedures route through `memories` with
+`node_type='procedure'` (Fork A / D12) rather than this table. Dropping it is a
+deferred follow-up.
 
 ### `meta`
-`key` PK, `value`. Holds `schema_version` (and, in future, `import_complete`).
+`key` PK, `value`. Holds `schema_version` (mirrors `PRAGMA user_version`),
+`import_complete` (the one-time legacy-import gate the session hooks read),
+`backfill_complete` (the **independent** cold-start session-cache backfill flag —
+controls only the `/memory-setup` hint, never `db_ready`), `topic_backfill_complete`
+(the gated topic-stamp data step), `last_maintenance` (the ~20h throttle stamp), and
+the per-period blast-radius counters `sp7_aggressive_period:<YYYY-MM>` /
+`sp10_synthesis_period:<YYYY-MM>` (the global monthly caps the autonomous beats
+check before acting).
 
 ## Indexes
 
