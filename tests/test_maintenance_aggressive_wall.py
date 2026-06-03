@@ -92,6 +92,42 @@ def test_assert_mutable_raises_on_import(tmp_path):
         aw.assert_mutable(conn, aw.MemoryUnit("m-import"))
 
 
+# --------------------------------------------------------------------------- #
+# 4a-bis. SP-10 SOURCE gate (assert_synthesis_source) — READ eligibility, distinct
+# from the SP-7 mutation gate: provenance-agnostic, only PINNED is protected.
+# --------------------------------------------------------------------------- #
+
+def test_assert_synthesis_source_passes_backfill_import(tmp_path):
+    # The cold-start seed is immutable to SP-7 but READABLE by SP-10 (visibility ≠ mutability).
+    conn = _open_temp_db(tmp_path)
+    _save(conn, id="m-bf", created_by="backfill_import")
+    assert aw.assert_synthesis_source(conn, "m-bf") is None
+
+
+def test_assert_synthesis_source_passes_import_human_agent(tmp_path):
+    conn = _open_temp_db(tmp_path)
+    _save(conn, id="m-imp", created_by="import")
+    _save(conn, id="m-hum", created_by="human")
+    _save(conn, id="m-agt", created_by="agent")
+    assert aw.assert_synthesis_source(conn, "m-imp") is None
+    assert aw.assert_synthesis_source(conn, "m-hum") is None
+    assert aw.assert_synthesis_source(conn, "m-agt") is None
+
+
+def test_assert_synthesis_source_raises_on_pinned(tmp_path):
+    # A pinned source (hard rule / hot unit) is never folded into a generated skill.
+    conn = _open_temp_db(tmp_path)
+    _save(conn, id="m-pin", created_by="background_review", pinned=True)
+    with pytest.raises(aw.ForbiddenTargetError):
+        aw.assert_synthesis_source(conn, "m-pin")
+
+
+def test_assert_synthesis_source_missing_row_is_forbidden(tmp_path):
+    conn = _open_temp_db(tmp_path)
+    with pytest.raises(aw.ForbiddenTargetError):
+        aw.assert_synthesis_source(conn, "nonexistent")
+
+
 def test_assert_mutable_raises_on_pinned_agent(tmp_path):
     """`pinned` is an INDEPENDENT second condition — even an agent-authored row,
     if pinned, is immutable (spec §4a)."""

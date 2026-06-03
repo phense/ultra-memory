@@ -11,9 +11,12 @@ Fork-2 trigger: a cluster of graduated lessons (``node_type='learning'``,
 ``index_hook`` reaching ``N`` lessons with mean ``outcome_weight ≥ THETA_W``.
 Fork-H: the slug is DERIVED from the domain (``gen-<slugify(domain)>``) → one skill
 per domain; a re-qualifying domain re-drafts and the orchestrator supersedes the
-incumbent (archive-never-delete). Every source lesson is funnelled through the
-wall's ``assert_mutable`` before its body is read into the prompt — a human/pinned
-source halts the whole run (zero tolerance).
+incumbent (archive-never-delete). Every source lesson is funnelled through the SP-10
+source gate ``assert_synthesis_source`` before its body is read into the prompt —
+provenance-agnostic READ eligibility (the ``backfill_import`` cold-start seed and
+``import``/``human`` lessons are all readable; synthesis never mutates them), only a
+PINNED source halts the whole run (zero tolerance). This is DISTINCT from the SP-7
+``assert_mutable`` *write* gate — visibility ≠ mutability.
 
 OAuth-only: the single draft call routes through ``ultra_memory.claude_cli.run_claude``
 (injectable runner for tests); NO anthropic SDK.
@@ -32,8 +35,7 @@ from ultra_memory.maintenance import skill_fs  # noqa: E402
 from ultra_memory.maintenance.parse_utils import strip_json_fence  # noqa: E402
 from ultra_memory.maintenance.aggressive_wall import (  # noqa: E402
     ForbiddenTargetError,
-    MemoryUnit,
-    assert_mutable,
+    assert_synthesis_source,
 )
 
 DEFAULT_N = 3
@@ -231,17 +233,20 @@ def draft(conn, *, repo_root, runner=subprocess.run, static_descriptions=None,
           model: str | None = None, claude_bin: str = "claude",
           timeout: int = 720, env=None) -> dict:
     """The induction pipeline (planning only). Picks the top eligible domain with a
-    material delta, funnels every source lesson through the wall, makes ONE
-    run_claude draft, parses grounded-or-dropped. Returns
-    {skill, cluster, incumbent, reason}. Raises ForbiddenTargetError if a source
-    lesson is human/pinned (the orchestrator turns it into a whole-run halt)."""
+    material delta, funnels every source lesson through the SP-10 source gate
+    (provenance-agnostic read eligibility — backfill_import/import/human all OK; only a
+    PINNED source halts), makes ONE run_claude draft, parses grounded-or-dropped. Returns
+    {skill, cluster, incumbent, reason}. Raises ForbiddenTargetError if a source lesson is
+    PINNED (the orchestrator turns it into a whole-run halt)."""
     static_descriptions = static_descriptions or []
     clusters = select_induction_clusters(conn, n=n, theta_w=theta_w)
     for cluster in clusters:
-        # Funnel every source lesson through the provenance gate FIRST (re-reads the
-        # live row; a human/pinned source → ForbiddenTargetError → whole-run halt).
+        # Funnel every source lesson through the SP-10 SOURCE gate FIRST (re-reads the
+        # live row). Provenance-agnostic (synthesis reads, never mutates the source — so
+        # the backfill_import seed is readable); only a PINNED source → ForbiddenTargetError
+        # → whole-run halt. NOT assert_mutable (that is the SP-7 *write* gate).
         for lid in cluster["lesson_ids"]:
-            assert_mutable(conn, MemoryUnit(lid))
+            assert_synthesis_source(conn, lid)
         incumbent = active_generated_skill_for(conn, cluster["domain"])
         if (incumbent is not None and incumbent.get("source_domain")
                 and incumbent["source_domain"] != cluster["domain"]):

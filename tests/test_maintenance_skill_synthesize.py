@@ -133,6 +133,34 @@ def test_draft_happy(tmp_path):
     assert out["skill"].source_lesson_ids == ["b0", "b1", "b2"]
 
 
+def test_draft_synthesizes_from_backfill_import_source(tmp_path):
+    # Synthesis READS source lessons to induce a NEW skill — it never mutates them — so
+    # source eligibility is provenance-agnostic. The cold-start backfill seed
+    # (created_by='backfill_import') is immutable to SP-7 but MUST be readable by SP-10,
+    # else the seed can never become a skill. (Was blocked by the assert_mutable funnel —
+    # the same mutability-vs-visibility conflation as the cluster-selection fix.)
+    conn = _conn(tmp_path)
+    for i in range(3):
+        _lesson(conn, f"b{i}", "backtest", created_by="backfill_import")
+    out = ss.draft(conn, repo_root=tmp_path / "repo",
+                   runner=_runner(_good_payload("gen-backtest", ["b0", "b1", "b2"])),
+                   ts=TS, env=FAKE_ENV)
+    assert out["skill"] is not None and out["skill"].slug == "gen-backtest"
+
+
+def test_draft_synthesizes_from_import_and_human_sources(tmp_path):
+    # import + human learnings are also readable sources (additive, eval-gated, reversible;
+    # the source row is untouched). Only PINNED stays protected (next test).
+    conn = _conn(tmp_path)
+    _lesson(conn, "b0", "backtest", created_by="import")
+    _lesson(conn, "b1", "backtest", created_by="human")
+    _lesson(conn, "b2", "backtest", created_by="backfill_import")
+    out = ss.draft(conn, repo_root=tmp_path / "repo",
+                   runner=_runner(_good_payload("gen-backtest", ["b0", "b1", "b2"])),
+                   ts=TS, env=FAKE_ENV)
+    assert out["skill"] is not None
+
+
 def test_draft_off_slug_dropped(tmp_path):
     conn = _conn(tmp_path)
     for i in range(3):

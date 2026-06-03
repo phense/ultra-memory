@@ -131,6 +131,31 @@ def assert_mutable(conn, unit) -> None:
     return None
 
 
+def assert_synthesis_source(conn, mem_id: str) -> None:
+    """SP-10 source-eligibility gate — DISTINCT from the SP-7 mutation gate
+    ``assert_mutable``. Synthesis READS a lesson to induce a NEW skill; it never mutates
+    the lesson, so source eligibility is PROVENANCE-AGNOSTIC: ``backfill_import`` (the
+    cold-start seed) / ``import`` / ``human`` / ``agent`` / ``background_review`` may all
+    seed a skill — else the seed could never graduate (the bug that conflated SP-7
+    mutability with SP-10 visibility a second time, at the draft funnel). The ONE
+    protection kept: a PINNED source (a hard rule / explicitly-hot unit) is never folded
+    into an auto-generated, auto-editable skill → ``ForbiddenTargetError``. Fail-closed: a
+    missing row / read error → forbidden (a source must provably exist)."""
+    try:
+        row = conn.execute(
+            "SELECT pinned FROM memories WHERE id=?", (mem_id,)).fetchone()
+    except Exception as exc:
+        raise ForbiddenTargetError(
+            f"synthesis source {mem_id!r}: provenance read failed ({exc!r}) — refusing"
+        ) from exc
+    if row is None:
+        raise ForbiddenTargetError(
+            f"synthesis source {mem_id!r}: no live row — cannot confirm the source")
+    if bool(row["pinned"]):
+        raise ForbiddenTargetError(
+            f"synthesis source {mem_id!r}: pinned — not folded into a generated skill")
+
+
 def _assert_memory_mutable(conn, mem_id: str) -> None:
     """A memory is mutable iff created_by IN MUTABLE_PROVENANCES AND pinned=0.
     Re-reads the LIVE row. Fail-closed: a read error or a missing id → forbidden."""
