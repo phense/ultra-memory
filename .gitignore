@@ -7,3 +7,7 @@ __pycache__/
 *.db-shm
 *.db-journal
 .DS_Store
+
+# Internal audit artifacts — process notes that embed local /Users paths; never
+# part of the public release (removed from tracking 2026-06-03, BACKLOG §5.2.2).
+docs/audit/

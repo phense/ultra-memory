@@ -1,6 +1,6 @@
 [project]
 name = "ultra-memory"
-version = "0.0.1"
+version = "0.0.2"
 description = "Project-agnostic agent memory engine + knowledge MCP (Claude plugin)"
 requires-python = ">=3.13"
 dependencies = []
