@@ -391,6 +391,52 @@ def test_db_path_from_env_derives_default(tmp_path):
         assert knowledge_mcp.db_path_from_env(env).is_absolute()
 
 
+def test_open_db_for_mcp_creates_missing_parent_and_migrates(tmp_path):
+    """Fresh-install release blocker (§5.2.1): the MCP starts on the post-install
+    restart BEFORE /memory-setup, so ~/.ultra-knowledge/ may not exist yet.
+    _open_db_for_mcp must mkdir the parent (so sqlite can open the file) AND migrate
+    (the MCP writes access_log audit rows on recall), returning a usable empty store
+    instead of crashing the server at startup so it silently never registers."""
+    deep = tmp_path / "nope" / "deeper" / "memory.db"
+    assert not deep.parent.exists()
+    conn = knowledge_mcp._open_db_for_mcp(deep)
+    try:
+        assert deep.parent.is_dir()                                  # parent created
+        assert conn.execute("PRAGMA user_version").fetchone()[0] > 0  # migrated
+        names = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"memories", "access_log"} <= names                   # tables the MCP uses
+    finally:
+        conn.close()
+
+
+def test_open_db_for_mcp_idempotent_on_existing_dir(tmp_path):
+    """Existing parent + re-open: mkdir is a no-op (exist_ok) and re-migrate is
+    idempotent — opening twice yields the same usable migrated store."""
+    p = tmp_path / "memory.db"
+    knowledge_mcp._open_db_for_mcp(p).close()
+    conn = knowledge_mcp._open_db_for_mcp(p)
+    try:
+        assert p.parent.is_dir()
+        assert conn.execute("PRAGMA user_version").fetchone()[0] > 0
+    finally:
+        conn.close()
+
+
+def test_open_db_for_mcp_logs_mkdir_failure_to_stderr(tmp_path, monkeypatch, capsys):
+    """A mkdir failure is logged to stderr, NOT swallowed-then-fatal-silently: the
+    diagnostic line is emitted before open_memory_db surfaces the real open error."""
+    import pathlib
+
+    def _boom(self, *a, **k):
+        raise OSError("read-only fs")
+
+    monkeypatch.setattr(pathlib.Path, "mkdir", _boom)
+    with pytest.raises(Exception):
+        knowledge_mcp._open_db_for_mcp(tmp_path / "x" / "memory.db")
+    assert "could not create" in capsys.readouterr().err
+
+
 def test_knowledge_tools_declares_query_tool():
     tools = knowledge_mcp.knowledge_tools()
     assert any(t.name == "knowledge_query" for t in tools)

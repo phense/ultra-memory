@@ -268,6 +268,28 @@ def db_path_from_env(env):
     return Path.home() / ".ultra-knowledge" / "memory.db"
 
 
+def _open_db_for_mcp(db_path):
+    """Open the memory.db for the stdio MCP, surviving a FRESH install.
+
+    On a clean machine ``~/.ultra-knowledge/`` does not exist yet, and the MCP starts
+    on the post-install restart BEFORE ``/memory-setup`` creates it — ``sqlite3.connect``
+    then raises "unable to open database file" and the server silently never registers
+    (the headline release blocker). Create the parent dir defensively (idempotent), then
+    open **and migrate** so the schema exists: the MCP itself writes ``access_log`` audit
+    rows on every recall, and an empty-but-migrated store recalls nothing gracefully.
+    A mkdir failure is logged to stderr, not fatal — ``open_memory_db`` surfaces the real
+    error if the path is genuinely unusable."""
+    import sys
+    from pathlib import Path
+    parent = Path(db_path).parent
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"ultra-memory knowledge MCP: could not create {parent}: {e}",
+              file=sys.stderr)
+    return memory_lib.open_memory_db(db_path)
+
+
 def lazy_embedder(factory=None):
     """A callable embedder that defers the (heavy) fastembed build to its FIRST call.
 
@@ -334,11 +356,9 @@ def main():
     from mcp.server.stdio import stdio_server
     from mcp.types import TextContent
 
-    from . import db
-
     db_path = db_path_from_env(os.environ)
     caller_class = caller_class_from_env(os.environ)
-    conn = db.connect(db_path)
+    conn = _open_db_for_mcp(db_path)
     embedder = lazy_embedder()
 
     server = Server("ultra-memory-knowledge")
