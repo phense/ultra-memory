@@ -33,9 +33,9 @@ time** at the draft source-gate. Two sites, one category error.
 
 **The fix.** Decouple visibility from provenance by their semantic intent, not
 their convenient shared code. Cluster selection now filters by
-`node_type='learning'` (provenance-agnostic, `9d7b49e`); the source-gate uses a
+`node_type='learning'` (provenance-agnostic, `98f5c81`); the source-gate uses a
 brand-new `assert_synthesis_source()` that reads from any source except pinned
-rows (`4c63d68`). Suddenly all 137 lessons were visible and synthesis worked.
+rows (`c97fe48`). Suddenly all 137 lessons were visible and synthesis worked.
 
 **Lesson learned.** *Reusing a write-gate predicate as a read-gate is a category
 error — and you will make it twice if you make it once. Decouple gates by what
@@ -82,7 +82,7 @@ table cheerfully leaked forbidden `user`/`feedback` memory IDs to subagents. (4)
 `record_session_event` redacted JSON *keys* but passed the *values* to
 `json.dumps()` raw, persisting secrets into the audit spool.
 
-**The fix.** Treat the read path as a **chokepoint** (`4cc0032`): redact all
+**The fix.** Treat the read path as a **chokepoint** (`1a9d1f4`): redact all
 returned text; make `wiki_sync` a redaction chokepoint over title/snippet/bm25;
 add `filter_links_for_caller()` that extends the type-wall to edges and
 fail-closes on unknown kinds; redact string values *before* the dump so replay
@@ -131,7 +131,7 @@ duplicates won by being last. The over-reported count was the perfect alibi:
 everything *looked* fine.
 
 **The fix.** `memory_import` now fails **loud** on a duplicate frontmatter name;
-`import_memory_dir` validates uniqueness up front (`440e0fd`).
+`import_memory_dir` validates uniqueness up front (`62f7739`).
 
 **Lesson learned.** *Silent overwrites in an import flow are debugging hell. Fail
 early, fail loud — a crash with a clear message beats a missing memory you won't
@@ -152,7 +152,7 @@ the results the user was actually entitled to.
 
 **The fix.** Push the type allowlist into the SQL itself (`include_types`) so the
 query only ever returns allowed rows, making top_k and the allowlist compatible;
-clamp and cap per type (`440e0fd`).
+clamp and cap per type (`62f7739`).
 
 **Lesson learned.** *Privilege filters live in the query layer, not post-fetch.
 Filter-after-truncate silently breaks the top_k contract.*
@@ -173,7 +173,7 @@ were a veneer painted over broken wiring. All green, all hollow.
 
 **The fix.** Orchestrator **structural** verification plus an Opus review caught
 the unwired resolver before it could do more damage, then truly wired it
-(`1508dea`). The same discipline later caught a `create_page` contract creep
+(`4af5828`). The same discipline later caught a `create_page` contract creep
 before *it* shipped.
 
 **Lesson learned.** *Green tests without structural verification are a veneer.
@@ -193,7 +193,7 @@ dangling pointer in a graph store.
 anything still pointed at them. Classic.
 
 **The fix.** `prune_session_events` now **soft-tombstones** instead of deleting,
-and edge traversals check liveness, so attribution edges stay safe (`d6725cc`).
+and edge traversals check liveness, so attribution edges stay safe (`6c546f4`).
 
 **Lesson learned.** *In a graph store, hard-delete is a foot-gun. Soft tombstones
 plus liveness checks keep your edges honest.*
@@ -211,7 +211,7 @@ score *alone*, with no tie-break. Equal-score hits flipped top_k membership
 depending on the phase of the moon (well, the hash seed).
 
 **The fix.** Deterministic total order: sort on `(-weighted_score, (kind, key))`.
-Same scores, same ranks — now also the same *order*, every time (`8ae3d17`).
+Same scores, same ranks — now also the same *order*, every time (`4e81b39`).
 
 **Lesson learned.** *Sorting on a single key in the presence of ties is a latent
 bug. Always add a secondary tie-break, or your "deterministic" engine isn't.*
@@ -232,7 +232,7 @@ re-import was a loaded clobber.
 **The fix.** UPDATE now **preserves** `'human'` provenance (a non-human re-save
 over a human row keeps it human), and `import_memory_dir` **skips** any live row
 that's `created_by='human'` — re-import is now edit-safe and provenance-safe
-(`8ae3d17`).
+(`4e81b39`).
 
 **Lesson learned.** *Human provenance is sacred. Import flows must respect it —
 the machine never gets to quietly overrule the person.*
@@ -252,7 +252,7 @@ exactly the references it should have cleaned up — by losing track of them.
 
 **The fix.** Scope the prune to the synced **roots' path-prefix**, independent of
 topic membership (mirroring `memory_export`'s path-based prune); also prune the
-knowledge embedding (`8ae3d17`).
+knowledge embedding (`4e81b39`).
 
 **Lesson learned.** *Orphan-prune must be path-based, not topic-based. Topic
 membership disappears with the last page — and takes your dangling references
@@ -272,9 +272,9 @@ skills. A safety gate that times itself to death is not, strictly, safe.
 someone parallelized it.
 
 **The fix.** First, the panic button: `RUNS_PER_QUERY 5→2` to fit the budget
-(`3f11040`). Then the real one (§1.4.7): a bounded `ThreadPoolExecutor`
+(`a3a8125`). Then the real one (§1.4.7): a bounded `ThreadPoolExecutor`
 (`PROBE_MAX_WORKERS=6`), each probe with a **unique** per-probe temp file
-(`<slug>-probe-<nonce>.md`). ~50 min → ~12 min (`296ad6a`), and we could afford
+(`<slug>-probe-<nonce>.md`). ~50 min → ~12 min (`c87389b`), and we could afford
 `RUNS_PER_QUERY` back up to 3.
 
 **Lesson learned.** *Tight-deadline evaluation loops need parallelism, and every
@@ -339,7 +339,7 @@ at the door, and the docstring lied about it.
 
 **The fix.** `query_memories` now raises a clear `ValueError` at entry if
 `embedder is None` on a non-empty store, surfacing the real constraint instead of
-a mid-function mystery (`b2e8961`).
+a mid-function mystery (`6bfd4b9`).
 
 **Lesson learned.** *Check type invariants at the front door. A false docstring is
 worse than no docstring — it hides the real error behind a confident lie.*
@@ -357,7 +357,7 @@ silently halted.
 retry. Long bodies — exactly the valuable ones — were the most fragile.
 
 **The fix.** Wrap draft generation in a `retry_on_parse` loop — one parse failure
-triggers one retry, which handles occasional LLM fragility gracefully (`eff77b4`).
+triggers one retry, which handles occasional LLM fragility gracefully (`956bbce`).
 
 **Lesson learned.** *LLM-generated structured output is fragile by nature. Design
 for a single-pass retry on parse failure; one bad newline shouldn't sink the
@@ -378,7 +378,7 @@ lock the deferred transaction was saving for later.
 
 **The fix.** Acquire the lock up front with `BEGIN IMMEDIATE`, wrapped in a
 bounded retry-with-exponential-backoff (`bounded_busy_retry`) so a transient busy
-backs off and retries instead of exploding (`0c704e8`, `35ad1fd`). The spool
+backs off and retries instead of exploding (`0c704e8`, `42c1eaf`). The spool
 catches anything that still loses, and `maintain.run` drains it.
 
 **Lesson learned.** *WAL mode with concurrent writers wants upfront lock
@@ -423,7 +423,7 @@ does not, it turns out, redact for you.
 **The fix.** Redact each string element **before** `json.dumps()`, so the spool
 carries only redacted text. (`event_key` still keys on the raw text so it
 survives redaction-rule changes — content-addressing where it's safe, redaction
-where it's persisted) (`4cc0032`).
+where it's persisted) (`1a9d1f4`).
 
 **Lesson learned.** *Serialization is not redaction. Redact before the dump, never
 after — and the audit trail is the* last *place you want a leak.*
@@ -441,7 +441,7 @@ a lot of wasted SQL.
 
 **The fix.** Score all candidates, **sort + truncate to top_k first**, *then*
 fetch links only for the survivors. Per-recall link work is now bounded to top_k,
-and the return shape is byte-identical (`8ae3d17`). (A composite index
+and the return shape is byte-identical (`4e81b39`). (A composite index
 `idx_access_log_session` in migration 0008 cleaned up a sibling full-scan on the
 attribution query, too.)
 
