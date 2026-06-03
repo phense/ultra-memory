@@ -222,6 +222,15 @@ cycle:
   edit-safe**: a legacy re-import SKIPS any row whose live `created_by` is `human`
   (it neither reverts the human-edited body nor demotes the provenance) — mirroring
   the deliberate status/pin preservation.
+  - **Provenance gates MUTABILITY, not synthesis VISIBILITY (2026-06-03).** `created_by`
+    controls whether the SP-7 self-correct loop may *rewrite* a unit (`MUTABLE_PROVENANCES =
+    ('agent','background_review')` — `human`/`import`/`backfill_import`/`pinned` are immutable).
+    It does **not** gate whether SP-10 may *learn a skill from* it: `select_induction_clusters`
+    selects lessons by `node_type='learning'` + quality (`outcome_weight ≥ θ_w`), **provenance-
+    agnostic**, so the cold-start `backfill_import` seed (and `human`/`import` learnings) can
+    seed a generated skill while staying un-rewritable. Synthesis is additive + eval-gated +
+    reversible, so seeding from any provenance is safe; conflating the two predicates is the
+    bug that made the session-cache backfill invisible to induction.
 - `session_events.outcome_signal` (the deterministic capture hint) is accepted by
   `record_session_event` but **set by no engine writer** — the Stop-hook capture
   that enqueues `skill_learning_candidate` rows is **Trading-side** (it lives in the
