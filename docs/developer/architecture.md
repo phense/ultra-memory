@@ -230,7 +230,11 @@ cycle:
     agnostic**, so the cold-start `backfill_import` seed (and `human`/`import` learnings) can
     seed a generated skill while staying un-rewritable. Synthesis is additive + eval-gated +
     reversible, so seeding from any provenance is safe; conflating the two predicates is the
-    bug that made the session-cache backfill invisible to induction.
+    bug that made the session-cache backfill invisible to induction. The SP-10 trigger-probe
+    eval-gate (no static-skill hijack, `candidate_fp==0`) is **self-validating per deployment**:
+    `skill_eval.build_probe_corpus` auto-derives one hijack-direction probe per discovered skill
+    from its description, so coverage is complete by construction (`coverage_gaps()==[]`) without
+    a hand-maintained corpus that would go stale as the skill set changes.
 - `session_events.outcome_signal` (the deterministic capture hint) is accepted by
   `record_session_event` but **set by no engine writer** — the Stop-hook capture
   that enqueues `skill_learning_candidate` rows is **Trading-side** (it lives in the
