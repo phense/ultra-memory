@@ -80,6 +80,46 @@ def test_select_theta_w(tmp_path):
     assert len(ss.select_induction_clusters(conn, n=3, theta_w=0.5)) == 1
 
 
+def test_select_includes_backfill_import_provenance(tmp_path):
+    # SP-10 visibility is by node_type='learning', NOT created_by. The cold-start
+    # backfill (created_by='backfill_import') MUST seed synthesis — that is the whole
+    # point of seeding the store so a fresh install isn't at zero. Provenance gates
+    # MUTABILITY (SP-7 MUTABLE_PROVENANCES), not VISIBILITY (SP-10 selection).
+    conn = _conn(tmp_path)
+    for i in range(3):
+        _lesson(conn, f"b{i}", "backtest", created_by="backfill_import")
+    clusters = ss.select_induction_clusters(conn, n=3, theta_w=1.0)
+    assert len(clusters) == 1
+    assert clusters[0]["domain"] == "backtest" and clusters[0]["n"] == 3
+
+
+def test_select_counts_mixed_provenance(tmp_path):
+    # human + import + backfill_import learnings in one domain all count toward the
+    # cluster — selection is provenance-agnostic.
+    conn = _conn(tmp_path)
+    _lesson(conn, "m0", "backtest", created_by="human")
+    _lesson(conn, "m1", "backtest", created_by="import")
+    _lesson(conn, "m2", "backtest", created_by="backfill_import")
+    clusters = ss.select_induction_clusters(conn, n=3, theta_w=1.0)
+    assert len(clusters) == 1 and clusters[0]["n"] == 3
+    assert set(clusters[0]["lesson_ids"]) == {"m0", "m1", "m2"}
+
+
+def test_select_excludes_generated_skill_backing_rows(tmp_path):
+    # Regression guard: a generated skill's own backing row (node_type='generated_skill')
+    # must NOT be counted as a lesson, else a skill would re-induce itself. The
+    # node_type='learning' predicate must survive the created_by decoupling.
+    conn = _conn(tmp_path)
+    for i in range(3):
+        _lesson(conn, f"b{i}", "backtest", created_by="backfill_import")
+    memory_lib.save_memory(conn, id="genrow", type="learning", title="G",
+                           body="backing", ts=TS, index_hook="backtest",
+                           node_type="generated_skill", created_by="background_review")
+    clusters = ss.select_induction_clusters(conn, n=3, theta_w=1.0)
+    assert len(clusters) == 1
+    assert "genrow" not in set(clusters[0]["lesson_ids"]) and clusters[0]["n"] == 3
+
+
 def test_draft_happy(tmp_path):
     conn = _conn(tmp_path)
     for i in range(3):

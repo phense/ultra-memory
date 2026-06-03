@@ -63,16 +63,23 @@ from ultra_memory.maintenance.skill_ids import (  # noqa: E402,F401
 def select_induction_clusters(conn, *, n: int = DEFAULT_N,
                               theta_w: float = DEFAULT_THETA_W,
                               lesson_cap: int = DEFAULT_LESSON_CAP) -> list[dict]:
-    """Adapt per_skill_outcome_rates: group graduated lessons by index_hook, keep
-    domains with >=n lessons and mean outcome_weight >= theta_w. Returns clusters
-    ranked (avg_w desc, n desc), each with its lesson bodies pulled. EXCLUDES the
-    generated-skill domains' own backing rows (node_type='generated_skill')."""
+    """Group active learnings by index_hook, keep domains with >=n lessons and mean
+    outcome_weight >= theta_w. Returns clusters ranked (avg_w desc, n desc), each with
+    its lesson bodies pulled.
+
+    Selection is by ``node_type='learning'`` + quality and is deliberately
+    PROVENANCE-AGNOSTIC: any ``created_by`` (incl. ``'backfill_import'`` from the
+    cold-start seed, ``'human'``, ``'import'``) may SEED a generated skill. Provenance
+    gates only MUTABILITY (the SP-7 ``MUTABLE_PROVENANCES`` wall — the self-correct loop
+    still may not REWRITE a seed), never SP-10 visibility — synthesis is additive +
+    eval-gated + reversible, so seeding from any provenance is safe. ``node_type='learning'``
+    also excludes a generated skill's own backing rows (``node_type='generated_skill'``),
+    preventing self-induction."""
     rows = conn.execute(
         """
         SELECT index_hook AS domain, COUNT(*) AS n, AVG(outcome_weight) AS avg_w
         FROM memories
-        WHERE created_by IN ('agent','background_review')
-          AND status = 'active'
+        WHERE status = 'active'
           AND node_type = 'learning'
           AND index_hook IS NOT NULL
         GROUP BY index_hook
@@ -88,8 +95,7 @@ def select_induction_clusters(conn, *, n: int = DEFAULT_N,
             """
             SELECT id, title, body, outcome_weight
             FROM memories
-            WHERE created_by IN ('agent','background_review')
-              AND status = 'active' AND node_type = 'learning' AND index_hook = ?
+            WHERE status = 'active' AND node_type = 'learning' AND index_hook = ?
             ORDER BY outcome_weight DESC, updated_at DESC
             LIMIT ?
             """,
