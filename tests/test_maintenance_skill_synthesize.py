@@ -220,6 +220,37 @@ def test_draft_skips_existing_skill_domain(tmp_path):
     assert "no eligible cluster" in out["reason"]
 
 
+def test_draft_skips_prefixed_plugin_skill_by_suffix(tmp_path):
+    # A plugin skill's index_hook is prefixed ('superpowers:X') but its discovered name
+    # is the bare 'X' → the colon-suffix must match so it's skipped too.
+    conn = _conn(tmp_path)
+    for i in range(3):
+        _lesson(conn, f"a{i}", "superpowers:test-driven-development")
+    called = {"n": 0}
+    def runner(cmd, **kw):
+        called["n"] += 1
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+    out = ss.draft(conn, repo_root=tmp_path / "repo",
+                   static_skill_names={"test-driven-development"},  # bare name (no prefix)
+                   runner=runner, ts=TS, env=FAKE_ENV)
+    assert out["skill"] is None and called["n"] == 0
+
+
+def test_draft_skips_any_colon_prefixed_domain(tmp_path):
+    # A ':'-prefixed domain is an existing plugin capability (skill/command/verb) the
+    # eval-gate may not even enumerate → skip to avoid minting a shadowing competitor.
+    conn = _conn(tmp_path)
+    for i in range(3):
+        _lesson(conn, f"a{i}", "ultra-memory:memory-save")
+    called = {"n": 0}
+    def runner(cmd, **kw):
+        called["n"] += 1
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+    out = ss.draft(conn, repo_root=tmp_path / "repo", static_skill_names=set(),
+                   runner=runner, ts=TS, env=FAKE_ENV)
+    assert out["skill"] is None and called["n"] == 0
+
+
 def test_draft_does_not_skip_net_new_domain(tmp_path):
     # A domain with NO static-skill namesake (e.g. an agent's domain) IS draftable —
     # the eval-gate has no namesake to hijack, so SP-10 can mint a genuinely new skill.

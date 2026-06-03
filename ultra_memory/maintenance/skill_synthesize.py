@@ -243,12 +243,21 @@ def draft(conn, *, repo_root, runner=subprocess.run, static_descriptions=None,
     skill_names = set(static_skill_names or ())
     clusters = select_induction_clusters(conn, n=n, theta_w=theta_w)
     for cluster in clusters:
-        if cluster["domain"] in skill_names:
-            # A gen-<existing-skill> is a same-domain COMPETITOR of <skill> → the
-            # anti-hijack eval-gate would always reject it. Skip BEFORE drafting (no
-            # wasted OAuth/eval cost). Such domains are augmented via their per-skill
-            # Learnings.md; SP-10 mints skills only for net-new domains (no static
-            # namesake — e.g. an agent's domain or a forward-loop emergent pattern).
+        domain = cluster["domain"]
+        # A gen-<existing-skill/command> is a same-domain COMPETITOR → the anti-hijack
+        # eval-gate would always reject it. Skip BEFORE drafting (no wasted OAuth/eval
+        # cost). Three forms of "this domain IS an existing capability":
+        #   - exact name match (a project skill, e.g. 'backtest');
+        #   - colon-suffix match (a plugin skill whose index_hook is prefixed, e.g.
+        #     'superpowers:subagent-driven-development' → name 'subagent-driven-development');
+        #   - any ':'-prefixed domain (a plugin skill/command/verb — an existing capability
+        #     whose namesake the eval-gate may not even enumerate, so skip to be safe).
+        # Such domains are augmented via their per-skill Learnings.md; SP-10 mints skills
+        # only for NET-NEW domains (no static namesake — an agent's domain, a forward-loop
+        # emergent pattern).
+        if (domain in skill_names
+                or domain.rsplit(":", 1)[-1] in skill_names
+                or ":" in domain):
             continue
         # Funnel every source lesson through the SP-10 SOURCE gate FIRST (re-reads the
         # live row). Provenance-agnostic (synthesis reads, never mutates the source — so
