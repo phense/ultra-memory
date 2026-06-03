@@ -342,31 +342,35 @@ def run_session_ingest_pass(conn, *, ts, env, runner=subprocess.run,
     (SESSION_INGEST_ENABLE; default OFF → a no-op). OAuth-only (run_claude), fail-open
     per session (an error leaves that session un-resolved for retry), idempotent."""
     if not _enabled(env):
-        return {"mode": "disabled", "sessions": 0, "ingested": 0, "corrections": 0}
-    ingested = corrections = sessions = 0
+        return {"mode": "disabled", "sessions": 0, "ingested": 0,
+                "skill_learnings": 0, "corrections": 0}
+    ingested = corrections = sessions = skill_learnings_n = 0
     for p in pending_sessions(conn, limit=limit):
         try:
             digest = build_digest(p["transcript_path"], max_chars=max_digest_chars)
             if not digest.strip():
                 mark_resolved(conn, event_id=p["event_id"])   # nothing to mine
                 continue
-            stdout = run_claude(build_prompt(digest), model=model, system=build_sys(),
-                                claude_bin=claude_bin, timeout=timeout, runner=runner,
-                                env=env)
-            result = parse_ingest(stdout, max_facts=max_facts)
+            skills_used = skills_used_for(conn, p["session_id"])
+            stdout = run_claude(build_prompt(digest, skills_used=skills_used),
+                                model=model, system=build_sys(), claude_bin=claude_bin,
+                                timeout=timeout, runner=runner, env=env)
+            result = parse_ingest(stdout, max_facts=max_facts, skills_used=skills_used)
             ingested += _save_facts(conn, result["facts"],
                                     session_id=p["session_id"], ts=ts)
+            skill_learnings_n += _save_skill_learnings(conn, result["skill_learnings"], ts=ts)
             if result["correction"]:
                 corrections += _save_correction(conn, result["correction"],
                                                 session_id=p["session_id"], ts=ts)
+            resolve_skill_candidates(conn, p["session_id"])   # supersede the consolidate feeder
             mark_resolved(conn, event_id=p["event_id"])
             sessions += 1
-        except Exception as exc:          # per-session fail-open (leave un-resolved)
+        except Exception as exc:          # per-session fail-open (leave BOTH markers un-resolved)
             log(f"session-ingest failed for {p.get('session_id')}: {exc!r} — retry next run")
     _emit_audit(audit_dir, ts, {"sessions": sessions, "ingested": ingested,
-                                "corrections": corrections})
+                                "skill_learnings": skill_learnings_n, "corrections": corrections})
     return {"mode": "ran", "sessions": sessions, "ingested": ingested,
-            "corrections": corrections}
+            "skill_learnings": skill_learnings_n, "corrections": corrections}
 
 
 def _emit_audit(audit_dir, ts, row) -> None:

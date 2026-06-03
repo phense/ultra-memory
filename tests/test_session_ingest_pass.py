@@ -151,6 +151,37 @@ def test_build_prompt_includes_skills_used_and_schema():
     assert "skill_learnings" in si.build_sys()
 
 
+def test_pass_saves_skill_learnings_and_resolves_candidates(tmp_path):
+    conn = _conn(tmp_path)
+    si.enqueue(conn, session_id="S1", transcript_path=str(_transcript(tmp_path)), ts=TS)
+    memory_lib.record_session_event(
+        conn, session_id="S1", kind="skill_learning_candidate",
+        title="backtest: skill invoked, Learnings.md not updated (x)", ts=TS, detail="e")
+    runner = _runner(_payload(
+        facts=[{"title": "Gen", "body": "general fact."}],
+        skill_learnings=[{"skill": "backtest", "title": "Fill at bid/ask", "body": "Never mid."}]))
+    res = si.run_session_ingest_pass(conn, ts=TS, env=ON, runner=runner)
+    assert res["ingested"] == 1 and res["skill_learnings"] == 1
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE node_type='learning' "
+                        "AND index_hook='backtest'").fetchone()[0] == 1
+    # the candidate marker is resolved (consolidate superseded); pending resolved too
+    assert conn.execute("SELECT COUNT(*) FROM session_events WHERE kind='skill_learning_candidate' "
+                        "AND resolved=0").fetchone()[0] == 0
+    assert si.pending_sessions(conn) == []
+    conn.close()
+
+
+def test_pass_failopen_leaves_both_markers_unresolved(tmp_path):
+    conn = _conn(tmp_path)
+    si.enqueue(conn, session_id="S1", transcript_path=str(_transcript(tmp_path)), ts=TS)
+    memory_lib.record_session_event(
+        conn, session_id="S1", kind="skill_learning_candidate",
+        title="backtest: skill invoked, ... (x)", ts=TS, detail="e")
+    si.run_session_ingest_pass(conn, ts=TS, env=ON, runner=_runner_raises())
+    assert conn.execute("SELECT COUNT(*) FROM session_events WHERE resolved=0").fetchone()[0] == 2
+    conn.close()
+
+
 # --------------------------------------------------------------------------- #
 # run_session_ingest_pass.
 # --------------------------------------------------------------------------- #
