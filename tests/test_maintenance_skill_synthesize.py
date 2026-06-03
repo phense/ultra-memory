@@ -201,6 +201,38 @@ def test_draft_halts_on_pinned_source(tmp_path):
                  ts=TS, env=FAKE_ENV)
 
 
+def test_draft_skips_existing_skill_domain(tmp_path):
+    # A gen-<existing-skill> would hijack its static namesake → the eval-gate always
+    # rejects it. Skip such a domain BEFORE drafting (no wasted run_claude/eval cost);
+    # those domains are augmented via their per-skill Learnings.md instead.
+    conn = _conn(tmp_path)
+    for i in range(3):
+        _lesson(conn, f"a{i}", "backtest")  # 'backtest' IS a static skill
+    called = {"n": 0}
+    def runner(cmd, **kw):
+        called["n"] += 1
+        return types.SimpleNamespace(
+            returncode=0, stdout=json.dumps(_good_payload("gen-backtest", ["a0", "a1", "a2"])),
+            stderr="")
+    out = ss.draft(conn, repo_root=tmp_path / "repo", static_skill_names={"backtest"},
+                   runner=runner, ts=TS, env=FAKE_ENV)
+    assert out["skill"] is None and called["n"] == 0   # skipped before any draft call
+    assert "no eligible cluster" in out["reason"]
+
+
+def test_draft_does_not_skip_net_new_domain(tmp_path):
+    # A domain with NO static-skill namesake (e.g. an agent's domain) IS draftable —
+    # the eval-gate has no namesake to hijack, so SP-10 can mint a genuinely new skill.
+    conn = _conn(tmp_path)
+    for i in range(3):
+        _lesson(conn, f"b{i}", "daily-market-briefing")  # an agent, not a static skill
+    out = ss.draft(conn, repo_root=tmp_path / "repo",
+                   static_skill_names={"backtest", "risk-manager"},
+                   runner=_runner(_good_payload("gen-daily-market-briefing", ["b0", "b1", "b2"])),
+                   ts=TS, env=FAKE_ENV)
+    assert out["skill"] is not None and out["skill"].slug == "gen-daily-market-briefing"
+
+
 def _flaky_runner(outputs):
     """Runner returning a different raw stdout per call (last value repeats)."""
     state = {"i": 0}

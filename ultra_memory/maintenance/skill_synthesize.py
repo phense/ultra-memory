@@ -231,7 +231,8 @@ def parse_skill_plan(stdout: str, cluster: dict) -> skill_fs.GeneratedSkill | No
 def draft(conn, *, repo_root, runner=subprocess.run, static_descriptions=None,
           n: int = DEFAULT_N, theta_w: float = DEFAULT_THETA_W, ts: str,
           model: str | None = None, claude_bin: str = "claude",
-          timeout: int = 720, env=None, draft_attempts: int = 2) -> dict:
+          timeout: int = 720, env=None, draft_attempts: int = 2,
+          static_skill_names=None) -> dict:
     """The induction pipeline (planning only). Picks the top eligible domain with a
     material delta, funnels every source lesson through the SP-10 source gate
     (provenance-agnostic read eligibility — backfill_import/import/human all OK; only a
@@ -239,8 +240,16 @@ def draft(conn, *, repo_root, runner=subprocess.run, static_descriptions=None,
     {skill, cluster, incumbent, reason}. Raises ForbiddenTargetError if a source lesson is
     PINNED (the orchestrator turns it into a whole-run halt)."""
     static_descriptions = static_descriptions or []
+    skill_names = set(static_skill_names or ())
     clusters = select_induction_clusters(conn, n=n, theta_w=theta_w)
     for cluster in clusters:
+        if cluster["domain"] in skill_names:
+            # A gen-<existing-skill> is a same-domain COMPETITOR of <skill> → the
+            # anti-hijack eval-gate would always reject it. Skip BEFORE drafting (no
+            # wasted OAuth/eval cost). Such domains are augmented via their per-skill
+            # Learnings.md; SP-10 mints skills only for net-new domains (no static
+            # namesake — e.g. an agent's domain or a forward-loop emergent pattern).
+            continue
         # Funnel every source lesson through the SP-10 SOURCE gate FIRST (re-reads the
         # live row). Provenance-agnostic (synthesis reads, never mutates the source — so
         # the backfill_import seed is readable); only a PINNED source → ForbiddenTargetError

@@ -235,7 +235,11 @@ def run_synthesize_pass(conn, *, repo_root, date, ts, briefings_dir,
         try:
             plan = ss.draft(conn, repo_root=repo_root, runner=runner, ts=ts, env=env,
                             model=model,
-                            static_descriptions=list(static_descriptions.values()))
+                            static_descriptions=list(static_descriptions.values()),
+                            # skip domains whose name IS a static skill (a gen-<skill>
+                            # would hijack its namesake → always rejected); SP-10 mints
+                            # only net-new domains.
+                            static_skill_names=set(static_descriptions.keys()))
         except ForbiddenTargetError as exc:
             result.halted = True
             result.reason = f"HALT (forbidden source): {exc}"
