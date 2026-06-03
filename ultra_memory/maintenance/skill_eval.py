@@ -28,9 +28,12 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import subprocess
 import sys
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,12 +43,13 @@ import yaml
 from ultra_memory.claude_cli import _child_env  # noqa: E402  (OAuth-sanitized env)
 
 THETA_DESC = 0.6          # Tier-A: reject above this token-cosine to any static desc
-RUNS_PER_QUERY = 2        # Tier-B: hijack-direction sample count (zero-tolerance — fire if ANY
-                          # sample fires). Lowered 5→2 (2026-06-03): the per-deployment auto-corpus
-                          # probes ~50 skills, each ~14-18s of `claude -p`; at 5 the serial gate
-                          # ran >60min and overran MAINT_TIMEOUT_STAGE2. 2 still multi-samples
-                          # (a truly-confusable candidate fires deterministically). The proper
-                          # fix is parallel/cosine-bounded probing (§1.4.7).
+RUNS_PER_QUERY = 3        # Tier-B: hijack-direction sample count (zero-tolerance — fire if ANY
+                          # sample fires). The per-deployment auto-corpus probes ~50 skills; the
+                          # probes now run CONCURRENTLY (§1.4.7), so the gate fits the timeout at a
+                          # conservative 3 samples (~12 min) rather than the serial-era 2.
+PROBE_MAX_WORKERS = int(os.environ.get("ULTRA_MEMORY_PROBE_WORKERS", "6") or "6")
+                          # Tier-B concurrency: independent `claude -p` probes run in a bounded
+                          # thread pool. Bounded so the OAuth CLI is not swamped (§1.4.7).
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -269,7 +273,12 @@ def probe_fires(query: str, skill_name: str, skill_description: str, *,
     child_env = _child_env(env)  # OAuth-only by construction (refuses API key / no token)
     cmds = Path(repo_root) / ".claude" / "commands"
     cmds.mkdir(parents=True, exist_ok=True)
-    cmd_name = f"{skill_name}-probe"
+    # UNIQUE per-call filename so CONCURRENT probes (§1.4.7) never race on one shared file
+    # (the old fixed `<skill>-probe.md` collided under the thread pool). Detection matches the
+    # STABLE prefix `<skill>-probe`, so any concurrent identical-proxy copy the model picks
+    # still counts as the candidate firing.
+    detect = f"{skill_name}-probe"
+    cmd_name = f"{detect}-{uuid.uuid4().hex[:8]}"
     cmd_file = cmds / f"{cmd_name}.md"
     cmd_file.write_text(
         f"---\ndescription: {json.dumps(skill_description)}\n---\n\n(probe)\n",
@@ -278,7 +287,7 @@ def probe_fires(query: str, skill_name: str, skill_description: str, *,
         proc = runner([claude_bin, "-p", query, "--output-format", "stream-json",
                        "--verbose"], capture_output=True, text=True,
                       timeout=timeout, env=child_env)
-        return _stream_mentions(getattr(proc, "stdout", "") or "", cmd_name)
+        return _stream_mentions(getattr(proc, "stdout", "") or "", detect)
     finally:
         try:
             cmd_file.unlink()  # ephemeral probe scaffolding — not a knowledge artifact
@@ -299,6 +308,22 @@ class EvalReport:
     tier_a_hit: str | None = None
     probes_evaluated: int = 0
     coverage_gaps: list = field(default_factory=list)
+
+
+def _probe_outcome(probe, candidate, fn, runs_per_query):
+    """Evaluate ONE hijack probe: fire if the candidate triggers on the probe's query
+    within `runs_per_query` samples (early-break on the first fire). A probe error fails
+    CLOSED (treated as a fire → reject). Returns (fired: bool, calls: int). Pure per-probe
+    so the probes parallelize trivially."""
+    calls = 0
+    for _ in range(max(1, runs_per_query)):
+        calls += 1
+        try:
+            if fn(probe["query"], candidate):
+                return True, calls
+        except Exception:
+            return True, calls  # fail-closed — never admit an un-evaluated skill
+    return False, calls
 
 
 def run_trigger_gate(candidate, *, static_descriptions, corpus,
@@ -345,21 +370,16 @@ def run_trigger_gate(candidate, *, static_descriptions, corpus,
     # Tier-B behavioral gate.
     fn = probe_fn or (lambda q, c: probe_fires(
         q, c.slug, c.description, repo_root=repo_root, runner=runner, env=env))
-    candidate_fp = 0
-    evaluated = 0
-    for p in hijack_probes:
-        fired = False
-        for _ in range(max(1, runs_per_query)):
-            evaluated += 1
-            try:
-                if fn(p["query"], candidate):
-                    fired = True
-                    break
-            except Exception:
-                fired = True  # a probe error fails CLOSED — never admit-an-unevaluated skill
-                break
-        if fired:
-            candidate_fp += 1
+    # Probes are INDEPENDENT `claude -p` calls → run them CONCURRENTLY in a bounded pool
+    # (§1.4.7: serial was ~50min/run and overran the maintenance timeout). Semantics are
+    # identical to the serial loop — candidate_fp is the count of probes that fired (order-
+    # independent), each probe early-breaks on its first fire, a probe error fails CLOSED.
+    workers = max(1, min(PROBE_MAX_WORKERS, len(hijack_probes)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        outcomes = list(pool.map(
+            lambda p: _probe_outcome(p, candidate, fn, runs_per_query), hijack_probes))
+    candidate_fp = sum(1 for fired, _ in outcomes if fired)
+    evaluated = sum(calls for _, calls in outcomes)
     if candidate_fp > 0:
         return EvalReport(admit=False, verdict="reject",
                           reason=f"trigger hijack: candidate fired on "

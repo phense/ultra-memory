@@ -80,6 +80,29 @@ def test_gate_rejects_tier_b_hijack():
     assert rep.admit is False and rep.verdict == "reject" and rep.candidate_fp > 0
 
 
+def test_gate_counts_fired_probes_concurrently(tmp_path):
+    # §1.4.7: probes run in a bounded thread pool. candidate_fp must equal the number of
+    # DISTINCT probes the candidate fired on (order-independent), regardless of concurrency.
+    statics = {"a": "alpha desc", "b": "bravo desc", "c": "charlie desc"}
+    corpus = [
+        {"query": "qa", "expect": "a", "should_trigger": True},
+        {"query": "qb", "expect": "b", "should_trigger": True},
+        {"query": "qc", "expect": "c", "should_trigger": True},
+    ]
+    # fires on qa + qc (2 probes), not qb.
+    rep = se.run_trigger_gate(_cand(), static_descriptions=statics, corpus=corpus,
+                              probe_fn=lambda q, c: q in ("qa", "qc"))
+    assert rep.admit is False and rep.verdict == "reject" and rep.candidate_fp == 2
+
+
+def test_gate_admits_when_no_probe_fires_concurrently(tmp_path):
+    statics = {"a": "alpha", "b": "bravo", "c": "charlie", "d": "delta"}
+    corpus = [{"query": f"q{n}", "expect": n, "should_trigger": True} for n in statics]
+    rep = se.run_trigger_gate(_cand(), static_descriptions=statics, corpus=corpus,
+                              probe_fn=lambda q, c: False)
+    assert rep.admit is True and rep.candidate_fp == 0
+
+
 def test_gate_holds_on_coverage_gap():
     statics = dict(STATICS, **{"uncovered-skill": "x"})
     rep = se.run_trigger_gate(_cand(), static_descriptions=statics, corpus=CORPUS,
@@ -123,8 +146,8 @@ def test_probe_fires_oauth_and_parse(tmp_path):
                           runner=runner_fired, env=FAKE_ENV) is True
     assert se.probe_fires("q", "gen-foo", "desc", repo_root=tmp_path,
                           runner=runner_quiet, env=FAKE_ENV) is False
-    # the ephemeral probe command-file is cleaned up
-    assert not (tmp_path / ".claude" / "commands" / "gen-foo-probe.md").exists()
+    # the ephemeral probe command-file (now a unique <skill>-probe-<nonce>.md) is cleaned up
+    assert not list((tmp_path / ".claude" / "commands").glob("gen-foo-probe*.md"))
     # OAuth-only: no token -> refuse to spawn
     with pytest.raises(OAuthViolation):
         se.probe_fires("q", "gen-foo", "desc", repo_root=tmp_path,
