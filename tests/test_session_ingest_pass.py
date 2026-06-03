@@ -107,6 +107,24 @@ def test_parse_ingest_skill_learnings_default_empty_without_skills_used():
     assert si.parse_ingest(out)["skill_learnings"] == []   # skills_used=None → ground to empty
 
 
+def test_save_skill_learnings_writes_learning_rows(tmp_path):
+    conn = _conn(tmp_path)
+    n = si._save_skill_learnings(
+        conn, [{"skill": "backtest", "title": "Fill at bid/ask", "body": "Never the mid."}],
+        ts=TS)
+    assert n == 1
+    row = conn.execute(
+        "SELECT node_type, index_hook, created_by FROM memories "
+        "WHERE index_hook='backtest'").fetchone()
+    assert row["node_type"] == "learning" and row["index_hook"] == "backtest"
+    assert row["created_by"] == "background_review"
+    # idempotent: re-save same content → no second row
+    si._save_skill_learnings(conn, [{"skill": "backtest", "title": "Fill at bid/ask",
+                                     "body": "Never the mid."}], ts=TS)
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE index_hook='backtest'").fetchone()[0] == 1
+    conn.close()
+
+
 # --------------------------------------------------------------------------- #
 # run_session_ingest_pass.
 # --------------------------------------------------------------------------- #

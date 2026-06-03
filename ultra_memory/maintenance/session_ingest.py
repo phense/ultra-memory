@@ -245,6 +245,31 @@ def _save_facts(conn, facts, *, session_id, ts) -> int:
     return n
 
 
+def _skill_learning_id(skill: str, title: str, body: str) -> str:
+    return "slearn-" + hashlib.sha256(
+        f"skill-learning:{skill}:{title}:{body}".encode("utf-8")).hexdigest()[:24]
+
+
+def _save_skill_learnings(conn, skill_learnings, *, ts) -> int:
+    """Persist each grounded skill-learning as the SP-10 / Learnings.md substrate row:
+    node_type='learning', index_hook=<skill>, created_by='background_review' — the same
+    shape consolidate.py graduates, so these project into the skill's Learnings.md and
+    are SP-10-eligible. Content-hash id → idempotent re-ingest upsert. Per-entry
+    fail-open (the redaction chokepoint is save_memory)."""
+    n = 0
+    for s in skill_learnings:
+        try:
+            memory_lib.save_memory(
+                conn, id=_skill_learning_id(s["skill"], s["title"], s["body"]),
+                type="learning", title=s["title"][:200], body=s["body"], ts=ts,
+                index_hook=s["skill"], node_type="learning",
+                created_by="background_review")
+            n += 1
+        except Exception:
+            pass
+    return n
+
+
 def _save_correction(conn, corr, *, session_id, ts) -> int:
     """A detected user correction → a high-signal `feedback` memory (surfaces in the
     SessionStart rehydration gist). The Tier-1 DIRECT skill amendment (north-star §4)
