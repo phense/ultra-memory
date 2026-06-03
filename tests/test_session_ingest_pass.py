@@ -145,6 +145,12 @@ def test_skills_used_and_resolve_candidates(tmp_path):
     conn.close()
 
 
+def test_build_prompt_includes_skills_used_and_schema():
+    p = si.build_prompt("DIGEST TEXT", skills_used={"backtest"})
+    assert "backtest" in p and "skill_learnings" in p
+    assert "skill_learnings" in si.build_sys()
+
+
 # --------------------------------------------------------------------------- #
 # run_session_ingest_pass.
 # --------------------------------------------------------------------------- #

@@ -189,16 +189,25 @@ def build_sys() -> str:
         "correction_detected/correction: TRUE only when the USER concretely contradicted "
         "or corrected an assistant behavior ('that's wrong, do it like X'); "
         "correction={behavior, do_instead}. Default false.\n"
-        "If nothing durable: extracted_knowledge=[], correction_detected=false."
+        "skill_learnings: for EACH skill in the SKILLS USED list, emit at most one "
+        "durable, reusable lesson about using THAT skill effectively, grounded in this "
+        "transcript (the kind of line that belongs in that skill's Learnings.md). Emit a "
+        "skill ONLY if it is in the list AND the transcript shows a real durable lesson; "
+        "otherwise omit it. NEVER invent a lesson and NEVER tag a skill not in the list.\n"
+        "If nothing durable: extracted_knowledge=[], skill_learnings=[], "
+        "correction_detected=false."
     )
 
 
-def build_prompt(digest: str) -> str:
+def build_prompt(digest: str, *, skills_used=None) -> str:
+    skills = ", ".join(sorted(skills_used or ())) or "(none)"
     return (
         "SESSION DIGEST (user/assistant prose + tool names; tool outputs omitted):\n"
         f"{digest}\n\n"
+        f"SKILLS USED THIS SESSION (only these may appear in skill_learnings): {skills}\n\n"
         'Return JSON: {"extracted_knowledge": [{"title": <str>, "body": <str>, '
-        '"topic": <str|null>}], "correction_detected": <bool>, '
+        '"topic": <str|null>}], "skill_learnings": [{"skill": <str>, "title": <str>, '
+        '"body": <str>}], "correction_detected": <bool>, '
         '"correction": {"behavior": <str>, "do_instead": <str>} | null}'
     )
 
