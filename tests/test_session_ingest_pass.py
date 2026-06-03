@@ -125,6 +125,26 @@ def test_save_skill_learnings_writes_learning_rows(tmp_path):
     conn.close()
 
 
+def test_skills_used_and_resolve_candidates(tmp_path):
+    conn = _conn(tmp_path)
+    for skill in ("backtest", "risk-manager", "backtest"):   # dup backtest → de-duped
+        memory_lib.record_session_event(
+            conn, session_id="S1", kind="skill_learning_candidate",
+            title=f"{skill}: skill invoked, Learnings.md not updated (x)", ts=TS,
+            detail="expected=p")
+    memory_lib.record_session_event(   # other session — untouched
+        conn, session_id="S2", kind="skill_learning_candidate",
+        title="pine-script: skill invoked, Learnings.md not updated (x)", ts=TS, detail="e")
+    assert si.skills_used_for(conn, "S1") == {"backtest", "risk-manager"}
+    si.resolve_skill_candidates(conn, "S1")
+    open_s1 = conn.execute("SELECT COUNT(*) FROM session_events WHERE session_id='S1' "
+                           "AND kind='skill_learning_candidate' AND resolved=0").fetchone()[0]
+    open_s2 = conn.execute("SELECT COUNT(*) FROM session_events WHERE session_id='S2' "
+                           "AND kind='skill_learning_candidate' AND resolved=0").fetchone()[0]
+    assert open_s1 == 0 and open_s2 == 1     # S1 resolved, S2 untouched
+    conn.close()
+
+
 # --------------------------------------------------------------------------- #
 # run_session_ingest_pass.
 # --------------------------------------------------------------------------- #

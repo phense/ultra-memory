@@ -91,6 +91,40 @@ def mark_resolved(conn, *, event_id) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Skill-candidate bridge (the consolidate-feeder supersession).
+# --------------------------------------------------------------------------- #
+
+_SKILL_CANDIDATE_KIND = "skill_learning_candidate"
+
+
+def _skill_of(title: str) -> str:
+    """The skill tag is the prefix before the first ':' (the Stop-hook title format
+    '<skill>: skill invoked, ...')."""
+    return (title or "").split(":", 1)[0].strip()
+
+
+def skills_used_for(conn, session_id: str) -> set:
+    """Distinct tracked-skill tags this session used, from its un-resolved
+    skill_learning_candidate markers. Empty set if none — grounds skill_learnings."""
+    rows = conn.execute(
+        "SELECT title FROM session_events WHERE session_id=? AND kind=? AND resolved=0",
+        (session_id, _SKILL_CANDIDATE_KIND)).fetchall()
+    return {s for s in (_skill_of(r["title"]) for r in rows) if s}
+
+
+def resolve_skill_candidates(conn, session_id: str) -> int:
+    """Mark this session's skill_learning_candidate markers resolved=1 — the supersession
+    of the thin consolidate feeder (the ingest pass already mined the content). Idempotent;
+    never deletes (only the flag flips). Returns rows affected."""
+    def work():
+        cur = conn.execute(
+            "UPDATE session_events SET resolved=1 WHERE session_id=? AND kind=? AND resolved=0",
+            (session_id, _SKILL_CANDIDATE_KIND))
+        return cur.rowcount
+    return memory_lib._with_immediate_retry(conn, work)
+
+
+# --------------------------------------------------------------------------- #
 # The transcript digest (deterministic, no-LLM, tool-output-free).
 # --------------------------------------------------------------------------- #
 
