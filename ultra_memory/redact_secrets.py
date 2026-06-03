@@ -23,6 +23,7 @@ _URI_USERINFO = re.compile(r"(?i)([a-z][a-z0-9+.\-]*://)[^\s:/@]+:[^\s:/@]+@")
 # Simple credential-shaped tokens redacted wholesale.
 _PATTERNS = [
     re.compile(r"sk-ant-[A-Za-z0-9_\-]{16,}"),
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}"),                            # OpenAI / generic long sk- key (sk-ant- handled above first; the 20-char floor + \b avoid prose false-positives)
     re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),
     re.compile(r"github_pat_[A-Za-z0-9_]{20,}"),
     re.compile(r"AKIA[0-9A-Z]{16}"),

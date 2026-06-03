@@ -9,6 +9,14 @@ def test_redacts_anthropic_key():
     assert strip_secrets("key sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF here") == f"key {R} here"
 
 
+def test_redacts_generic_openai_sk_key():
+    # classic OpenAI key (sk- + long base62) and the sk-proj- form both redact
+    assert strip_secrets("my key sk-A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8 ok") == f"my key {R} ok"
+    assert R in strip_secrets("sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    # length floor (20) + \b anchor: a short sk- token and a hyphenated prose word are NOT over-redacted
+    assert strip_secrets("sk-abc and task-oriented work") == "sk-abc and task-oriented work"
+
+
 def test_redacts_github_pat():
     assert R in strip_secrets("ghp_0123456789abcdefghijABCDEFGHIJ0123")
     assert R in strip_secrets("github_pat_11ABCDEFG0123456789_abcdefghij")
