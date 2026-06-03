@@ -40,7 +40,12 @@ import yaml
 from ultra_memory.claude_cli import _child_env  # noqa: E402  (OAuth-sanitized env)
 
 THETA_DESC = 0.6          # Tier-A: reject above this token-cosine to any static desc
-RUNS_PER_QUERY = 5        # Tier-B: hijack-direction sample count (zero-tolerance)
+RUNS_PER_QUERY = 2        # Tier-B: hijack-direction sample count (zero-tolerance — fire if ANY
+                          # sample fires). Lowered 5→2 (2026-06-03): the per-deployment auto-corpus
+                          # probes ~50 skills, each ~14-18s of `claude -p`; at 5 the serial gate
+                          # ran >60min and overran MAINT_TIMEOUT_STAGE2. 2 still multi-samples
+                          # (a truly-confusable candidate fires deterministically). The proper
+                          # fix is parallel/cosine-bounded probing (§1.4.7).
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
