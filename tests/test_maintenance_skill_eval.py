@@ -43,6 +43,24 @@ def test_coverage_gaps():
     assert se.coverage_gaps(["risk-manager", "no-such-skill"], CORPUS) == ["no-such-skill"]
 
 
+def test_build_probe_corpus_covers_every_skill():
+    # §6.5 self-validating per-deployment corpus: one hijack-direction probe per
+    # discovered skill, so coverage_gaps() is [] BY CONSTRUCTION (the eval-gate is
+    # never fail-closed on an uncovered skill — the autonomous default).
+    descs = {"risk-manager": "Use before any trade.", "backtest": "Use for strategy design."}
+    corpus = se.build_probe_corpus(descs)
+    assert se.coverage_gaps(list(descs), corpus) == []
+    assert all(p["should_trigger"] for p in corpus)
+    assert {p["expect"] for p in corpus} == set(descs)
+
+
+def test_build_probe_corpus_query_is_description_with_name_fallback():
+    corpus = se.build_probe_corpus({"a": "do A things", "b": "  "})
+    by = {p["expect"]: p["query"] for p in corpus}
+    assert by["a"] == "do A things"
+    assert by["b"] == "b"   # empty/blank description falls back to the skill name
+
+
 def test_gate_admits_clean_candidate():
     rep = se.run_trigger_gate(_cand(), static_descriptions=STATICS, corpus=CORPUS,
                               probe_fn=lambda q, c: False)

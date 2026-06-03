@@ -129,6 +129,24 @@ def coverage_gaps(skill_names, corpus: list[dict]) -> list[str]:
     return [n for n in skill_names if n not in covered]
 
 
+def build_probe_corpus(descriptions: dict) -> list[dict]:
+    """Auto-derive a SELF-VALIDATING per-deployment trigger-probe corpus (§6.5): one
+    hijack-direction probe per discoverable skill, with `query` = the skill's own
+    description (its routing spec; the name as a fallback for a blank description).
+
+    This is the AUTONOMOUS default — fed the same `descriptions` dict the coverage check
+    uses, ``coverage_gaps(list(descriptions), build_probe_corpus(descriptions)) == []`` by
+    construction, so the eval-gate is never fail-closed on an uncovered skill and needs no
+    hand-maintained corpus file that would go stale as a deployment's skill set changes. A
+    consumer MAY still supply a curated corpus (richer, more diverse queries) via
+    `config.probe_corpus` to override."""
+    corpus = []
+    for name, desc in descriptions.items():
+        query = str(desc).strip() or str(name)
+        corpus.append({"query": query, "should_trigger": True, "expect": name})
+    return corpus
+
+
 def _plugin_skill_roots():
     """Best-effort roots that hold installed plugin skills (cache + marketplaces)."""
     base = Path.home() / ".claude" / "plugins"

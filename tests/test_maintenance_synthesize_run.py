@@ -82,6 +82,19 @@ def test_dryrun_admits_but_does_not_write(tmp_path, monkeypatch):
     assert not sf.skill_md_path(tmp_path / "repo", "gen-backtest").exists()
 
 
+def test_autobuilds_corpus_when_none_configured(tmp_path, monkeypatch):
+    # Autonomy: with NO corpus and NO corpus_path, the run AUTO-BUILDS a per-deployment
+    # probe corpus from the discovered skill descriptions, so the eval-gate is NOT
+    # fail-closed on coverage. (Without the auto-build, corpus=[] -> coverage gap -> HOLD.)
+    monkeypatch.setenv("SP10_SYNTHESIS_DRYRUN", "1")
+    conn = _conn(tmp_path)
+    _lessons(conn, 3)
+    res = _run(conn, tmp_path, corpus=None, corpus_path=None,
+               runner=_runner(_payload("gen-backtest", ["b0", "b1", "b2"])))
+    assert res.mode == "dryrun" and res.admitted == "gen-backtest"
+    assert not res.held   # NOT held on a coverage gap — corpus auto-covers STATICS
+
+
 def test_live_apply_writes_dual_representation(tmp_path):
     conn = _conn(tmp_path)
     _lessons(conn, 3)

@@ -221,7 +221,12 @@ def run_synthesize_pass(conn, *, repo_root, date, ts, briefings_dir,
             # the auto-invocable plugin skills a generated description could shadow.
             static_descriptions = se.read_all_invocable_skill_descriptions(repo_root)
         if corpus is None:
-            corpus = se.load_corpus(corpus_path) if corpus_path else []
+            # Autonomy (§6.5): an explicit curated corpus wins; otherwise AUTO-BUILD a
+            # self-validating per-deployment corpus from the same discovered descriptions
+            # the coverage check uses — so the eval-gate is never fail-closed on an
+            # uncovered skill (the old `else []` made a no-corpus install HOLD forever).
+            corpus = (se.load_corpus(corpus_path) if corpus_path
+                      else se.build_probe_corpus(static_descriptions))
         if budget_fn is None:
             budget_fn = lambda c: se.estimate_listing_budget_ok(  # noqa: E731
                 c.description, static_descriptions)
