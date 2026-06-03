@@ -42,6 +42,7 @@ Engine env seams the wrapper / consumer can also set (SP-3):
 | `ULTRA_MEMORY_CALLER_TOPIC` | Comma/`:`/`;`-separated topic list — the **topic** axis of the access wall (the interim source until SP-0 spike #7 resolves per-subagent identity). Fail-closed: unset + no `agent_topic_bindings` row ⇒ the empty topic set. |
 | `ULTRA_MEMORY_AGENT_NAME` | Agent name for the `agent_topic_bindings` lookup (`topic_scope_from_env`). |
 | `ULTRA_MEMORY_REBUILD_INDEX` | `=1` ⇒ `maintain` forces a one-pass re-population of every `unified_index` row regardless of `content_sha256` (the SP-6 `bm25_text` backfill, equivalent to `maintain --rebuild`). Implies force (bypasses the throttle). |
+| `ULTRA_MEMORY_BACKFILL_CMD` | A consumer's **cold-start session-cache backfill** runner (e.g. `./scripts/run_backfill.sh`). Set ⇒ `/memory-setup` prints a one-time *hint* to run it (never auto-runs). Unset ⇒ never offered (greenfield-safe). Independent of the `import_complete` gate — see [`backfill_complete`](#the-import_complete-gate). |
 
 `/memory-setup` builds the runtime venv under `${CLAUDE_PLUGIN_DATA}/venv`,
 optionally imports a legacy memory dir **once**, stamps the DB ready (the
@@ -74,7 +75,7 @@ agents which to use; this is the operator-facing list.
 | `/memory-verify <id>` | Reconfirm a fact still holds (resets the staleness signal). |
 | `/memory-edit <id>` | Correct a fact's body in place (body only; type/title/fields preserved). |
 | `/memory-inbox` | Apply queued human-correction directives (free text preserved under "Unprocessed"). |
-| `/memory-setup` | One-time bootstrap: venv, optional legacy import, `import_complete` stamp, sanity-check. |
+| `/memory-setup` | One-time bootstrap: venv, optional legacy import, `import_complete` stamp, optional cold-start-backfill hint, sanity-check. |
 | `/memory-maintain` | Force a prune+export now (the same `ultra_memory.maintain.run` the async hook throttles). |
 
 ## Wiring at a glance
@@ -106,6 +107,15 @@ The session hooks no-op until `meta.import_complete='1'` (`hooks/common.db_ready
 `/memory-setup` stamps it (via `setup.mark_import_complete`) after the optional
 legacy import — production code, not just tests, sets it now. A migrated-but-
 unstamped DB intentionally fails open to the legacy path.
+
+A separate `meta.backfill_complete` flag tracks the **optional cold-start
+session-cache backfill** (a consumer-side runner declared via
+`ULTRA_MEMORY_BACKFILL_CMD`). It is **deliberately independent** of
+`import_complete` and **not** read by `db_ready` — `/memory-setup` only uses it
+to decide whether to print the one-time backfill hint
+(`setup.should_offer_backfill` / `setup.backfill_hint`), and stamping it
+(`setup.mark_backfill_complete`) merely silences that hint. Declining or never
+running the backfill therefore never disables the session hooks.
 
 ## Maintenance (self-healing, throttled)
 

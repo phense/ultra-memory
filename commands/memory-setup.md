@@ -58,11 +58,24 @@ print('stamped' if setup.mark_import_complete(db) else 'already stamped')
 "
    ```
 
-4. **Sanity check:** the MCP module imports, the embedder loads, a trial recall returns:
+4. **Optional cold-start backfill — offer, never auto-run** (only when the consumer declared a session-cache backfill runner in `ULTRA_MEMORY_BACKFILL_CMD`). Some consumers ship a backfill that mines *historical* Claude Code session transcripts into the store (memories + wiki) to seed it on a fresh install. That is the consumer's deliberate, **pilot-first** step — so `/memory-setup` only prints a one-time hint pointing at the runner; it never executes it. Greenfield consumers leave `ULTRA_MEMORY_BACKFILL_CMD` unset and see nothing. The `meta.backfill_complete` flag is **independent** of `import_complete` (it only silences the hint), so declining the backfill never disables the session hooks:
+   ```bash
+   "$PY" -c "
+import os
+from ultra_memory import setup
+db = os.environ['ULTRA_MEMORY_DB']
+cmd = os.environ.get('ULTRA_MEMORY_BACKFILL_CMD', '')
+if setup.should_offer_backfill(db, cmd):
+    print(setup.backfill_hint(cmd))
+"
+   ```
+   If the hint prints, surface it to the user — do **not** run the backfill yourself. After the user has run it (pilot → full), stamp it so the hint stops: `"$PY" -c "import os; from ultra_memory import setup; setup.mark_backfill_complete(os.environ['ULTRA_MEMORY_DB'])"`.
+
+5. **Sanity check:** the MCP module imports, the embedder loads, a trial recall returns:
    ```bash
    "$CLAUDE_PLUGIN_DATA/venv/bin/python" -c "import ultra_memory.knowledge_mcp; import fastembed; print('MCP + embedder OK')"
    uv run --directory "$CLAUDE_PLUGIN_ROOT" --python "$CLAUDE_PLUGIN_DATA/venv/bin/python" \
      python -m ultra_memory.memory_cli recall --query "setup smoke" --top-k 1 || true
    ```
 
-Report what was built / imported / skipped, **and the resolved DB path from step 2**. After this, restart Claude Code so the `knowledge` MCP registers.
+Report what was built / imported / skipped (including whether a cold-start backfill was offered), **and the resolved DB path from step 2**. After this, restart Claude Code so the `knowledge` MCP registers.

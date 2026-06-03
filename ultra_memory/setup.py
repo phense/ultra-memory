@@ -73,3 +73,67 @@ def should_import_legacy(db_path):
         return not _import_complete(conn)
     finally:
         conn.close()
+
+
+# --- cold-start session-cache backfill (§5.2.9) ---------------------------
+# A consumer MAY ship a session-cache backfill that mines historical Claude
+# Code transcripts into the store (memories + wiki). It is consumer-side and
+# OPTIONAL, so /memory-setup only *offers* it — it never auto-runs it. The
+# consumer opts in by declaring its runner in the ULTRA_MEMORY_BACKFILL_CMD
+# env (mirroring ULTRA_MEMORY_HARNESS_DIR for the legacy import); greenfield
+# consumers leave it unset and are never offered the backfill.
+#
+# The meta.backfill_complete flag is INDEPENDENT of import_complete: it is a
+# pure idempotency/hint marker and is deliberately NOT wired into db_ready(),
+# so declining the backfill never disables the session hooks.
+
+def _backfill_complete(conn):
+    row = conn.execute("SELECT value FROM meta WHERE key='backfill_complete'").fetchone()
+    return bool(row) and str(row[0]) == "1"
+
+
+def mark_backfill_complete(db_path):
+    """Stamp meta.backfill_complete='1'. Returns True if newly stamped, False if
+    it was already set (idempotent). Independent of import_complete."""
+    conn = memory_lib.open_memory_db(str(db_path))
+    try:
+        if _backfill_complete(conn):
+            return False
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('backfill_complete', '1') "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        return True
+    finally:
+        conn.close()
+
+
+def should_offer_backfill(db_path, backfill_cmd):
+    """True only when a consumer-declared backfill runner exists AND the one-time
+    cold-start backfill has not been stamped. `backfill_cmd` is the consumer's
+    declared runner (e.g. from ULTRA_MEMORY_BACKFILL_CMD); empty/None => the
+    consumer ships no backfill => never offer (greenfield-safe)."""
+    if not backfill_cmd:
+        return False
+    conn = memory_lib.open_memory_db(str(db_path))
+    try:
+        return not _backfill_complete(conn)
+    finally:
+        conn.close()
+
+
+def backfill_hint(backfill_cmd):
+    """The one-line post-bootstrap hint naming the consumer's backfill runner.
+    Pure (no DB) — the caller decides whether to print it via should_offer_backfill."""
+    return (
+        f"ultra-memory: this project ships a cold-start session-cache backfill "
+        f"({backfill_cmd}) — run it to seed the store from historical sessions "
+        f"(writes memories + wiki). Pilot-first: try it with --pilot --dry-run, "
+        f"then stamp meta.backfill_complete via setup.mark_backfill_complete(db) "
+        f"so this hint stops."
+    )
