@@ -243,11 +243,16 @@ docs match reality":
   read-only recall tool with its privilege boundary, the wiki-curation pipeline, zero-config install,
   **1176 passing tests**, and a content-free repository.
 - ✅ **Self-learning loop — automatic and conservative:** all four steps (consolidate, attribute,
-  self-correct, and create-new-skill) run on a weekly schedule behind the in-code safety rules
+  self-correct, and create-new-skill) run behind the in-code safety rules
   (can't touch your facts, archive-not-delete, capped per run, git checkpoint, a written summary, a
   kill switch, and a collision check before any new skill). The defaults are deliberately tight (a few
   edits / a few reversions / one new skill per run); you can loosen them and watch the effect in the next
-  summary. Outcome-attribution and session-import ship turned off until you opt in.
+  summary. The whole loop is **on by default** and advances automatically as you use Claude Code
+  (or on an optional installed schedule). It reads only your **local** session transcripts
+  and runs on **your Claude login — no API key, no metered bill**. Turn any beat off from
+  the `/plugin` config (Session capture / Outcome attribution / Self-correction / Skill
+  synthesis). The self-correcting beats act only where a git checkpoint exists and
+  otherwise self-skip — so they can always be undone.
 - ✅ **Release hygiene — shipped:** continuous integration, contributor files (CONTRIBUTING / CHANGELOG),
   a third-party-license notice, and a content-free / path-free guard over the whole markdown publish surface.
 - ⬜ **At publish time:** a one-time git-history scrub (the working tree is clean, but older commits still
