@@ -136,19 +136,18 @@ When you touch a module, ask which doc owns the change:
 
 | You changed… | …update |
 |---|---|
-| A public function or signature | `docs/reference/api.md` |
-| A table, column, or migration | `docs/reference/schema.md` |
-| A behaviour, flow, or invariant | `docs/developer/architecture.md` |
-| A user-visible capability or command | `docs/user/` |
-| An operational flow (export / dump / spool / rollback) | `docs/reference/operations.md` |
+| A public function or signature | `docs/11-reference-api-schema.md` |
+| A table, column, or migration | `docs/11-reference-api-schema.md` |
+| A behaviour, flow, or invariant | `docs/10-architecture.md` |
+| A user-visible capability or command | `docs/04-working-with-memory.md` |
+| An operational flow (export / dump / spool / rollback) | `docs/10-architecture.md` |
 
 If a change genuinely needs no doc update (an internal-only refactor with no behavioural
 or interface change), it's fine to commit through the warning — just be honest about it.
 
-> **Note:** this handbook under `docs/handbook/` is a curated, published narrative. The
-> `docs/reference/` and `docs/developer/` files are the lockstep-with-code source of
-> truth the hook points you at; update those when you change the engine, and fold any
-> user-facing consequence into the handbook in a deliberate pass.
+> **Note:** the handbook *is* the documentation — its chapters live directly under `docs/`
+> and stay in lockstep with the code. Update the chapter that owns the change; the
+> doc-discipline hook nudges you whenever a code commit touches no `docs/` file at all.
 
 ---
 

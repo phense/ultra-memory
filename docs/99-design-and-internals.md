@@ -8,14 +8,14 @@ distilled from the project's internal design log into one readable narrative, so
 decide whether the guarantees match what you need before you point the engine at your
 data.
 
-It is deliberately self-contained: you can read it cold, without the developer reference.
-Where you want the module-level mechanics or the exact function contracts, two in-plugin
-documents go deeper and stay in lockstep with the code:
+It is deliberately self-contained: you can read it cold, without the developer chapters.
+Where you want the module-level mechanics or the exact function contracts, two handbook
+chapters go deeper and stay in lockstep with the code:
 
-- [`../developer/architecture.md`](../developer/architecture.md) — module-by-module
-  mechanics and the canonical storage model.
-- [`../developer/design-decisions.md`](../developer/design-decisions.md) — the full
-  rationale log, including the bug-hunt arc that hardened each boundary.
+- [10. Architecture](10-architecture.md) — module-by-module mechanics and the canonical
+  storage model.
+- [11. Reference — API & schema](11-reference-api-schema.md) — the exact function
+  contracts, every table, and the read-only MCP surface.
 
 The whole system rests on a single principle, and every decision below is an application
 of it:
@@ -366,11 +366,8 @@ free.
 
 ## See also
 
-- [`../developer/architecture.md`](../developer/architecture.md) — the canonical storage
-  model and a module-by-module map of the engine.
-- [`../developer/design-decisions.md`](../developer/design-decisions.md) — the complete
-  rationale log, including the hardening bug-hunt arc summarized here.
-- [`../user/overview.md`](../user/overview.md) — the user-level tour of the two stores and the
-  loop.
-- [`../reference/operations.md`](../reference/operations.md) — install, wiring, rollback, and
-  the write spool.
+- [10. Architecture](10-architecture.md) — the canonical storage model and a
+  module-by-module map of the engine, including install, wiring, rollback, and the write spool.
+- [11. Reference — API & schema](11-reference-api-schema.md) — the exact function
+  contracts, every table, and the read-only MCP surface.
+- [2. The mental model](02-mental-model.md) — the user-level tour of the two stores and the loop.

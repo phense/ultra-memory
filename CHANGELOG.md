@@ -9,9 +9,9 @@ change between `0.0.x` releases.
 ## [Unreleased]
 
 ### Added
-- A consolidated user + developer handbook under `docs/handbook/` (foundations →
-  use → configure → extend → develop + a design-notes appendix); the old
-  `docs/{user,developer,reference}` pages now redirect into it.
+- A consolidated user + developer handbook at `docs/` (foundations → use → configure
+  → extend → develop + a design-notes appendix); the old `docs/{user,developer,reference}`
+  split-by-audience pages were folded into it.
 
 ## [0.0.4] — 2026-06-04
 

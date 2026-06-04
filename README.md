@@ -164,7 +164,7 @@ reversible, mistakes are rare *and* cheap to undo. You stay in the review loop, 
 - **It never blocks you.** If a background step or a hook hits an error, it logs one line and steps
   aside — it can't wedge your session.
 
-The full story is in the **[handbook](docs/handbook/README.md)** — from the mental model and everyday
+The full story is in the **[handbook](docs/README.md)** — from the mental model and everyday
 use through configuration, building your own knowledge domain, and the engine's architecture, API, and
 design rationale.
 
@@ -235,25 +235,25 @@ steps simply do nothing, so a memory-only install just works.
 
 ## 📖 Documentation / Handbook
 
-The full story lives in the **[ultra-memory Handbook](docs/handbook/README.md)** — a single,
+The full story lives in the **[ultra-memory Handbook](docs/README.md)** — a single,
 progressively-ordered read that takes you from the mental model through everyday use, configuration,
 building your own knowledge domain, and developing on the engine itself:
 
-- **Understand** — [What is ultra-memory?](docs/handbook/01-what-is-ultra-memory.md) ·
-  [The mental model](docs/handbook/02-mental-model.md)
-- **Use** — [Quick start](docs/handbook/03-quick-start.md) ·
-  [Working with your memory](docs/handbook/04-working-with-memory.md) ·
-  [The self-learning loop in practice](docs/handbook/05-self-learning-in-practice.md)
-- **Configure** — [Configuration reference](docs/handbook/06-configuration-reference.md) ·
-  [Privacy, cost & control](docs/handbook/07-privacy-cost-control.md)
-- **Extend** — [Build your own domain](docs/handbook/08-build-your-own-domain.md) ·
-  [Curating a domain](docs/handbook/09-curating-a-domain.md)
-- **Develop** — [Architecture](docs/handbook/10-architecture.md) ·
-  [Reference — API & schema](docs/handbook/11-reference-api-schema.md) ·
-  [Contributing](docs/handbook/12-contributing.md)
-- **Appendix** — [Design notes & rationale](docs/handbook/99-design-and-internals.md)
+- **Understand** — [What is ultra-memory?](docs/01-what-is-ultra-memory.md) ·
+  [The mental model](docs/02-mental-model.md)
+- **Use** — [Quick start](docs/03-quick-start.md) ·
+  [Working with your memory](docs/04-working-with-memory.md) ·
+  [The self-learning loop in practice](docs/05-self-learning-in-practice.md)
+- **Configure** — [Configuration reference](docs/06-configuration-reference.md) ·
+  [Privacy, cost & control](docs/07-privacy-cost-control.md)
+- **Extend** — [Build your own domain](docs/08-build-your-own-domain.md) ·
+  [Curating a domain](docs/09-curating-a-domain.md)
+- **Develop** — [Architecture](docs/10-architecture.md) ·
+  [Reference — API & schema](docs/11-reference-api-schema.md) ·
+  [Contributing](docs/12-contributing.md)
+- **Appendix** — [Design notes & rationale](docs/99-design-and-internals.md)
 
-Start at the **[handbook index](docs/handbook/README.md)** for the one-line "what you'll learn" map of
+Start at the **[handbook index](docs/README.md)** for the one-line "what you'll learn" map of
 each chapter.
 
 ---
@@ -303,7 +303,7 @@ ultra-memory builds on other people's ideas and code:
 Tests come first (TDD), and the `docs/` are kept in step with the code. A warn-only doc-reminder hook
 ships under `.githooks/`; enable it once per clone with `git config core.hooksPath .githooks`. Run the
 suite with `uv run pytest`. See the handbook's
-[Contributing](docs/handbook/12-contributing.md) chapter.
+[Contributing](docs/12-contributing.md) chapter.
 
 ## License
 

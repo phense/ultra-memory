@@ -2,7 +2,7 @@
 
 Thanks for your interest! This is the quick version; the full developer guide —
 conventions, the doc-discipline rule, the engine invariants — lives in
-[`docs/developer/contributing.md`](docs/developer/contributing.md).
+[`docs/12-contributing.md`](docs/12-contributing.md).
 
 ## Quick start
 

@@ -1,49 +1,83 @@
-# ultra-memory documentation
+# The ultra-memory Handbook
 
-A project-agnostic agent-memory engine + topic-partitioned knowledge wiki + an
-autonomous self-learning skill loop for Claude Code, delivered as a local plugin.
+Lasting memory for Claude — on your own machine. This handbook is the single front
+door to ultra-memory: it takes you from *what it is* and *why it is shaped that way*,
+through *using it day to day* and *configuring it*, to *building your own knowledge
+domain* and *developing on the engine itself*. Read it front to back the first time;
+afterwards it doubles as a reference.
 
-## 📖 Start here — the handbook
+The chapters are arranged as a progression — **Understand → Use → Configure → Extend
+→ Develop** — followed by an appendix of design rationale. Each entry below says, in
+one line, what you will learn there.
 
-The documentation now lives as a single, progressively-ordered read:
+---
 
-### **[➡ The ultra-memory Handbook](handbook/README.md)**
+## Part I — Understand
 
-It takes you from the mental model (Part I — Understand), through everyday use (Part II
-— Use) and configuration (Part III — Configure), to building your own knowledge domain
-(Part IV — Extend) and developing on the engine itself (Part V — Develop), plus a
-design-rationale appendix. The [handbook index](handbook/README.md) maps every chapter
-with a one-line "what you'll learn".
+The two ideas the whole system falls out of. Read these even if you only ever want to
+*use* ultra-memory.
 
-> The old split-by-audience pages — `user/`, `developer/`, `reference/` — have been
-> **consolidated into the handbook**; each now contains a short redirect stub pointing
-> at the chapter that superseded it.
+1. [What is ultra-memory?](01-what-is-ultra-memory.md) — the problem (Claude forgets
+   everything at session end) and the one-paragraph promise: two memories, searched as
+   one, on your own machine.
+2. [The mental model](02-mental-model.md) — the single idea everything else falls out
+   of: two stores with different half-lives, queried as one, tied by a graph of links.
 
-## Also here
+## Part II — Use
 
-- **[ENCOUNTERED_PROBLEMS.md](ENCOUNTERED_PROBLEMS.md)** — a wry, technically-accurate
-  retrospective of the gnarliest bugs since the first commit. Every one is now found,
-  fixed, and regression-tested — read it as a tour of how the system got tougher.
+Get it running and live with it.
 
-## Status (2026-06-04)
+3. [Quick start](03-quick-start.md) — nothing to a working install in four lines and a
+   restart, and exactly what starts running on its own afterwards.
+4. [Working with your memory](04-working-with-memory.md) — the everyday verbs: how to
+   save a fact, how reading happens (mostly without you), and how to keep the store
+   honest over time.
+5. [The self-learning loop in practice](05-self-learning-in-practice.md) — what the
+   background loop does, when it runs, the in-code guarantees that make it safe to leave
+   on, and how to read the summary it writes you.
 
-The fabric is **live and tested** — **1197 green tests**: the two-store knowledge fabric
-(Session Memory in SQLite + the topic-partitioned LLM-Wiki), `unified_recall` deterministic
-RRF fusion, the typed-edge `links` graph, the single audited write gateway with redaction at
-persist *and* export, OAuth-only enforcement, SessionStart/Stop hooks, the read-only
-`knowledge` MCP behind the fail-closed (type × topic) privilege wall, the wiki-curation
-maintenance pipeline, and zero-config install.
+## Part III — Configure
 
-The **self-learning loop is built and autonomous** (posture set 2026-06-03): capture →
-consolidate (SP-6) → attribute (SP-8) → self-correct (SP-7) → synthesize (SP-10), running on
-a weekly cadence behind a seven-mechanism **code** safety wall (provenance gate ·
-archive-never-delete · bounded blast radius · git checkpoint · audit digest · kill switch ·
-synthesis eval-gate). Full autonomy in *whether* it acts; conservative, reversible defaults in
-*how*. See the handbook's [Design notes & rationale](handbook/99-design-and-internals.md)
-appendix for the rationale.
+Make it behave the way you want.
 
-**Single-root today.** The engine is parameterized over a `(global, project)` root pair; the
-global cross-project root is designed and built, activation pending.
+6. [Configuration reference](06-configuration-reference.md) — every setting, where it
+   lives, what it defaults to, and a recipe for each common "I want it to do X" wish.
+7. [Privacy, cost & control](07-privacy-cost-control.md) — what reads your data, where
+   it goes, what it costs (your Claude login, no API key), and the off switch for every
+   step that does anything.
 
-The repo is **content-free**: only code ships here; your `memory.db`, exports, and any secrets
-stay in your own project, injected via config. A `test_no_hardcoded_paths` guard enforces it.
+## Part IV — Extend
+
+Teach it your own subject matter.
+
+8. [Build your own domain](08-build-your-own-domain.md) — stand up a brand-new
+   knowledge domain in the two small places the engine leaves to you (a content-free
+   engine plus your topic).
+9. [Curating a domain](09-curating-a-domain.md) — keep a domain healthy: the
+   deterministic maintenance pipeline that lints, dedups, cross-links, and re-indexes,
+   and the audited verbs for the writes that *are* yours.
+
+## Part V — Develop
+
+Work on the engine itself.
+
+10. [Architecture](10-architecture.md) — the modules, the data flow, and the discipline
+    invariants (never lose a write, never leak a secret, never bill an API).
+11. [Reference — API & schema](11-reference-api-schema.md) — the contract: every public
+    function with its real signature, every table with its real columns, the verbs and
+    the MCP surface.
+12. [Contributing](12-contributing.md) — the invariants every change must respect, the
+    TDD workflow, the tests, and the doc-discipline rule.
+
+## Appendix
+
+99. [Design notes & rationale](99-design-and-internals.md) — *why* the system is shaped
+    the way it is: the trade-offs behind every choice that touches your private notes,
+    its self-edits, and its unattended LLM calls.
+
+---
+
+*New here?* Read [1](01-what-is-ultra-memory.md) and [2](02-mental-model.md), then jump
+to [3 — Quick start](03-quick-start.md). *Just want it configured?* Go straight to
+[6](06-configuration-reference.md) and [7](07-privacy-cost-control.md). *Building on
+it?* Start at [10](10-architecture.md).
