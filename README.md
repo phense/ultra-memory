@@ -5,9 +5,9 @@
 **Claude forgets everything when a session ends. ultra-memory gives it a memory that lasts: it remembers how you work, what your project decided, and what you've learned — and keeps that knowledge tidy on its own. One Claude Code plugin, running on your machine and your Claude subscription. No cloud service, no API key, no bill.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.0.3-informational.svg)](.claude-plugin/plugin.json)
+[![version](https://img.shields.io/badge/version-0.0.4-informational.svg)](.claude-plugin/plugin.json)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-1176%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-1197%20passing-brightgreen.svg)](tests/)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-8A63D2.svg)](https://docs.claude.com/en/docs/claude-code)
 
 Most "memory for Claude" tools give you one bucket: they save a session, compress it, and replay it
@@ -241,7 +241,7 @@ docs match reality":
 - ✅ **Live today:** the two-store memory, one ranked search across both, the graph of links, the single
   audited write path with secret stripping, the "your-login-only" rule, the session-start/-end hooks, the
   read-only recall tool with its privilege boundary, the wiki-curation pipeline, zero-config install,
-  **1176 passing tests**, and a content-free repository.
+  **1197 passing tests**, and a content-free repository.
 - ✅ **Self-learning loop — automatic and conservative:** all four steps (consolidate, attribute,
   self-correct, and create-new-skill) run behind the in-code safety rules
   (can't touch your facts, archive-not-delete, capped per run, git checkpoint, a written summary, a

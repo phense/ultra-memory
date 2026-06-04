@@ -8,9 +8,8 @@ module is split capture-fast / process-slow, mirroring the skill-learning loop:
   • slice 4a (THIS file's deterministic core, NO LLM): the session-ingest QUEUE
     (`session_events` rows, kind='session_ingest_pending', drained `resolved=0`) +
     the transcript DIGEST builder (a compact, tool-output-free view the LLM pass
-    reads). The enqueue is gated by `SESSION_INGEST_ENABLE` — default OFF, a no-op,
-    byte-identical behavior until armed (the north-star ships-active posture flip is
-    the operator's explicit step on a real consumer).
+    reads). The enqueue is gated by `SESSION_INGEST_ENABLE` — opt-OUT (default ON
+    since the autonomy flip); set it to '0'/'false'/'no'/'off' to disable.
   • slice 4b (the drain beat): one OAuth `claude` call per pending session →
     {extracted_knowledge, correction_detected, correction} → route. Built on top of
     this substrate.
@@ -62,9 +61,9 @@ def enqueue(conn, *, session_id: str, transcript_path: str, ts: str) -> None:
 
 
 def enqueue_if_enabled(conn, *, session_id, transcript_path, ts, env) -> bool:
-    """Gated enqueue for the Stop hook: a no-op unless SESSION_INGEST_ENABLE is set
-    (so default behavior is byte-identical). Fail-open — never raises into the hook.
-    Returns True iff a marker was written."""
+    """Gated enqueue for the Stop hook: enqueues unless SESSION_INGEST_ENABLE is an
+    explicit opt-out ('0'/'false'/'no'/'off'); default ON. Fail-open — never raises
+    into the hook. Returns True iff a marker was written."""
     if not _enabled(env):
         return False
     try:
@@ -342,8 +341,9 @@ def run_session_ingest_pass(conn, *, ts, env, runner=subprocess.run,
                             audit_dir=None, log=lambda _m: None) -> dict:
     """Drain up to `limit` pending sessions: one OAuth `claude` call per session →
     extracted knowledge + correction → the memory store; mark each resolved. GATED
-    (SESSION_INGEST_ENABLE; default OFF → a no-op). OAuth-only (run_claude), fail-open
-    per session (an error leaves that session un-resolved for retry), idempotent."""
+    (SESSION_INGEST_ENABLE; opt-OUT, default ON → a no-op only when disabled).
+    OAuth-only (run_claude), fail-open per session (an error leaves that session
+    un-resolved for retry), idempotent."""
     if not _enabled(env):
         return {"mode": "disabled", "sessions": 0, "ingested": 0,
                 "skill_learnings": 0, "corrections": 0}
@@ -391,9 +391,9 @@ def _emit_audit(audit_dir, ts, row) -> None:
 def beat(conn, config, ts, env):
     """The `run_pipeline` registry entry for the SESSION-INGEST beat (north-star
     subsystem 4): mines each finished session's transcript for durable knowledge +
-    user corrections, one OAuth call per session. GATED SESSION_INGEST_ENABLE (the
-    drain is a no-op until armed — the ships-active posture flip is the consumer's
-    explicit step). Threads the config seam (model + briefings_dir audit)."""
+    user corrections, one OAuth call per session. GATED SESSION_INGEST_ENABLE
+    (opt-OUT, default ON — the drain is a no-op only when explicitly disabled).
+    Threads the config seam (model + briefings_dir audit)."""
     audit_dir = (Path(config.briefings_dir) / "maintenance-logs"
                  if getattr(config, "briefings_dir", None) else None)
     return run_session_ingest_pass(

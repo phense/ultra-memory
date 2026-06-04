@@ -7,11 +7,13 @@ These checks are pure JSON-schema-shape assertions (no install, no network), so 
 fail fast in CI if a userConfig field loses its title or the manifest drifts.
 """
 import json
+import tomllib
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 _PLUGIN_JSON = _ROOT / ".claude-plugin" / "plugin.json"
 _MARKETPLACE_JSON = _ROOT / ".claude-plugin" / "marketplace.json"
+_PYPROJECT = _ROOT / "pyproject.toml"
 
 _VALID_USERCONFIG_TYPES = {"string", "number", "boolean", "file", "directory"}
 
@@ -85,4 +87,19 @@ def test_marketplace_json_is_valid_and_points_at_this_plugin():
     plugins = mk.get("plugins", [])
     assert any(p.get("name") == "ultra-memory" for p in plugins), (
         "marketplace.json must list the ultra-memory plugin"
+    )
+
+
+def test_version_is_in_sync_across_manifests_and_pyproject():
+    """The single source of release truth: pyproject.toml's `[project].version`,
+    `.claude-plugin/plugin.json`'s `version`, and `marketplace.json`'s
+    `metadata.version` MUST all carry the SAME string. A bump that touches one but
+    not the others would otherwise ship a manifest that disagrees with the package."""
+    pyproject_version = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]["version"]
+    plugin_version = _manifest()["version"]
+    marketplace_version = json.loads(
+        _MARKETPLACE_JSON.read_text(encoding="utf-8"))["metadata"]["version"]
+    assert pyproject_version == plugin_version == marketplace_version, (
+        "version drift: pyproject={!r} plugin.json={!r} marketplace.json={!r}".format(
+            pyproject_version, plugin_version, marketplace_version)
     )

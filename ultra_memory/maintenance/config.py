@@ -43,7 +43,8 @@ _DEFAULT_CADENCE = {"session_ingest": 24, "consolidate": 168, "aggressive": 720,
 # The autonomous posture (north-star decision 1): beats default ON, governed by the
 # wall (decision 2). A consumer can still gate any beat off in its config. The
 # `session_ingest` beat is additionally gated by SESSION_INGEST_ENABLE in its own
-# code (default OFF) — the ships-active posture flip is the consumer's explicit step.
+# code — opt-OUT (default ON since the autonomy flip): set it to '0'/'false'/'no'/'off'
+# to disable.
 _DEFAULT_BEATS = {"session_ingest": True, "consolidate": True, "aggressive": True,
                   "synthesize": True, "learnings": True, "wiki_maintenance": True}
 _DEFAULT_MODEL = "claude-sonnet-4-6"

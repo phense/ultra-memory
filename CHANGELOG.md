@@ -8,19 +8,43 @@ change between `0.0.x` releases.
 
 ## [Unreleased]
 
+## [0.0.4] — 2026-06-04
+
+### Changed
+- **Self-learning loop autonomous by default (opt-out).** The four heavy beats
+  (session capture, outcome attribution, self-correction, skill synthesis) now ship
+  ON by default behind the existing code-enforced safety wall, instead of opt-in /
+  default-OFF. A consumer disables any of them with the `*_enable` userConfig toggles
+  or the matching opt-out env vars (`SESSION_INGEST_ENABLE=off`, …).
+- **Session-lifecycle driver.** The heavy beats are driven from an async SessionStart
+  hook (a throttled per-beat clock) rather than requiring an external scheduler;
+  fail-open on a fresh / no-git / no-OAuth store.
+
 ### Added
+- **userConfig opt-out toggles** for every self-learning beat, bridged from the
+  install prompt into the engine's env (each defaults ON, set `off` to disable).
+- **Optional OS-scheduler offer** at setup (pure launchd/systemd offer helpers) for a
+  consumer that prefers a scheduler over the session-driven clock.
+- **Honest privacy / cost disclosure** in the README: the loop runs on YOUR Claude
+  login (no API key), reads only your local session transcript, and persists only the
+  extracted, redacted knowledge.
+- Bounded, env-overridable probe budget on the skill-eval gate for the unattended path.
 - Public-release scaffolding: this `CHANGELOG.md`, a root `CONTRIBUTING.md`,
   `THIRD-PARTY-LICENSES.md`, and a GitHub Actions test workflow.
 - `test_no_hardcoded_paths` extended to the entire tracked markdown publish surface
   (via `git ls-files`), not just the Python package.
+- A version-consistency guard locking `pyproject.toml` ↔ `plugin.json` ↔
+  `marketplace.json` to the same version string.
 
-### Changed
+### Changed (publish hygiene)
 - Manifests carry author email + `repository`/`homepage` URLs; dropped the stale
   "(local plugin)" descriptor.
 - The numbered engineering backlog is no longer tracked in the repo (kept as the
   maintainer's private working doc); the public roadmap is the README *Status* section.
 
 ### Fixed
+- Corrected a stale `maintenance/config.py` comment and `session_ingest.py` docstrings
+  that still described the pre-autonomy `SESSION_INGEST_ENABLE` default-OFF posture.
 - Removed consumer-specific PII (maintainer email, local home paths, consumer script
   names) from the documentation publish surface; relocated two consumer-flavored design
   docs out of the content-free plugin.
@@ -68,5 +92,6 @@ change between `0.0.x` releases.
   behind a code-enforced safety wall.
 - **OAuth-only** LLM invariant: refuses to run with an `ANTHROPIC_API_KEY` present.
 
-[Unreleased]: https://github.com/phense/ultra-memory/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/phense/ultra-memory/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/phense/ultra-memory/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/phense/ultra-memory/releases/tag/v0.0.3
