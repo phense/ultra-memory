@@ -2,20 +2,25 @@
 
 A project-agnostic agent-memory engine + topic-partitioned knowledge wiki + an
 autonomous self-learning skill loop for Claude Code, delivered as a local plugin.
-This `docs/` tree is split by reading intent:
 
-- **[user/](user/)** — for *consumers*: what ultra-memory is and how to use it.
-  - [overview.md](user/overview.md) — the mental model (two stores, one fabric), headline capabilities, and what we've already considered (privacy, OAuth-only, reversibility)
-  - [usage.md](user/usage.md) — install (`/ultra-memory:memory-setup`), the everyday verbs, recall + rehydration, the wiki surface, the cold-start backfill, the loop day-to-day
-- **[developer/](developer/)** — for *contributors*: how it's built and **why**.
-  - [design-decisions.md](developer/design-decisions.md) — the **WHY** behind every major choice (one global DB + topic-partitioned wiki, two-stores-one-fabric, OAuth-only, gateway-only writes, the self-learning loop, autonomy-via-code-wall) with the trade-offs considered and rejected
-  - [variables.md](developer/variables.md) — the **complete** reference of every config variable + tunable constant (env / `config.toml` / `userConfig` / code), grouped, with defaults
-  - [architecture.md](developer/architecture.md) — the canonical model, modules, data flow
-  - [contributing.md](developer/contributing.md) — TDD, tests, the doc-discipline rule
-- **[reference/](reference/)** — *look-up* (complete but concise, technical only):
-  - [schema.md](reference/schema.md) — tables, columns, provenance values, migrations
-  - [api.md](reference/api.md) — the engine API surface, verbs, the MCP
-  - [operations.md](reference/operations.md) — install/bootstrap, env vars, the gates, maintenance beats, the autonomous apply path, export/rollback/redaction
+## 📖 Start here — the handbook
+
+The documentation now lives as a single, progressively-ordered read:
+
+### **[➡ The ultra-memory Handbook](handbook/README.md)**
+
+It takes you from the mental model (Part I — Understand), through everyday use (Part II
+— Use) and configuration (Part III — Configure), to building your own knowledge domain
+(Part IV — Extend) and developing on the engine itself (Part V — Develop), plus a
+design-rationale appendix. The [handbook index](handbook/README.md) maps every chapter
+with a one-line "what you'll learn".
+
+> The old split-by-audience pages — `user/`, `developer/`, `reference/` — have been
+> **consolidated into the handbook**; each now contains a short redirect stub pointing
+> at the chapter that superseded it.
+
+## Also here
+
 - **[ENCOUNTERED_PROBLEMS.md](ENCOUNTERED_PROBLEMS.md)** — a wry, technically-accurate
   retrospective of the gnarliest bugs since the first commit. Every one is now found,
   fixed, and regression-tested — read it as a tour of how the system got tougher.
@@ -34,7 +39,8 @@ consolidate (SP-6) → attribute (SP-8) → self-correct (SP-7) → synthesize (
 a weekly cadence behind a seven-mechanism **code** safety wall (provenance gate ·
 archive-never-delete · bounded blast radius · git checkpoint · audit digest · kill switch ·
 synthesis eval-gate). Full autonomy in *whether* it acts; conservative, reversible defaults in
-*how*. See [design-decisions.md](developer/design-decisions.md) §5–6 for the rationale.
+*how*. See the handbook's [Design notes & rationale](handbook/99-design-and-internals.md)
+appendix for the rationale.
 
 **Single-root today.** The engine is parameterized over a `(global, project)` root pair; the
 global cross-project root is designed and built, activation pending.
