@@ -71,7 +71,24 @@ if setup.should_offer_backfill(db, cmd):
    ```
    If the hint prints, surface it to the user — do **not** run the backfill yourself. After the user has run it (pilot → full), stamp it so the hint stops: `"$PY" -c "import os; from ultra_memory import setup; setup.mark_backfill_complete(os.environ['ULTRA_MEMORY_DB'])"`.
 
-5. **Sanity check:** the MCP module imports, the embedder loads, a trial recall returns:
+5. **Autonomy notice + optional scheduler (offer, never auto-run).** The self-learning
+   loop is **ON by default** and advances automatically whenever you open Claude Code
+   (the async SessionStart `beats` hook, throttled per-beat). It reads only your local
+   session transcripts and runs on **your Claude login (no API key)**. To turn any beat
+   off, use the `/plugin` config toggles (Session capture / Outcome attribution /
+   Self-correction / Skill synthesis). For deterministic cadence on a headless box, print
+   the optional OS-scheduler snippet and let the user install it themselves:
+   ```bash
+   "$PY" -c "
+import sys
+from ultra_memory import setup
+kind = setup.detect_scheduler_platform(sys.platform)
+print(setup.scheduler_offer_text(kind, py='$CLAUDE_PLUGIN_DATA/venv/bin/python'))
+"
+   ```
+   Surface the printed snippet to the user; do **not** install it.
+
+6. **Sanity check:** the MCP module imports, the embedder loads, a trial recall returns:
    ```bash
    "$CLAUDE_PLUGIN_DATA/venv/bin/python" -c "import ultra_memory.knowledge_mcp; import fastembed; print('MCP + embedder OK')"
    uv run --directory "$CLAUDE_PLUGIN_ROOT" --python "$CLAUDE_PLUGIN_DATA/venv/bin/python" \
