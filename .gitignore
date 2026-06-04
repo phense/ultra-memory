@@ -16,3 +16,8 @@ docs/audit/
 # process notes + local paths); it stays on disk but out of the public repo. The
 # public-facing roadmap lives in the README "Status" section. (untracked 2026-06-04)
 /BACKLOG.md
+
+# Agent working-norms / Claude Code guidance for developing on this engine —
+# maintainer's private working doc, kept on disk but out of the public repo
+# (the public contributor guide is CONTRIBUTING.md + docs/12-contributing.md).
+/CLAUDE.md
