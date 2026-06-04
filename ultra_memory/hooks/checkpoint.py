@@ -122,8 +122,8 @@ def run(payload, *, db_path, ts):
                     title=subject or tid, ts=ts, detail=None,
                 )
             # Subsystem 4: enqueue this finished session for the throttled ingestion
-            # pass (mine the transcript for durable knowledge + corrections). Gated by
-            # SESSION_INGEST_ENABLE (default OFF → a no-op), fail-open — never blocks.
+            # pass (mine the transcript for durable knowledge + corrections). ON by
+            # default (opt-out via SESSION_INGEST_ENABLE=0), fail-open — never blocks.
             session_ingest.enqueue_if_enabled(
                 conn, session_id=session_id, transcript_path=str(transcript),
                 ts=ts, env=os.environ)

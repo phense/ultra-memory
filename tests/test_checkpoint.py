@@ -114,7 +114,10 @@ def test_run_records_completed_tasks(tmp_path):
     assert ("task_done", "Build hook") in [(r[0], r[1]) for r in rows]
 
 
-def test_run_is_idempotent(tmp_path):
+def test_run_is_idempotent(tmp_path, monkeypatch):
+    # Isolate the checkpoint task_done event_key dedup from the now-default-ON
+    # session_ingest enqueue (explicit opt-out keeps the count at the task_done row).
+    monkeypatch.setenv("SESSION_INGEST_ENABLE", "0")
     t = _write_transcript(tmp_path, [
         _create_result(1, "Build hook"),
         _task_update(1, status="completed"),
