@@ -26,6 +26,16 @@ def _cand(slug="gen-foo", description="Use when tuning the vol-vibes calendar en
                              index_hook=slug, source_lesson_ids=["L1"])
 
 
+def test_runs_per_query_default_is_bounded():
+    # the unattended (no env) path must stay small so a monthly synthesize from a
+    # session hook never floods the user's machine.
+    assert se.runs_per_query({}) <= 3
+
+
+def test_runs_per_query_env_override(monkeypatch):
+    assert se.runs_per_query({"ULTRA_MEMORY_PROBE_RUNS": "5"}) == 5
+
+
 def test_token_cosine():
     assert se.token_cosine("a b c", "a b c") == pytest.approx(1.0)
     assert se.token_cosine("a b c", "x y z") == 0.0

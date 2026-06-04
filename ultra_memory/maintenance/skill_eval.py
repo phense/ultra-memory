@@ -43,14 +43,28 @@ import yaml
 from ultra_memory.claude_cli import _child_env  # noqa: E402  (OAuth-sanitized env)
 
 THETA_DESC = 0.6          # Tier-A: reject above this token-cosine to any static desc
-RUNS_PER_QUERY = 3        # Tier-B: hijack-direction sample count (zero-tolerance — fire if ANY
-                          # sample fires). The per-deployment auto-corpus probes ~50 skills; the
-                          # probes now run CONCURRENTLY (§1.4.7), so the gate fits the timeout at a
-                          # conservative 3 samples (~12 min) rather than the serial-era 2.
+RUNS_PER_QUERY = 3        # Tier-B: bounded DEFAULT hijack-direction sample count (zero-tolerance —
+                          # fire if ANY sample fires). The per-deployment auto-corpus probes ~50
+                          # skills; the probes now run CONCURRENTLY (§1.4.7), so the gate fits the
+                          # timeout at a conservative 3 samples (~12 min) rather than the serial-era
+                          # 2. Read via runs_per_query(env) — overridable (ULTRA_MEMORY_PROBE_RUNS,
+                          # clamped 1..10) for a deliberate heavier run.
 PROBE_MAX_WORKERS = int(os.environ.get("ULTRA_MEMORY_PROBE_WORKERS", "6") or "6")
                           # Tier-B concurrency: independent `claude -p` probes run in a bounded
                           # thread pool. Bounded so the OAuth CLI is not swamped (§1.4.7).
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def runs_per_query(env=None) -> int:
+    """Probe samples per query. Bounded default (3) so an unattended monthly synthesize
+    triggered from a session hook never floods the machine; override via env for a
+    deliberate heavier run."""
+    src = env if env is not None else os.environ
+    try:
+        n = int(src.get("ULTRA_MEMORY_PROBE_RUNS", str(RUNS_PER_QUERY)))
+    except Exception:
+        n = RUNS_PER_QUERY
+    return max(1, min(n, 10))
 
 
 # --------------------------------------------------------------------------- #
@@ -329,12 +343,17 @@ def _probe_outcome(probe, candidate, fn, runs_per_query):
 def run_trigger_gate(candidate, *, static_descriptions, corpus,
                      repo_root=None, runner=subprocess.run, env=None,
                      probe_fn=None, similarity_fn=None, theta_desc: float = THETA_DESC,
-                     runs_per_query: int = RUNS_PER_QUERY, budget_fn=None) -> EvalReport:
+                     samples_per_query: int | None = None, budget_fn=None) -> EvalReport:
     """The load-bearing gate. Returns an EvalReport; admit iff Tier-A passes, the
     corpus covers every static skill, the listing budget is OK, and the candidate
     fires on ZERO static-skill-intent probes (candidate_fp == 0). HOLD (fail-closed)
     on empty/gap coverage; REJECT on a Tier-A hit or any candidate fire; a probe
-    error fails CLOSED to reject."""
+    error fails CLOSED to reject.
+
+    The Tier-B per-query sample count defaults to the bounded, env-overridable
+    `runs_per_query(env)` (ULTRA_MEMORY_PROBE_RUNS, clamped 1..10) so the unattended
+    path can never flood the machine; pass `samples_per_query` to force a value."""
+    rpq = samples_per_query if samples_per_query is not None else runs_per_query(env)
     static_names = list(static_descriptions.keys())
 
     # Tier-A deterministic pre-filter.
@@ -377,7 +396,7 @@ def run_trigger_gate(candidate, *, static_descriptions, corpus,
     workers = max(1, min(PROBE_MAX_WORKERS, len(hijack_probes)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         outcomes = list(pool.map(
-            lambda p: _probe_outcome(p, candidate, fn, runs_per_query), hijack_probes))
+            lambda p: _probe_outcome(p, candidate, fn, rpq), hijack_probes))
     candidate_fp = sum(1 for fired, _ in outcomes if fired)
     evaluated = sum(calls for _, calls in outcomes)
     if candidate_fp > 0:
