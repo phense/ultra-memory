@@ -5,7 +5,7 @@
 **Claude forgets everything when a session ends. ultra-memory gives it a memory that lasts: it remembers how you work, what your project decided, and what you've learned — and keeps that knowledge tidy on its own. One Claude Code plugin, running on your machine and your Claude subscription. No cloud service, no API key, no bill.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.0.2-informational.svg)](.claude-plugin/plugin.json)
+[![version](https://img.shields.io/badge/version-0.0.3-informational.svg)](.claude-plugin/plugin.json)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](pyproject.toml)
 [![tests](https://img.shields.io/badge/tests-1175%20passing-brightgreen.svg)](tests/)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-8A63D2.svg)](https://docs.claude.com/en/docs/claude-code)
