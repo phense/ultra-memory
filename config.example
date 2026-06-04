@@ -38,6 +38,19 @@ export ULTRA_MEMORY_WIKI_DIR="/abs/path/to/consumer/wiki"
 # A consumer whose wiki follows the reference Karpathy conventions needs none of the
 # [maintenance.wiki] table — every default already matches.
 
+# --- Maintenance failure notification (OPTIONAL) --------------------------------
+# ultra-memory ships NO mail/notify transport. To be alerted when a maintenance run
+# records beat errors, point this at YOUR notifier — a "module:function" resolved with
+# <project>/scripts on sys.path (the same seam as wiki_linter). The function is called
+# FAIL-OPEN with a NotifyEvent (.subject/.body/.errors/.ran/.run_ts/.project). Unset →
+# a one-line stderr no-op (the plugin sends nothing).
+#   In <project>/.ultra-memory/config.toml:  [maintenance]  notifier = "mymod:notify"
+#   Or override here:                          export ULTRA_MEMORY_NOTIFIER="mymod:notify"
+# Copy ultra_memory/maintenance/notify.py::example_notifier for SMTP / CLI shell-out /
+# webhook / MCP-via-`claude -p` templates. Headless cron ⇒ no direct Gmail/M365 MCP;
+# OAuth-only (no anthropic SDK / API key).
+# export ULTRA_MEMORY_NOTIFIER="mymod:notify"
+
 # --- knowledge MCP: caller privilege class --------------------------------------
 # Fail-closed: anything other than an explicit trusted class is treated as the
 # untrusted "subagent" (recall limited to project/reference; never user/feedback).

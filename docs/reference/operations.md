@@ -219,6 +219,48 @@ using*, so every backfill cluster is a same-domain competitor the eval-gate reje
 Those lessons augment the static skill's `Learnings.md` (live); synthesis mints new
 skills only for novel forward-loop domains.
 
+## Notification / alerting {#notification-alerting}
+
+A maintenance run is **fail-open per beat** — a beat that errors is caught, recorded
+in `result.errors`, and never wedges the session. To make those caught errors
+*visible*, `python -m ultra_memory.maintenance` exposes two complementary signals:
+
+1. **Exit code** — the process returns **1** iff a beat recorded a (caught) error,
+   else 0. This is the pure SIGNAL a consumer's cron wrapper can watch even for the
+   paths the in-process notifier cannot cover (a `timeout`/SIGKILL of the whole run,
+   an OOM, a crash before `main` returns). Keep a thin catch-all on it (e.g. mail on a
+   non-zero wrapper exit) as the catastrophic net.
+2. **In-process notifier hook** — on `result.errors`, `__main__` fires a pluggable
+   notifier **FAIL-OPEN** (a notifier error degrades to one log line; alerting MUST
+   NOT fail a maintenance run) with a structured `NotifyEvent`.
+
+**ultra-memory ships NO transport.** The notifier is a consumer seam:
+
+- **Config key:** `[maintenance] notifier = "module:function"` in
+  `<project>/.ultra-memory/config.toml` (or `ULTRA_MEMORY_NOTIFIER` to override). It is
+  resolved exactly like `wiki_linter` — `<project>/scripts` and `<project>` are put on
+  `sys.path` so an in-tree module imports.
+- **No-op default:** unset / unresolvable → a one-line stderr no-op (the plugin sends
+  nothing). A bad hook spec logs one line and degrades to the no-op — never wedges.
+- **`NotifyEvent` fields:** `kind` (`"maintenance_failure"`), `project`, `run_ts`,
+  `errors` (beat → `repr(exc)`), `ran`, `skipped`, plus pre-built `subject` and `body`
+  the hook can use verbatim or ignore in favor of the structured fields.
+- **Transports** (the hook wires exactly one): SMTP (stdlib, headless), shelling out to
+  any CLI / existing mailer, an own mail server / webhook (stdlib `urllib`), or MCP
+  (Gmail / M365). **Headless reality:** the maintenance pipeline runs as a cron with no
+  interactive Claude session, so a Gmail/M365 **MCP tool cannot be called directly** —
+  route it through a `claude -p` bridge with the MCP servers loaded (heavier; costs
+  OAuth tokens).
+- **OAuth-only invariant** (project hard rule): a notifier MUST NOT import the
+  `anthropic` SDK or use an API key. The `claude -p` path is OAuth via the CLI;
+  SMTP/webhook touch no Anthropic surface at all.
+
+Copy `ultra_memory/maintenance/notify.py::example_notifier` — it is a `COPY ME`
+template carrying all four transport snippets. The same seam is the future
+generalization of the `WriteSpooled` alert (see [Write spool](#write-spool)):
+today `WriteSpooled` surfaces loudly via the exit-code signal; a later change can route
+it through this same notifier.
+
 ## Topic backfill (gated) {#topic-backfill-gated}
 
 `memory_lib.backfill_topic(conn, *, default_topic, ts)` stamps `topic =
@@ -303,7 +345,7 @@ re-run migrations against an already-shaped schema (which would otherwise fail w
 `duplicate column name`). Restoring also recovers the `audit_log` and embedding
 BLOBs (the markdown views do not).
 
-## Write spool (`<db_dir>/memory_spool/`)
+## Write spool (`<db_dir>/memory_spool/`) {#write-spool}
 
 If a write cannot get the lock after the bounded retries, `_write_txn` writes the
 operation's intent to `memory_spool/<hash>.json` and raises `WriteSpooled`. The
