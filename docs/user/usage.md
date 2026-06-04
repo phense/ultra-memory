@@ -12,10 +12,10 @@
 ultra-memory is a Claude Code plugin. Two steps:
 
 1. **Install the plugin** (zero-config). Once installed it defaults to the global home
-   `~/.ultra-knowledge/memory.db` and `~/.ultra-knowledge/wiki/` — no env vars, no
+   `~/.ultra-memory/memory.db` and `~/.ultra-memory/wiki/` — no env vars, no
    config file needed.
 
-2. **Run `/memory-setup`.** This one-time bootstrap:
+2. **Run `/ultra-memory:memory-setup`.** This one-time bootstrap:
    - builds the runtime virtual environment,
    - **optionally** imports an existing legacy memory directory (a one-time legacy
      import),
@@ -27,9 +27,9 @@ ultra-memory is a Claude Code plugin. Two steps:
 
 3. **Restart Claude Code** so the read-only `knowledge` MCP registers.
 
-Prerequisites (both required, and preflighted by `/memory-setup`): `uv` and `git`.
+Prerequisites (both required, and preflighted by `/ultra-memory:memory-setup`): `uv` and `git`.
 
-> **The `import_complete` gate.** Until `/memory-setup` stamps the database ready, the
+> **The `import_complete` gate.** Until `/ultra-memory:memory-setup` stamps the database ready, the
 > SessionStart and Stop hooks **no-op** (fail-open to the legacy path). This is a
 > guardrail: the projection-style `Learnings.md` files and the rehydration gist cannot
 > regenerate empty over un-imported content. You will not get rehydration or capture
@@ -47,18 +47,18 @@ write raw SQL.
 
 | Command | What it does |
 |---|---|
-| `/memory-save` | Persist a **new** durable fact — a preference, a feedback directive, project state, or a reference. The canonical new-fact verb. |
-| `/memory-recall "<query>"` | Recall durable memories matching a query — past decisions, accumulated project knowledge, preferences. Trusted full recall (all types). |
-| `/memory-pin <id>` | Make a fact **always in context** — it gets injected into every SessionStart gist. Pin your hard rules. Append `unpin` to clear. |
-| `/memory-verify <id>` | Mark a fact as reconfirmed-true today — resets its staleness signal. |
-| `/memory-edit <id>` | Correct a fact's **body** in place. Type, title, and other fields are preserved. |
-| `/memory-inbox` | Apply queued human-correction directives (pin/unpin/verify) you typed into the watched inbox file between sessions. |
-| `/memory-setup` | The one-time bootstrap above. |
-| `/memory-maintain` | Force a prune + export now (the same maintenance the SessionStart hook runs throttled). Pure Python, no LLM. |
+| `/ultra-memory:memory-save` | Persist a **new** durable fact — a preference, a feedback directive, project state, or a reference. The canonical new-fact verb. |
+| `/ultra-memory:memory-recall "<query>"` | Recall durable memories matching a query — past decisions, accumulated project knowledge, preferences. Trusted full recall (all types). |
+| `/ultra-memory:memory-pin <id>` | Make a fact **always in context** — it gets injected into every SessionStart gist. Pin your hard rules. Append `unpin` to clear. |
+| `/ultra-memory:memory-verify <id>` | Mark a fact as reconfirmed-true today — resets its staleness signal. |
+| `/ultra-memory:memory-edit <id>` | Correct a fact's **body** in place. Type, title, and other fields are preserved. |
+| `/ultra-memory:memory-inbox` | Apply queued human-correction directives (pin/unpin/verify) you typed into the watched inbox file between sessions. |
+| `/ultra-memory:memory-setup` | The one-time bootstrap above. |
+| `/ultra-memory:memory-maintain` | Force a prune + export now (the same maintenance the SessionStart hook runs throttled). Pure Python, no LLM. |
 
 ### Saving a memory
 
-Use `/memory-save` whenever something should be remembered durably — "the operator prefers
+Use `/ultra-memory:memory-save` whenever something should be remembered durably — "the operator prefers
 German for conversation", "the order-execution engine is Rust", "this strategy is
 paper-only". Saving:
 
@@ -73,14 +73,14 @@ paper-only". Saving:
 
 ### Recalling
 
-`/memory-recall "<query>"` is the trusted, full-access read path — it can see every
+`/ultra-memory:memory-recall "<query>"` is the trusted, full-access read path — it can see every
 type, including your `user`/`feedback` memories. (Subagents and cron jobs get a
 *type-scoped* read instead; see *How recall works* below.) Use it before answering
 anything that depends on remembered context.
 
 ### Pinning hard rules
 
-`/memory-pin <id>` is how you make a rule **un-missable**. A pinned memory is injected
+`/ultra-memory:memory-pin <id>` is how you make a rule **un-missable**. A pinned memory is injected
 into every SessionStart rehydration gist, so the agent always starts with it in
 context — exactly what you want for hard rules (a tax fence, an OAuth-only rule, a
 paper-only constraint). Pinning also makes a memory immutable to the autonomous
@@ -89,13 +89,13 @@ memories and pinned wiki pages share one section of the gist.
 
 ### Correcting and verifying
 
-- `/memory-edit <id>` rewrites a fact's body when it is wrong or outdated — and stamps
+- `/ultra-memory:memory-edit <id>` rewrites a fact's body when it is wrong or outdated — and stamps
   it `created_by='human'`, which makes it immutable to the autonomous loops from then
   on.
-- `/memory-verify <id>` says "I checked, this still holds" — it resets the staleness
+- `/ultra-memory:memory-verify <id>` says "I checked, this still holds" — it resets the staleness
   signal so the fact ranks normally again.
-- `/memory-inbox` is the between-sessions path: type pin/unpin/verify directives into
-  the watched inbox file whenever you think of them, then run `/memory-inbox` to apply
+- `/ultra-memory:memory-inbox` is the between-sessions path: type pin/unpin/verify directives into
+  the watched inbox file whenever you think of them, then run `/ultra-memory:memory-inbox` to apply
   them in one go. Free text it cannot parse is preserved under an "Unprocessed"
   section rather than dropped.
 
@@ -121,7 +121,7 @@ every time** (ties break on a fixed secondary key).
 Recall is scoped by an orthogonal **(type × topic)** access wall, and it is
 **fail-closed**:
 
-- **Trusted callers** (you, via the `/memory-recall` CLI) get full recall — all types.
+- **Trusted callers** (you, via the `/ultra-memory:memory-recall` CLI) get full recall — all types.
 - **Untrusted callers** (a subagent, a cron job — the default `subagent` class) get
   only `project` / `reference` memories, **never** `user` / `feedback`, and only the
   topics they are bound to. A caller with no topic binding sees only `topic IS NULL`
@@ -148,7 +148,7 @@ switch it on. Flip it to live injection when you are comfortable with the conten
 ## The wiki: read and write
 
 The Expert-Knowledge wiki holds durable domain knowledge as human-readable, git-tracked
-markdown pages, organised by topic under `~/.ultra-knowledge/wiki/<topic>/`.
+markdown pages, organised by topic under `~/.ultra-memory/wiki/<topic>/`.
 
 ### Reading
 
@@ -191,9 +191,9 @@ can seed the self-learning loop from that history. This is **separate from** the
 one-time legacy memory import:
 
 - The **legacy import** (gated by `import_complete`) pulls an existing markdown memory
-  tree into the database — a one-time event run by `/memory-setup`.
+  tree into the database — a one-time event run by `/ultra-memory:memory-setup`.
 - The **cold-start backfill** is independent and optional: if you point the plugin at a
-  backfill runner, `/memory-setup` prints a *hint* to run it (it never auto-runs). It
+  backfill runner, `/ultra-memory:memory-setup` prints a *hint* to run it (it never auto-runs). It
   populates the session-event cache from prior sessions so the consolidate beat has
   material to work with.
 

@@ -19,4 +19,4 @@ Save a new durable memory: **$ARGUMENTS**.
    rm -f "$tmp"
    ```
 
-(Needs `ULTRA_MEMORY_DB` set — the plugin's hook/MCP env provides it.) This is the canonical way to create a new fact: never hand-write a `*.md` file and re-import. To make the fact always-in-context, `/memory-pin` it afterward. Review the body for secrets before saving (they are auto-stripped, but check).
+(Needs `ULTRA_MEMORY_DB` set — the plugin's hook/MCP env provides it.) This is the canonical way to create a new fact: never hand-write a `*.md` file and re-import. To make the fact always-in-context, `/ultra-memory:memory-pin` it afterward. Review the body for secrets before saving (they are auto-stripped, but check).

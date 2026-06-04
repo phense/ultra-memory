@@ -54,7 +54,7 @@ The durable typed notes.
 | `supersedes` | TEXT | canonical id when `status='redirect'` |
 | `pinned` | INTEGER | default 0 |
 | `topic` | TEXT | **(0004)** nullable. `NULL` = cross-topic / visible-to-all (composes with the §5 access wall as `topic IS NULL`); a non-NULL topic walls the row. `user`/`feedback` operational rows stay `NULL` (D11). |
-| `created_by` | TEXT | **(0004)** provenance; `NOT NULL DEFAULT 'human'`. Values: `human` (CLI / `/memory-*`) / `agent` (session-ingest capture) / `background_review` (the consolidate beat's graduations) / `import` (legacy markdown) / `backfill_import` (cold-start session-cache backfill). **Gates MUTABILITY, not synthesis visibility (2026-06-03):** the SP-7 provenance gate may auto-edit only `('agent','background_review')` rows — `human`/`import`/`backfill_import`/`pinned` rows are immutable; but SP-10 synthesis selects induction clusters by `node_type='learning'` (provenance-agnostic), so a `backfill_import` lesson CAN feed a generated skill while still being un-rewritable. |
+| `created_by` | TEXT | **(0004)** provenance; `NOT NULL DEFAULT 'human'`. Values: `human` (CLI / `/ultra-memory:memory-*`) / `agent` (session-ingest capture) / `background_review` (the consolidate beat's graduations) / `import` (legacy markdown) / `backfill_import` (cold-start session-cache backfill). **Gates MUTABILITY, not synthesis visibility (2026-06-03):** the SP-7 provenance gate may auto-edit only `('agent','background_review')` rows — `human`/`import`/`backfill_import`/`pinned` rows are immutable; but SP-10 synthesis selects induction clusters by `node_type='learning'` (provenance-agnostic), so a `backfill_import` lesson CAN feed a generated skill while still being un-rewritable. |
 | `outcome_weight` | REAL | **(0004)** `NOT NULL DEFAULT 1.0`. Multiplied into the unified-recall score (`1.0` is multiplicatively neutral; `<1.0` demotes, `>1.0` promotes). **Written by `set_outcome_weight`** (SP-7, the deterministic EWMA regression signal folded from SP-8 attribution edges); the default `1.0` is the neutral state before any signal lands. |
 
 ### `sessions`
@@ -174,7 +174,7 @@ deferred follow-up.
 `key` PK, `value`. Holds `schema_version` (mirrors `PRAGMA user_version`),
 `import_complete` (the one-time legacy-import gate the session hooks read),
 `backfill_complete` (the **independent** cold-start session-cache backfill flag —
-controls only the `/memory-setup` hint, never `db_ready`), `topic_backfill_complete`
+controls only the `/ultra-memory:memory-setup` hint, never `db_ready`), `topic_backfill_complete`
 (the gated topic-stamp data step), `last_maintenance` (the ~20h throttle stamp), and
 the per-period blast-radius counters `sp7_aggressive_period:<YYYY-MM>` /
 `sp10_synthesis_period:<YYYY-MM>` (the global monthly caps the autonomous beats

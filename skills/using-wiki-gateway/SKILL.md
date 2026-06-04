@@ -16,7 +16,7 @@ inherited and must not be re-implemented.
 python -m ultra_memory.wiki_gateway scaffold --out scripts/my_wiki.py --class-name MyWikiGateway --topic mytopic
 ```
 
-(or the `/wiki-gateway-scaffold` slash command). It emits a `class MyWikiGateway(WikiGateway)` stub with
+(or the `/ultra-memory:wiki-gateway-scaffold` slash command). It emits a `class MyWikiGateway(WikiGateway)` stub with
 all 6 hooks (each defaulting to `super()`), their contracts, and the config snippet.
 
 ## The 6 override hooks (override ONLY what differs)

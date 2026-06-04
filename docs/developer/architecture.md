@@ -184,7 +184,7 @@ test** (which can import both). The memory-store byte-identity is enforced here.
   (a wiki page has no `memories` row) use `knowledge_pins`. `set_pinned(source_kind
   ∈ {memory, knowledge})` writes the right one; `rehydrate.build_gist` unions both
   into the single `## Pinned rules` gist section. A back-compat `id=` shim keeps
-  the SP-1 `/memory-pin` + spooled records working.
+  the SP-1 `/ultra-memory:memory-pin` + spooled records working.
 - **Fail-closed role + topic scope.** The access wall composes two orthogonal
   axes by AND: `visible(fact) ⟺ (topic ∈ agent_topics OR topic IS NULL) AND (type ∈
   allowed_types_for(caller_class))`. `topic_scope_from_env` resolves
@@ -213,7 +213,7 @@ SP-3 lands the **columns and relations** the §7a loop will need, all **inert** 
 cycle:
 
 - `memories.created_by` (provenance gate input): stamped `human` by the CLI /
-  `/memory-*` verbs (the safe-immutable default), `import` by the bootstrap
+  `/ultra-memory:memory-*` verbs (the safe-immutable default), `import` by the bootstrap
   importer. **`agent` and `background_review` have no engine write site yet** — they
   are reserved values an agent-initiated save / a future Tier-2 maintenance write
   will set; the SP-7 provenance gate may auto-edit only those non-`human` rows.

@@ -6,7 +6,7 @@ This `docs/` tree is split by reading intent:
 
 - **[user/](user/)** — for *consumers*: what ultra-memory is and how to use it.
   - [overview.md](user/overview.md) — the mental model (two stores, one fabric), headline capabilities, and what we've already considered (privacy, OAuth-only, reversibility)
-  - [usage.md](user/usage.md) — install (`/memory-setup`), the everyday verbs, recall + rehydration, the wiki surface, the cold-start backfill, the loop day-to-day
+  - [usage.md](user/usage.md) — install (`/ultra-memory:memory-setup`), the everyday verbs, recall + rehydration, the wiki surface, the cold-start backfill, the loop day-to-day
 - **[developer/](developer/)** — for *contributors*: how it's built and **why**.
   - [design-decisions.md](developer/design-decisions.md) — the **WHY** behind every major choice (one global DB + topic-partitioned wiki, two-stores-one-fabric, OAuth-only, gateway-only writes, the self-learning loop, autonomy-via-code-wall) with the trade-offs considered and rejected
   - [variables.md](developer/variables.md) — the **complete** reference of every config variable + tunable constant (env / `config.toml` / `userConfig` / code), grouped, with defaults

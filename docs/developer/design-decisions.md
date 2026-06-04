@@ -25,8 +25,8 @@ closed 20+ integrity/redaction/privilege bugs).
 
 **Decision (executed 2026-06-01).** All Session Memory — `memories`, `session_events`,
 `embeddings`, `access_log`, the edge graph — lives in **one canonical SQLite at
-`~/.ultra-knowledge/memory.db`**, shared by every project. The Expert-Knowledge wiki
-likewise lives in **one global tree at `~/.ultra-knowledge/wiki/`**, organized into
+`~/.ultra-memory/memory.db`**, shared by every project. The Expert-Knowledge wiki
+likewise lives in **one global tree at `~/.ultra-memory/wiki/`**, organized into
 **topic subdirectories** (`trading`, `programming`, `user`) rather than per-project
 silos.
 
@@ -61,16 +61,16 @@ into theme-indexes keeps the access model legible.
 
 ### Zero-config resolution (and why one value, not many)
 
-With no env var and no config file, the plugin defaults to `~/.ultra-knowledge/memory.db`
-and `~/.ultra-knowledge/wiki`. An explicit `ULTRA_MEMORY_DB` override is still honored
+With no env var and no config file, the plugin defaults to `~/.ultra-memory/memory.db`
+and `~/.ultra-memory/wiki`. An explicit `ULTRA_MEMORY_DB` override is still honored
 (for testing, or a user who deliberately wants a per-project silo). A consumer who wants
 to store elsewhere sets **one** value (`data_db_path`); the default is the global home.
 
 **Rejected: require each project to declare its own roots, topic names, and env vars.**
 That makes portability fragile and multi-project scenarios unmaintainable — every new
 project duplicates config, and a typo in a root path silently splits the fabric. The
-single, predictable home (`~/.ultra-knowledge/`) is the only topology that scales to a
-second project without config duplication. Drop the plugin in, run `/memory-setup`,
+single, predictable home (`~/.ultra-memory/`) is the only topology that scales to a
+second project without config duplication. Drop the plugin in, run `/ultra-memory:memory-setup`,
 restart — the fabric auto-wires.
 
 A safety property worth calling out: DB-path resolution is **`explicit ULTRA_MEMORY_DB`

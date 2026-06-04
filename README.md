@@ -1,184 +1,170 @@
 # ultra-memory
 
-### The One-Stop Memory Solution for Claude.
+### Lasting memory for Claude — on your own machine.
 
-**Session memory + a durable expert-knowledge wiki + a self-improving skill loop — fused into one ranked recall, in a single Claude Code plugin. Local-first, OAuth-only, zero cloud, zero API keys.**
+**Claude forgets everything when a session ends. ultra-memory gives it a memory that lasts: it remembers how you work, what your project decided, and what you've learned — and keeps that knowledge tidy on its own. One Claude Code plugin, running on your machine and your Claude subscription. No cloud service, no API key, no bill.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![version](https://img.shields.io/badge/version-0.0.2-informational.svg)](.claude-plugin/plugin.json)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-1160%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-1175%20passing-brightgreen.svg)](tests/)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-8A63D2.svg)](https://docs.claude.com/en/docs/claude-code)
 
-Most "memory for Claude" tools give you one bucket: they capture a session, compress it,
-and squirt it back next time. ultra-memory gives you a **knowledge fabric** — two stores
-with *different half-lives* (fast-moving session memory **and** a curated, git-canonical
-expert-knowledge wiki), a **typed-edge graph** that spans both, **one ranked recall** that
-fuses them, a **single audited write gateway** that redacts secrets on the way in *and* out,
-and a **self-learning loop** that consolidates, self-corrects, and even synthesizes
-new skills from what it learns — autonomous, but governed by a code safety wall (provenance-gated,
-archive-never-delete, bounded, reversible). All of it runs on your machine, on your Claude
-subscription — no vector cloud, no metered API key, ever.
+Most "memory for Claude" tools give you one bucket: they save a session, compress it, and replay it
+next time. ultra-memory keeps **two kinds of memory at once**, because not everything you want Claude
+to remember ages at the same speed:
 
-> **The boundary (this repo is published; your data is not):** this repository holds **only code**
-> and is **content-free**. Your `memory.db`, exports, paths, the knowledge base it indexes, and any
-> secrets live in *your* project and are injected via config — never committed here. No hardcoded user
-> paths (enforced by a test). One plugin, many consumers.
+- **Session memory** — *how you work*: preferences, your project's current state, corrections you've
+  made. Fast-moving, stored in a local SQLite database.
+- **A knowledge wiki** — *what you've learned*: concepts, findings, post-mortems — the durable stuff
+  worth keeping. Stored as plain Markdown you can read, edit, and track in git.
 
-**[Why ultra-memory](#why-ultra-memory)** · **[Quick Start](#quick-start)** · **[What makes it different](#what-makes-it-different)** · **[How it works](#how-it-works)** · **[Comparison](#comparison)** · **[Configuration](#configuration)** · **[Status](#status--honest-roadmap)** · **[License](#license)**
+When Claude needs context, ultra-memory searches **both at once** and returns one ranked list of what's
+relevant. A small graph of links ties the two together, so a lesson from a session can "graduate" into a
+wiki page and stay connected. And over time the plugin curates itself — merging duplicates, correcting
+what it got wrong, even turning repeated lessons into new reusable skills — always in small, reversible
+steps you can review, and never touching a rule you've locked down.
+
+> **Your data stays yours.** This repository is **code only** — it ships no content. Your memory
+> database, your notes, your paths, and any secrets live in *your* project and are passed in by config;
+> nothing personal is ever committed here (a test enforces it). One plugin, many projects.
+
+**[Why](#why-ultra-memory)** · **[Quick start](#quick-start)** · **[What's different](#what-makes-it-different)** · **[How it works](#how-it-works)** · **[Comparison](#comparison)** · **[Configuration](#configuration)** · **[Status](#status--honest-roadmap)** · **[Acknowledgments](#acknowledgments)** · **[License](#license)**
 
 ---
 
 ## Why ultra-memory
 
-🧠 **It's a fabric, not a bucket.** A session-memory store for *how you work* (preferences, project
-state, corrections) and a durable, topic-partitioned **LLM-Wiki** for *what you've learned* (concepts,
-studies, post-mortems) — kept separate because they decay at different speeds, ranked **together** at
-recall time.
+🧠 **Two memories, searched as one.** Quick "how you work" facts and a durable, growing knowledge base —
+kept apart because they age differently, ranked together when Claude needs them.
 
-🔗 **It has a real graph.** A typed-edge `links` table spans memory ↔ wiki, so a session learning can
-be *graduated* into a wiki page and the edge is recorded — recall traverses it.
+🔒 **Private by design.** Everything lives in local files. It runs on your Claude login and **refuses to
+start if a paid API key is present** — there is deliberately no metered-API path. Secrets are stripped
+on the way in *and* on the way out.
 
-🔒 **It's private by construction.** Local SQLite, **OAuth-only** (an `ANTHROPIC_API_KEY` on the
-process raises a hard `OAuthViolation` — the engine never touches the metered API or the SDK), and a
-single audited write gateway that strips secrets at both persist and export.
+♻️ **It tidies itself, safely.** A background loop merges duplicates, improves what it stored, and can
+even create new skills from lessons it keeps seeing — in small, bounded, reversible steps. It can
+**never** delete anything (only archive it) and can **never** change a rule you've pinned. You read a
+short summary of what it did; you don't babysit it.
 
-♻️ **It improves itself — safely.** A wall-governed self-learning loop
-(consolidate → attribute → self-correct → synthesize) that can dedup, reinforce, revert, and even
-induce new Claude skills from matured lessons. The autonomy is *structural*: the code **cannot**
-mutate a human/pinned fact, **cannot** delete (only archive + redirect-stub), and is bounded
-(≤3 edits / ≤3 reversions / ≤5 quarantines / ≤1 new skill per run) — so mistakes are rare *and*
-cheap to revert. You stay in the audit loop, not the write loop.
-
-⚡ **It installs in one step and stays out of your way.** A zero-config Claude Code plugin: a
-~15 ms SessionStart rehydration gist, a Stop-checkpoint, throttled background maintenance — fail-open
-everywhere, so it can never wedge a session.
+⚡ **One-step install, then invisible.** A drop-in Claude Code plugin. It adds a few milliseconds at
+session start and otherwise stays out of the way — and if anything ever goes wrong, it logs a line and
+steps aside rather than blocking your work.
 
 ---
 
-## Quick Start
+## Quick start
 
 ultra-memory is a drop-in [Claude Code](https://docs.claude.com/en/docs/claude-code) plugin.
 
 ```bash
-# 1. Add the marketplace (replace <owner> with the GitHub owner of this repo)
-/plugin marketplace add <owner>/ultra-memory
+# 1. Add the marketplace
+/plugin marketplace add phense/ultra-memory
 
 # 2. Install
 /plugin install ultra-memory@ultra-memory
 
-# 3. Bootstrap (builds the runtime venv, stamps the DB, sanity-checks), then restart Claude Code
-/memory-setup
+# 3. Set up (builds the runtime, prepares the database, runs a quick check), then restart Claude Code
+/ultra-memory:memory-setup
 ```
 
-That's the whole install — no hand-editing `.mcp.json`, `settings.json`, or any wrapper.
-**Zero-config:** the store auto-derives to `~/.ultra-knowledge/memory.db` (one fabric shared by all
-your projects). Optional `userConfig` overrides exist (`data_db_path`, `caller_class`,
-`rehydrate_budget`) but nothing is required.
+That's the whole install — no editing `.mcp.json`, `settings.json`, or any wrapper by hand. By default
+your memory lives in `~/.ultra-memory/memory.db`, one store shared across all your projects. A few
+optional settings exist (see [Configuration](#configuration)), but nothing is required.
 
-**Then just use it:**
+**Then just use it** (Claude Code namespaces a plugin's commands with the plugin name):
 
 ```text
-/memory-save     persist a durable fact (how you want to work, a decision, a reference)
-/memory-recall   query the store on demand
-/memory-pin      keep a hard rule hot in every session's rehydration gist
-/memory-verify   reconfirm a fact is still true (resets its staleness clock)
-/memory-edit     correct a stored memory in place
-/memory-inbox    apply pin/verify directives you typed between sessions
-/memory-maintain run maintenance now (prune + refresh views; no LLM)
+/ultra-memory:memory-save      save a durable fact (how you work, a decision, a reference)
+/ultra-memory:memory-recall    search your memory on demand
+/ultra-memory:memory-pin       keep a rule in view at the start of every session
+/ultra-memory:memory-verify    reconfirm a fact is still true (resets its "stale" clock)
+/ultra-memory:memory-edit      correct a stored memory
+/ultra-memory:memory-inbox     apply pin/verify notes you jotted between sessions
+/ultra-memory:memory-maintain  run cleanup now (no AI calls)
 ```
 
-On each **SessionStart** the rehydration gist (pinned rules + hot memories) is injected; on **Stop** a
-checkpoint is written; a read-only, type-scoped `knowledge` MCP tool exposes recall to subagents
-behind a fail-closed privilege wall.
+At the start of each session, ultra-memory injects a short summary of your pinned rules and most
+relevant memories. When a session ends, it saves a checkpoint. Subagents can read your memory through a
+read-only tool, behind a privilege boundary so they only ever see the facts they're allowed to.
 
-**Requirements:** `uv` and `git` on `PATH` (both preflighted by `/memory-setup`). `uv` provisions the
-Python 3.13 runtime; `git` is the rollback model — the deterministic redacted SQL dump is the sole
-git-committed restore artifact. First `/memory-setup` downloads a small local embedder (~bge-small),
-cached afterward. **No API key, no cloud account, ever.**
+**Requirements:** `uv` and `git` on your `PATH` (both checked by setup). `uv` provides the Python 3.13
+runtime; `git` is how you roll back — ultra-memory commits a readable, secret-stripped snapshot of your
+store, and nothing else. The first setup downloads a small local search model (about the size of
+bge-small), cached afterward. **No API key, no cloud account, ever.**
 
 ---
 
 ## What makes it different
 
-Three things that, *together*, no other Claude-memory tool ships:
+Three things that, together, no other Claude-memory tool ships:
 
-### 1. A durable expert-knowledge wiki — not just session memory
-Session memory is volatile (preferences, state, corrections). Real expertise — concepts, indicator
-studies, post-mortems — has a longer half-life and deserves a **curated, canonical home**.
-ultra-memory treats a **topic-partitioned LLM-Wiki** (plaintext Markdown, canonical in git) as a
-first-class store *beside* session memory: it ships the **wiki sync**, the **cross-store fusion**, and
-the full **curation/maintenance engine** — a schema-driven 5-detector framework (stale · dedup · scope ·
-lint · graph), a grey-zone dedup judge, and a conservative consolidation drain. Structured writes go
-through a single **audited gateway** (routed, deduped, secret-redacted, audited) wired via a thin
-consumer config seam — scaffold your own gateway in one command, or run **pure-memory with no wiki
-at all**.
-
-### Extending the wiki gateway
-
-The wiki write path is a subclassable plugin API — `ultra_memory.wiki_gateway.WikiGateway`. To give a
-project its own wiki (custom routing, dedup, frontmatter, anchors, labels), scaffold an extension:
+### 1. A real knowledge base — not just session memory
+Session memory is volatile: preferences, state, corrections. But real expertise — concepts, studies,
+lessons learned — deserves a lasting, organized home. ultra-memory treats a **Markdown knowledge wiki**
+(plain text, versioned in git) as a first-class store *alongside* session memory. It ships the whole
+curation pipeline: it flags stale and duplicate pages, keeps links healthy, and merges near-duplicates
+conservatively. Every structured write goes through **one gateway** that files the page in the right
+place, removes duplicates, strips secrets, and logs the change. Want your own wiki layout? Subclass the
+gateway and scaffold a starter in one command:
 
 ```
 python -m ultra_memory.wiki_gateway scaffold --out scripts/my_wiki.py --class-name MyWikiGateway --topic mytopic
 ```
 
-then override only the hooks that differ and wire `wiki_gateway = "my_wiki:MyWikiGateway"` in
-`.ultra-memory/config.toml` (unset → a turnkey built-in). The `using-wiki-gateway` skill teaches the
-6-hook contract; the inherited engine (materialization, secret redaction, write-lock, audit) is never
-re-implemented. (No consumer config at all → a pure-memory install with no wiki.)
+Then override only the parts that differ and point `wiki_gateway = "my_wiki:MyWikiGateway"` at it in
+`.ultra-memory/config.toml`. Or skip the wiki entirely and run memory-only — with no wiki configured,
+the wiki steps simply do nothing.
 
-### 2. A typed-edge graph + one ranked recall across both stores
-A `links` table records typed edges (e.g. a `validated_as` edge from a session learning to the wiki
-page it matured into). `unified_recall` then fuses **memory** and **wiki** hits into a single ranked
-list via deterministic Reciprocal-Rank-Fusion (stable under `PYTHONHASHSEED`), scoped by a
-fail-closed **role × topic** privilege wall — a subagent literally cannot recall another topic's or a
-higher-privilege caller's rows.
+### 2. One ranked search across both stores
+A small **links table** records typed connections — for example, the link from a session lesson to the
+wiki page it grew into. A single search then blends memory and wiki results into one ranked list, scoped
+by a **privilege boundary**: a subagent can't read another project's facts or a more-trusted caller's
+private ones. The ranking is deterministic, so the same query gives the same order every time.
 
-### 3. A Hermes-style self-learning skill loop
-The fourth beat is what makes it an *organism*: a four-stage loop —
-**consolidate** (graduate matured lessons) → **attribute** (credit outcomes back to recalled memories)
-→ **self-correct** (auto-edit / revert / quarantine *agent-authored* knowledge, never your pinned
-rules) → **synthesize** (induce a new `gen-*/SKILL.md` from a cluster of graduated lessons, behind an
-eval-gate that proves the new skill won't hijack an existing one). It's **built, tested (part of the
-1160-test suite), and wall-governed** — the autonomy is in *whether* it acts; the conservatism is in
-*how*. Seven mechanisms enforce that in **code, not prose**: a provenance gate (human/pinned rows are
-physically immutable), archive-never-delete, bounded blast radius, a pre-run git checkpoint, an
-audit + human digest, a kill switch, and (for synthesis) a behavioral eval-gate. Because every action
-is reversible and bounded, mistakes are rare *and* cheap to undo. (See
-[Status](#status--honest-roadmap) for exactly what's live.)
+### 3. A self-learning loop
+This is what makes it feel like an organism rather than a filing cabinet. A background loop runs in four
+steps: **consolidate** (promote lessons that have proven their worth), **attribute** (notice which
+remembered facts actually helped), **self-correct** (fix, retire, or set aside its *own* earlier notes —
+never your pinned rules), and **synthesize** (turn a cluster of related lessons into a brand-new
+reusable skill, after a check that it won't step on an existing one).
+
+It's fully built and tested, and **safe by construction** rather than by good intentions. The rules are
+enforced in code, not just asked for in a prompt: it cannot touch a fact you authored or pinned, cannot
+delete (only archive), is capped per run (at most a few edits, a few reversions, one new skill),
+checkpoints to git before it acts, and writes you a summary afterward. Because every step is small and
+reversible, mistakes are rare *and* cheap to undo. You stay in the review loop, not the work loop. (See
+[Status](#status) for exactly what's on by default.)
 
 ---
 
 ## How it works
 
 ```
-            ┌──────────────────────── one knowledge fabric ────────────────────────┐
-            │                                                                       │
-   Session Memory (SQLite, volatile)            Expert Knowledge — LLM-Wiki (Markdown, durable)
-   how you work · state · corrections           concepts · studies · post-mortems · canonical in git
-            │                                                                       │
-            └──────────────┬───────────  typed-edge graph (links)  ────────┬────────┘
-                           │                                               │
-                    unified_recall  ── deterministic RRF fusion ──  one ranked list
-                           │            (role × topic privilege wall, fail-closed)
-                           │
-     single audited write gateway (memory_lib) · strip_secrets on persist + export · OAuth-only
-                           │
-   SessionStart gist (~15 ms, fail-open) · Stop checkpoint · throttled background maintenance beats
-                           (consolidate · attribute · self-correct · synthesize · projection-regen)
+        ┌───────────────────────── one knowledge base ─────────────────────────┐
+        │                                                                       │
+   Session memory (SQLite)                      Knowledge wiki (Markdown, in git)
+   how you work · state · fixes                 concepts · studies · lessons
+        │                                                                       │
+        └──────────────┬──────────────  links between them  ──────────┬─────────┘
+                       │                                               │
+                 one ranked search  ──  blends both  ──  scoped by a privilege boundary
+                       │
+        one audited write path  ·  strips secrets in and out  ·  your Claude login only
+                       │
+   session-start summary (fast, never blocks) · end-of-session checkpoint · background cleanup
 ```
 
-- **OAuth-only chokepoint:** every LLM call goes through `claude_cli` on your Claude subscription. An
-  `ANTHROPIC_API_KEY` on the process is a hard error — there is deliberately no metered-API path.
-- **Single audited write gateway:** all mutations funnel through `memory_lib`, with secret redaction
-  at persist *and* export, retryable transactions, and a spool for busy-casualties.
-- **git is the rollback model:** a deterministic, redacted SQL dump + a VACUUM snapshot are the
-  committed restore artifacts; nothing destructive, soft-delete + redirect-stub only.
-- **Fail-open hooks:** a maintenance or hook error degrades to one log line — it never blocks or
-  wedges a session.
+- **Your Claude login only.** Every AI call goes through the local `claude` command on your own
+  subscription. A paid API key on the process is a hard error — there's deliberately no metered path.
+- **One audited write path.** Every change funnels through a single gateway that strips secrets on save
+  *and* on export, and retries safely under load.
+- **git is your undo button.** ultra-memory commits a readable, secret-stripped snapshot of your store.
+  Nothing is ever hard-deleted — it's archived and redirected instead.
+- **It never blocks you.** If a background step or a hook hits an error, it logs one line and steps
+  aside — it can't wedge your session.
 
-Full architecture lives in [`docs/`](docs/) — [`user/`](docs/user/) (overview + usage),
+The full architecture is in [`docs/`](docs/): [`user/`](docs/user/) (overview + usage),
 [`developer/`](docs/developer/) (architecture + contributing), [`reference/`](docs/reference/)
 (schema, API, operations).
 
@@ -186,116 +172,103 @@ Full architecture lives in [`docs/`](docs/) — [`user/`](docs/user/) (overview 
 
 ## Comparison
 
-How ultra-memory stacks up against the most popular Claude/AI memory **and knowledge** projects —
-including [STORM](https://github.com/stanford-oval/storm), the ~28k★ "LLM-writes-a-wiki" system from
-Stanford, to test our knowledge-wiki claim against a *real* LLM-wiki. **Honest:** we lead on
-architecture today and say plainly where we don't — the field's real advantage over us is **adoption**
-(we're pre-public), and our self-learning loop runs **autonomously but conservatively** behind a
-code-enforced safety wall.
+How ultra-memory compares to the most popular Claude/AI memory **and knowledge** projects — including
+[STORM](https://github.com/stanford-oval/storm), Stanford's ~28k★ "LLM-writes-a-wiki" system, to test
+our knowledge-wiki claim against a *real* one. We lead on features today and say plainly where we don't:
+the field's real edge over us is **adoption** — we're not public yet.
 
 Legend: ✅ shipped & live · ⚠️ partial / opt-in / caveated (see notes) · ❌ absent
 
 | Capability | **ultra-memory** | [claude-mem](https://github.com/thedotmack/claude-mem) (~80k★) | [mem0](https://github.com/mem0ai/mem0) (~56k★) | [Basic Memory](https://github.com/basicmachines-co/basic-memory) (~2.8k★) | [STORM](https://github.com/stanford-oval/storm) (~28k★) |
 |---|:--:|:--:|:--:|:--:|:--:|
-| **Durable expert-knowledge wiki** (separate half-life from session memory) | ✅ ⁷ | ❌ | ❌ | ⚠️ ¹ | ⚠️ ⁸ |
-| **Cross-store unified recall** (memory + wiki, one ranked list) | ✅ | ❌ | ⚠️ ² | ⚠️ ² | ❌ |
-| **Knowledge graph / typed links** | ✅ | ❌ | ✅ | ✅ | ⚠️ ⁹ |
-| **Autonomous self-learning** (dedup · consolidate · self-correct · synthesize) | ✅ ³ | ⚠️ | ⚠️ | ⚠️ | ❌ |
-| **Audited write + secret redaction** (single gateway) | ✅ | ⚠️ | ❌ | ⚠️ | ❌ |
-| **Role × topic privilege wall** (fail-closed) | ✅ | ❌ | ⚠️ | ❌ | ❌ |
+| **Durable knowledge wiki** ¹ (separate from session memory) | ✅ | ❌ | ❌ | ⚠️ | ⚠️ |
+| **One ranked search across memory + wiki** | ✅ | ❌ | ⚠️ | ⚠️ | ❌ |
+| **Knowledge graph / typed links** | ✅ | ❌ | ✅ | ✅ | ⚠️ |
+| **Self-learning** ² (dedup · consolidate · self-correct · synthesize) | ✅ | ⚠️ | ⚠️ | ⚠️ | ❌ |
+| **Audited writes + secret stripping** (one gateway) | ✅ | ⚠️ | ❌ | ⚠️ | ❌ |
+| **Privilege boundary on recall** | ✅ | ❌ | ⚠️ | ❌ | ❌ |
 | **Local-first, no paid API key** | ✅ | ✅ | ❌ | ✅ | ❌ |
-| **Git-trackable plaintext storage** | ✅ | ⚠️ ⁴ | ❌ | ✅ | ⚠️ ¹⁰ |
-| **Claude-Code-native, one-command install** | ⚠️ ⁵ | ✅ | ❌ | ✅ | ❌ |
-| **Adoption / community** | ❌ ⁶ | ✅ | ✅ | ⚠️ | ✅ |
+| **Plain-text, git-trackable storage** | ✅ | ⚠️ | ❌ | ✅ | ⚠️ |
+| **Claude-Code-native, one-command install** ³ | ⚠️ | ✅ | ❌ | ✅ | ❌ |
+| **Adoption / community** ⁴ | ❌ | ✅ | ✅ | ⚠️ | ✅ |
 
 <sub>
-¹ Basic Memory's Markdown notes are durable, but it's one flat store — it doesn't split fast-moving
-session memory from durable expert knowledge.
-² mem0 and Basic Memory do hybrid retrieval *within one store*; neither fuses a separate durable-wiki
-store and a session store into one ranked list the way <code>unified_recall</code> does.
-³ ultra-memory's four-beat loop (consolidate → attribute → self-correct → synthesize) runs
-<strong>autonomously</strong> behind a code safety wall — provenance-gated, bounded, reversible,
-archive-never-delete, eval-gated for synthesis. The autonomy is in <em>whether</em> it acts; the
-conservatism (gentlest verbs first, bounded blast radius, immutable human facts) is enforced in code,
-so it acts but makes the safest call first. (Honesty: some niche memory tools, e.g.
-<a href="https://github.com/doobidoo/mcp-memory-service">doobidoo/mcp-memory-service</a>, also run
-autonomous consolidation; ours is broader in scope — self-correction + skill synthesis, not just dedup.)
-⁴ claude-mem keeps a local but <em>binary</em> Chroma vector store — not human-readable/diffable like
-Markdown or a redacted SQL dump.
-⁵ Native zero-config plugin, but <strong>not yet public</strong> — a 2026-06-02 audit lists a few
-release blockers (see <a href="BACKLOG.md">BACKLOG §5.2</a>). Marked ⚠️ until published.
-⁶ Pre-public, zero stars. This is the field's clearest advantage over us today — claude-mem (~80k★)
-and mem0 (~56k★, funded, hosted dashboard, 14M+ downloads) have distribution we have yet to earn.
-⁷ ultra-memory ships the wiki tier as an <em>engine</em> — sync, cross-store fusion, and the full
-curation/maintenance pipeline (5 detectors + grey-zone judge + consolidation); the structured write
-gateway is a subclassable base (<code>WikiGateway</code>) — scaffold a starter extension with one
-command (<code>python -m ultra_memory.wiki_gateway scaffold</code>), then wire it via a thin consumer
-config seam (or leave unset for the built-in turnkey). Genuinely first-class and git-canonical, but
-bring-your-own-wiki rather than a turnkey authoring UI.
-⁸ STORM autonomously <em>writes</em> citation-grounded, Wikipedia-style articles (genuine LLM
-curation) — but each run emits a <strong>standalone report</strong>: no <code>[[wikilinks]]</code>, no
-cross-article knowledge base, no topic-partitioned store that accumulates and is re-queried over time.
-⁹ Only Co-STORM builds a hierarchical "mind map," and it is <strong>per-session and ephemeral</strong>
-— not a persistent typed-edge graph that retrieval traverses.
-¹⁰ STORM emits Markdown/JSON you can commit, but these are generated <strong>report artifacts</strong>
-read/edited elsewhere — not a git-tracked store agents continuously read from and write back to.
+¹ ultra-memory ships the wiki as an <em>engine</em> (sync, the cross-store search, the full curation
+pipeline) with a subclassable write path — git-canonical and bring-your-own-layout, not a point-and-click
+authoring UI. (Basic Memory has durable notes but one flat store; STORM writes standalone articles, not an
+accumulating, re-queryable base.)
+² Runs automatically but conservatively: in code it can't touch facts you authored or pinned, can't delete
+(only archive), is capped per run, and checks a new skill won't collide before creating it — broader than
+the dedup-only tools.
+³ Native zero-config plugin, but <strong>not public yet</strong> (see <a href="BACKLOG.md">BACKLOG §5.2</a>).
+Marked ⚠️ until published.
+⁴ Pre-public, zero stars — the field's clearest advantage over us today; claude-mem (~80k★) and mem0
+(~56k★, funded, hosted, millions of downloads) have distribution we have yet to earn.
 </sub>
 
-**Bottom line:** ultra-memory is the only Claude-memory layer that ships the *full fabric in one box* —
-a session store **and** a git-canonical expert-knowledge wiki, fused into one ranked recall over a
-typed-edge graph, behind an audited redaction gateway, gated by a role × topic wall, on an OAuth-only
-path. No competitor combines all of these. It out-features the field on architecture today; it has yet
-to earn the field's distribution.
+**Bottom line:** ultra-memory is the only Claude-memory layer that ships the *whole thing in one box* —
+a session store **and** a git-tracked knowledge wiki, blended into one ranked search over a graph of
+links, behind a single secret-stripping write path, on your Claude login only. No competitor combines all
+of these. It out-features the field on architecture today; it has yet to earn the field's reach.
 
 ---
 
 ## Configuration
 
-Zero-config by default. Everything below is optional (`userConfig` at install, or `ULTRA_MEMORY_*`
-env, or a consumer `.ultra-memory/config.toml`):
+Zero-config by default. Everything below is optional — set it at install, as an `ULTRA_MEMORY_*`
+environment variable, or in a project's `.ultra-memory/config.toml`:
 
-| Setting | Default | Purpose |
+| Setting | Default | What it does |
 |---|---|---|
-| `data_db_path` | `~/.ultra-knowledge/memory.db` | Override the fixed global store location. |
-| `caller_class` | `subagent` | Privilege class for the `knowledge` MCP. `subagent` ⇒ project/reference facts only (fail-closed); set `orchestrator` only on a trusted top-level instance. |
-| `rehydrate_budget` | `2000` | Character budget for the SessionStart rehydration gist. |
-| `oauth_token` | — | Claude OAuth token (**never** an `ANTHROPIC_API_KEY`); only needed if you arm LLM maintenance. |
+| `data_db_path` | `~/.ultra-memory/memory.db` | Where your memory is stored. |
+| `caller_class` | `subagent` | Who's asking, for the recall privilege boundary. `subagent` sees project/reference facts only; set `orchestrator` only on a trusted top-level session. |
+| `rehydrate_budget` | `2000` | Size (in characters) of the session-start summary. |
+| `oauth_token` | — | Your Claude login token (**never** a paid API key); only needed if you turn on the AI-powered cleanup. |
 
-The maintenance pipeline (consolidate / self-correct / synthesize / projection-regen) resolves its
-project specifics — wiki gateway, audit dir, probe corpus, model — through the same config seam, and
-**degrades gracefully**: with no wiki configured the wiki beats are no-ops, so a pure-memory install
-just works.
+The background cleanup finds its project specifics — wiki gateway, where to write its reports, which
+model to use — through the same config, and **degrades gracefully**: with no wiki configured, the wiki
+steps simply do nothing, so a memory-only install just works.
 
 ---
 
 ## Status — honest roadmap
 
-ultra-memory is **early and pre-public** — strong engine, distribution not yet earned. In the spirit
-of "the docs match reality":
+ultra-memory is **early and pre-public** — strong engine, reach not yet earned. In the spirit of "the
+docs match reality":
 
-- ✅ **Live today:** the two-store fabric, `unified_recall` RRF fusion, the typed-edge graph, the
-  single audited write gateway + redaction, OAuth-only enforcement, SessionStart/Stop hooks, the
-  read-only `knowledge` MCP with the role × topic wall, the wiki-curation maintenance pipeline,
-  zero-config install, **1160 green tests**, content-free repo.
-- ✅ **Self-learning loop — autonomous, conservative (as of 2026-06-03):** consolidate (SP-6),
-  usage-attribution (SP-8), aggressive self-correct (SP-7), and skill synthesis (SP-10) run on a
-  weekly cadence behind the seven-mechanism code wall (provenance gate · archive-never-delete ·
-  bounded blast radius · git checkpoint · audit digest · kill switch · synthesis eval-gate). The
-  defaults are deliberately tight (3 edits / 3 reversions / 5 quarantines / 1 new skill per run);
-  loosen them in config and watch the effect in the next digest. Each beat is also individually
-  gated by a kill-switch env flag, and outcome-attribution / session-ingest ship gated-off until
-  you opt in.
-- ⬜ **Open before a clean public release** (tracked in [`BACKLOG.md`](BACKLOG.md) §5.2): a fresh-install
-  MCP fix, scrubbing an internal audit dir, the public-marketplace install path above, and a version
-  bump. Single-root today; global cross-project root activation is designed, not yet enabled.
+- ✅ **Live today:** the two-store memory, one ranked search across both, the graph of links, the single
+  audited write path with secret stripping, the "your-login-only" rule, the session-start/-end hooks, the
+  read-only recall tool with its privilege boundary, the wiki-curation pipeline, zero-config install,
+  **1175 passing tests**, and a content-free repository.
+- ✅ **Self-learning loop — automatic and conservative:** all four steps (consolidate, attribute,
+  self-correct, and create-new-skill) run on a weekly schedule behind the in-code safety rules
+  (can't touch your facts, archive-not-delete, capped per run, git checkpoint, a written summary, a
+  kill switch, and a collision check before any new skill). The defaults are deliberately tight (a few
+  edits / a few reversions / one new skill per run); you can loosen them and watch the effect in the next
+  summary. Outcome-attribution and session-import ship turned off until you opt in.
+- ⬜ **Before a clean public release** (tracked in [`BACKLOG.md`](BACKLOG.md) §5.2): continuous-integration
+  + contributor files (CONTRIBUTING / CHANGELOG) + a dependency license notice, plus a couple of small doc
+  fixes. Today everything is per-machine; sharing one store across projects is designed but not yet on.
+
+---
+
+## Acknowledgments
+
+ultra-memory builds on other people's ideas and code:
+
+- **Andrej Karpathy** — the [LLM-Wiki idea](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) behind the knowledge-wiki tier.
+- **Praney Behl** — the [llm-wiki plugin](https://github.com/praneybehl/llm-wiki-plugin) (MIT), whose retrieval / lint / graph approach the wiki engine draws from.
+- **obra** — the [superpowers](https://github.com/obra/superpowers) skill framework that shaped how this project is built (and how its skills work).
+- **Anthropic** — Claude Code, the skills framework, and bundled skills (e.g. `simplify`, `skill-creator`, `code-review`).
+- **The Hermes agent** — the template for the self-learning loop (capture → consolidate → self-correct → synthesize).
 
 ---
 
 ## Contributing
 
-TDD is mandatory and `docs/` are kept in lockstep with the code. A warn-only doc-discipline hook ships
-under `.githooks/`; enable it once per clone with `git config core.hooksPath .githooks`. Run the suite
-with `uv run pytest`. See [`docs/developer/contributing.md`](docs/developer/contributing.md).
+Tests come first (TDD), and the `docs/` are kept in step with the code. A warn-only doc-reminder hook
+ships under `.githooks/`; enable it once per clone with `git config core.hooksPath .githooks`. Run the
+suite with `uv run pytest`. See [`docs/developer/contributing.md`](docs/developer/contributing.md).
 
 ## License
 

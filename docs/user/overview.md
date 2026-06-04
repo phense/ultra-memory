@@ -15,7 +15,7 @@ Concretely it ships three things that work as one:
 
 1. **A DB-canonical memory store.** Instead of a pile of loose markdown files and
    ad-hoc session logs, your memories live in one SQLite database
-   (`~/.ultra-knowledge/memory.db`). "DB-canonical" means *the database is the
+   (`~/.ultra-memory/memory.db`). "DB-canonical" means *the database is the
    working truth* — every read, write, and recall hits the database, and git only
    tracks a clean, redacted *text dump* of it for history and rollback. You get
    typed memories, a per-session event log, and fast retrieval without losing the
@@ -33,8 +33,8 @@ Concretely it ships three things that work as one:
    skills from matured lessons. Every autonomous action is bounded, reversible, and
    audited (see *What we've already considered* below).
 
-You interact with all of this through slash commands (`/memory-save`,
-`/memory-recall`, `/memory-pin`, …) and an automatic SessionStart context injection;
+You interact with all of this through slash commands (`/ultra-memory:memory-save`,
+`/ultra-memory:memory-recall`, `/ultra-memory:memory-pin`, …) and an automatic SessionStart context injection;
 you rarely touch the database directly.
 
 ## The mental model: two stores, one fabric
@@ -47,7 +47,7 @@ half-lives, but you query them as one fabric.**
 | **What it holds** | How you want to work, current project state, corrections, references | Durable knowledge: patterns, studies, post-mortems, matured lessons |
 | **Half-life** | Short — changes session to session | Long — meant to outlive any single approach |
 | **Form** | Rows in `memory.db` (query-on-demand) | Human-readable markdown, git-tracked, hand-browsable |
-| **Written via** | `/memory-save` (the `memory_lib` gateway) | The wiki write gateway (`create-page`, `append-validation-log`, …) |
+| **Written via** | `/ultra-memory:memory-save` (the `memory_lib` gateway) | The wiki write gateway (`create-page`, `append-validation-log`, …) |
 | **Rule of thumb** | *How the agent should behave* → here | *What we learned about the domain* → here |
 
 The two are **never merged into one store** — that is a deliberate design choice, not
@@ -68,7 +68,7 @@ without copying one into the other.
 ultra-memory keeps **one global home** for the whole fabric:
 
 ```
-~/.ultra-knowledge/
+~/.ultra-memory/
 ├── memory.db        ← the single Session-Memory store for ALL projects
 └── wiki/            ← the single Expert-Knowledge wiki (topic subdirectories)
     ├── trading/
@@ -91,7 +91,7 @@ Scoping is handled by **topics**, not by separate databases:
   bound to that topic.
 
 This makes the plugin genuinely portable: drop it into any project, run
-`/memory-setup`, and it auto-wires to the global home with **no environment variables
+`/ultra-memory:memory-setup`, and it auto-wires to the global home with **no environment variables
 or config files required**. (You *can* point it elsewhere with an explicit
 `ULTRA_MEMORY_DB` override — for testing, or if you truly want a per-project silo —
 but you never *have* to.)

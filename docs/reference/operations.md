@@ -9,7 +9,7 @@ rollback, the write spool, redaction, the embedding cache, migrations).
 
 Install and configure are documented in the README's "Install as a plugin"
 section. In short (**zero-config**): `/plugin install` prompts for nothing required,
-then run `/memory-setup` and restart Claude Code so the `knowledge` MCP registers.
+then run `/ultra-memory:memory-setup` and restart Claude Code so the `knowledge` MCP registers.
 The DB path auto-derives (resolution order below); set `data_db_path` only to override.
 
 **DB-path resolution (single source of truth — `knowledge_mcp.db_path_from_env`).** The
@@ -17,7 +17,7 @@ MCP, all three session hooks (via `hooks/common.resolve_db_path`), and `maintain
 resolve the `memory.db` path the SAME way, NEVER cwd, NEVER project-local: (1) explicit
 `ULTRA_MEMORY_DB` (the `data_db_path` override, threaded through
 `${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH}`) if set + non-blank; else (2) the fixed global
-`~/.ultra-knowledge/memory.db` — the single store shared by every project. The
+`~/.ultra-memory/memory.db` — the single store shared by every project. The
 local-vs-project fallback (`${CLAUDE_PROJECT_DIR}/data/memory.db` → `~/.claude/memory.db`)
 was retired 2026-06-01: the fabric always lives at one fixed user-path. The `.mcp.json`
 env carries a bash-default (`${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH:-}`,
@@ -29,7 +29,7 @@ empty `data_db_path` ⇒ blank `ULTRA_MEMORY_DB` ⇒ the engine derives the fixe
 
 | Key | Required | Default | Purpose |
 |---|---|---|---|
-| `data_db_path` | no | `""` (auto-derive) | Optional override. Empty ⇒ the fixed global `~/.ultra-knowledge/memory.db` (single store shared by every project). Set an absolute path to override that location. |
+| `data_db_path` | no | `""` (auto-derive) | Optional override. Empty ⇒ the fixed global `~/.ultra-memory/memory.db` (single store shared by every project). Set an absolute path to override that location. |
 | `caller_class` | no | `subagent` | MCP recall privilege class (the **type** axis). Fail-closed: `subagent` ⇒ `project`/`reference` only. |
 | `rehydrate_budget` | no | `2000` | Character budget for the SessionStart rehydration gist. |
 | `oauth_token` | no | — | OAuth token, NEVER an `ANTHROPIC_API_KEY`. Only for LLM maintenance; the prune+export slice does not use it. |
@@ -42,17 +42,17 @@ Engine env seams the wrapper / consumer can also set (SP-3):
 | `ULTRA_MEMORY_CALLER_TOPIC` | Comma/`:`/`;`-separated topic list — the **topic** axis of the access wall (the interim source until SP-0 spike #7 resolves per-subagent identity). Fail-closed: unset + no `agent_topic_bindings` row ⇒ the empty topic set. |
 | `ULTRA_MEMORY_AGENT_NAME` | Agent name for the `agent_topic_bindings` lookup (`topic_scope_from_env`). |
 | `ULTRA_MEMORY_REBUILD_INDEX` | `=1` ⇒ `maintain` forces a one-pass re-population of every `unified_index` row regardless of `content_sha256` (the SP-6 `bm25_text` backfill, equivalent to `maintain --rebuild`). Implies force (bypasses the throttle). |
-| `ULTRA_MEMORY_BACKFILL_CMD` | A consumer's **cold-start session-cache backfill** runner (e.g. `./scripts/run_backfill.sh`). Set ⇒ `/memory-setup` prints a one-time *hint* to run it (never auto-runs). Unset ⇒ never offered (greenfield-safe). Independent of the `import_complete` gate — see [`backfill_complete`](#the-import_complete-gate). Backfilled rows are `created_by='backfill_import'`. |
+| `ULTRA_MEMORY_BACKFILL_CMD` | A consumer's **cold-start session-cache backfill** runner (e.g. `./scripts/run_backfill.sh`). Set ⇒ `/ultra-memory:memory-setup` prints a one-time *hint* to run it (never auto-runs). Unset ⇒ never offered (greenfield-safe). Independent of the `import_complete` gate — see [`backfill_complete`](#the-import_complete-gate). Backfilled rows are `created_by='backfill_import'`. |
 | `ULTRA_MEMORY_PROBE_WORKERS` | Bounded thread-pool size for the SP-10 eval-gate's hijack-direction probes (default `6`). Caps concurrent `claude -p` probe subprocesses so a full eval pass fits the maintenance window (~50 min serial → ~12 min parallel) without swamping the OAuth CLI. |
 | `SP7_AGGRESSIVE_DISABLE` / `SP10_SYNTHESIS_DISABLE` | Kill switches for the autonomous self-correct / synthesize beats — any value makes the whole beat a no-op + one log line. **Present-by-default in cron** until a consumer arms the beat; remove the var to run live. `SP7_AGGRESSIVE_DRYRUN` / `SP10_SYNTHESIS_DRYRUN` plan+eval+digest but apply nothing. |
 | `SESSION_INGEST_ENABLE` | Additional gate for the `session_ingest` beat (capture + SP-8 attribution); default OFF — the enqueue/fold is a no-op until set. |
 
-`/memory-setup` builds the runtime venv under `${CLAUDE_PLUGIN_DATA}/venv`,
+`/ultra-memory:memory-setup` builds the runtime venv under `${CLAUDE_PLUGIN_DATA}/venv`,
 optionally imports a legacy memory dir **once**, stamps the DB ready (the
 `import_complete` gate, below), and sanity-checks. First run downloads the embedder
 model (~bge-small, cached afterward).
 
-**Prerequisites (both required, preflighted by `/memory-setup`):** `uv` and `git`
+**Prerequisites (both required, preflighted by `/ultra-memory:memory-setup`):** `uv` and `git`
 on PATH — declared as `setup.REQUIRED_TOOLS`; `setup.missing_prerequisites()` is
 the testable mirror and the command's step-0 shell preflight aborts if either is
 missing.
@@ -72,14 +72,14 @@ agents which to use; this is the operator-facing list.
 
 | Command | What it does |
 |---|---|
-| `/memory-recall "<query>"` | Trusted full recall (CLI path; all types). |
-| `/memory-save` | Persist a NEW durable fact — the canonical new-fact verb (wraps `memory_lib.save_memory`). |
-| `/memory-pin <id>` | Make a fact always-in-context (auto-injects into the SessionStart gist; for hard rules). |
-| `/memory-verify <id>` | Reconfirm a fact still holds (resets the staleness signal). |
-| `/memory-edit <id>` | Correct a fact's body in place (body only; type/title/fields preserved). |
-| `/memory-inbox` | Apply queued human-correction directives (free text preserved under "Unprocessed"). |
-| `/memory-setup` | One-time bootstrap: venv, optional legacy import, `import_complete` stamp, optional cold-start-backfill hint, sanity-check. |
-| `/memory-maintain` | Force a prune+export now (the same `ultra_memory.maintain.run` the async hook throttles). |
+| `/ultra-memory:memory-recall "<query>"` | Trusted full recall (CLI path; all types). |
+| `/ultra-memory:memory-save` | Persist a NEW durable fact — the canonical new-fact verb (wraps `memory_lib.save_memory`). |
+| `/ultra-memory:memory-pin <id>` | Make a fact always-in-context (auto-injects into the SessionStart gist; for hard rules). |
+| `/ultra-memory:memory-verify <id>` | Reconfirm a fact still holds (resets the staleness signal). |
+| `/ultra-memory:memory-edit <id>` | Correct a fact's body in place (body only; type/title/fields preserved). |
+| `/ultra-memory:memory-inbox` | Apply queued human-correction directives (free text preserved under "Unprocessed"). |
+| `/ultra-memory:memory-setup` | One-time bootstrap: venv, optional legacy import, `import_complete` stamp, optional cold-start-backfill hint, sanity-check. |
+| `/ultra-memory:memory-maintain` | Force a prune+export now (the same `ultra_memory.maintain.run` the async hook throttles). |
 
 ## Wiring at a glance
 
@@ -107,14 +107,14 @@ agents which to use; this is the operator-facing list.
 ## The `import_complete` gate
 
 The session hooks no-op until `meta.import_complete='1'` (`hooks/common.db_ready`).
-`/memory-setup` stamps it (via `setup.mark_import_complete`) after the optional
+`/ultra-memory:memory-setup` stamps it (via `setup.mark_import_complete`) after the optional
 legacy import — production code, not just tests, sets it now. A migrated-but-
 unstamped DB intentionally fails open to the legacy path.
 
 A separate `meta.backfill_complete` flag tracks the **optional cold-start
 session-cache backfill** (a consumer-side runner declared via
 `ULTRA_MEMORY_BACKFILL_CMD`). It is **deliberately independent** of
-`import_complete` and **not** read by `db_ready` — `/memory-setup` only uses it
+`import_complete` and **not** read by `db_ready` — `/ultra-memory:memory-setup` only uses it
 to decide whether to print the one-time backfill hint
 (`setup.should_offer_backfill` / `setup.backfill_hint`), and stamping it
 (`setup.mark_backfill_complete`) merely silences that hint. Declining or never
@@ -122,7 +122,7 @@ running the backfill therefore never disables the session hooks.
 
 ## Maintenance (self-healing, throttled)
 
-`/memory-maintain` forces a prune+export; the async SessionStart hook runs the
+`/ultra-memory:memory-maintain` forces a prune+export; the async SessionStart hook runs the
 same `ultra_memory.maintain.run` throttled (≤ once per ~20h via
 `meta.last_maintenance`). Pure Python — no LLM, no OAuth token. Retention rolls
 old `session_events` into per-session summaries before deleting, so the digest
@@ -294,7 +294,7 @@ The access wall has **two orthogonal axes** (composed by AND):
 
 `visible(fact) ⟺ (topic ∈ agent_topics OR topic IS NULL) AND (type ∈
 allowed_types_for(caller_class))`. Trusted full recall (all topics + all types) is
-the `/memory-recall` CLI, not the MCP — there is no `orchestrator` MCP instance
+the `/ultra-memory:memory-recall` CLI, not the MCP — there is no `orchestrator` MCP instance
 this cycle (`[[feedback_subagents_can_leak_secrets]]`). The per-subagent
 topic-identity mechanism is the unresolved SP-0 spike #7; the env-var fallback is
 the locked interim, and the fail-closed default means the degraded mode is safe
@@ -304,7 +304,7 @@ the locked interim, and the fail-closed default means the degraded mode is safe
 
 The venv lives under `${CLAUDE_PLUGIN_DATA}` (survives plugin updates, SP-0
 P1-D4). If a plugin update or a manual cleanup removes it, the wrapper fails open
-(SessionStart prints "venv missing → run /memory-setup") and `/memory-setup`
+(SessionStart prints "venv missing → run /ultra-memory:memory-setup") and `/ultra-memory:memory-setup`
 idempotently re-bootstraps it.
 
 ## Export artifacts (`data/memory_export/`)

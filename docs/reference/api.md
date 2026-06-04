@@ -63,7 +63,7 @@ Every public function. The caller owns connections and supplies timestamps.
   D7). `source_kind='memory'` flips `memories.pinned`; `source_kind='knowledge'`
   upserts `knowledge_pins(slug=source_id, …)`. **Back-compat shim:** the legacy
   `set_pinned(id=…)` signature still works (treated as `source_kind='memory'`), so
-  `/memory-pin` + pre-SP-3 spool records keep replaying. Audited; registered in
+  `/ultra-memory:memory-pin` + pre-SP-3 spool records keep replaying. Audited; registered in
   `replay_spool` under the new arg shape.
 - `backfill_topic(conn, *, default_topic, ts, reason=…) -> {stamped,
   skipped_already_complete}` — **gated, one-time, idempotent** data step (D4):
@@ -534,7 +534,7 @@ ships. Two tiers, zero-tolerance (`candidate_fp == 0`):
   `memory.db` path (the MCP, all three session hooks via `hooks/common.resolve_db_path`,
   and `maintain` route through it, so a zero-config install opens the same DB everywhere).
   Resolution order, **NEVER cwd, NEVER project-local**: (1) explicit `ULTRA_MEMORY_DB` if
-  set + non-blank → `Path(it)`; else (2) the fixed global `~/.ultra-knowledge/memory.db`
+  set + non-blank → `Path(it)`; else (2) the fixed global `~/.ultra-memory/memory.db`
   (the single store shared by every project — the local-vs-project fallback was retired
   2026-06-01). Blank values are treated as unset (fall through). It only RESOLVES —
   `open_memory_db` downstream does the
@@ -587,7 +587,7 @@ Shared, fail-open, no-LLM, no-write helpers for the session hooks.
 - `resolve_db_path(env=None) -> str` — resolve the `memory.db` path the SAME way the
   knowledge MCP does (delegates to `knowledge_mcp.db_path_from_env`), so the whole plugin
   is zero-config-consistent: explicit `ULTRA_MEMORY_DB`, else the fixed global
-  `~/.ultra-knowledge/memory.db` — never cwd, never project-local.
+  `~/.ultra-memory/memory.db` — never cwd, never project-local.
   Returns a `str` (hooks feed it to `db_ready` / `open_memory_db`). Used by all three hook
   `main()` shells.
 - `db_ready(db_path) -> bool` — True only when the schema is present AND
@@ -612,7 +612,7 @@ Shared, fail-open, no-LLM, no-write helpers for the session hooks.
   material work.
 - `main(stdin, stdout) -> int` — CLI shell: read payload, resolve the DB path via
   `common.resolve_db_path()` (zero-config: explicit `ULTRA_MEMORY_DB`, else the fixed
-  global `~/.ultra-knowledge/memory.db` — never cwd, never project-local),
+  global `~/.ultra-memory/memory.db` — never cwd, never project-local),
   stamp `ts`, run, write any output. Exit 0.
 
 ## `hooks.rehydrate` (SessionStart hook)

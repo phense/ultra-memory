@@ -14,7 +14,7 @@ The first run downloads the embedder model (~bge-small); this is cached afterwar
    missing=""
    for tool in uv git; do command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"; done
    if [ -n "$missing" ]; then
-     echo "ultra-memory: missing required tool(s):$missing — install them and re-run /memory-setup" >&2
+     echo "ultra-memory: missing required tool(s):$missing — install them and re-run /ultra-memory:memory-setup" >&2
      exit 1
    fi
    ```
@@ -58,7 +58,7 @@ print('stamped' if setup.mark_import_complete(db) else 'already stamped')
 "
    ```
 
-4. **Optional cold-start backfill — offer, never auto-run** (only when the consumer declared a session-cache backfill runner in `ULTRA_MEMORY_BACKFILL_CMD`). Some consumers ship a backfill that mines *historical* Claude Code session transcripts into the store (memories + wiki) to seed it on a fresh install. That is the consumer's deliberate, **pilot-first** step — so `/memory-setup` only prints a one-time hint pointing at the runner; it never executes it. Greenfield consumers leave `ULTRA_MEMORY_BACKFILL_CMD` unset and see nothing. The `meta.backfill_complete` flag is **independent** of `import_complete` (it only silences the hint), so declining the backfill never disables the session hooks:
+4. **Optional cold-start backfill — offer, never auto-run** (only when the consumer declared a session-cache backfill runner in `ULTRA_MEMORY_BACKFILL_CMD`). Some consumers ship a backfill that mines *historical* Claude Code session transcripts into the store (memories + wiki) to seed it on a fresh install. That is the consumer's deliberate, **pilot-first** step — so `/ultra-memory:memory-setup` only prints a one-time hint pointing at the runner; it never executes it. Greenfield consumers leave `ULTRA_MEMORY_BACKFILL_CMD` unset and see nothing. The `meta.backfill_complete` flag is **independent** of `import_complete` (it only silences the hint), so declining the backfill never disables the session hooks:
    ```bash
    "$PY" -c "
 import os

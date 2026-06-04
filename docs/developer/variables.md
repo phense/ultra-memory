@@ -22,7 +22,7 @@ A few well-defined special cases:
 
 | Parameter | Resolution chain |
 |---|---|
-| `db_path_from_env` | explicit `ULTRA_MEMORY_DB` **→** `~/.ultra-knowledge/memory.db` (global default; **never** cwd, never project-local — a safety property) |
+| `db_path_from_env` | explicit `ULTRA_MEMORY_DB` **→** `~/.ultra-memory/memory.db` (global default; **never** cwd, never project-local — a safety property) |
 | `session_id_from_env` | `ULTRA_MEMORY_SESSION_ID` **→** `CLAUDE_CODE_SESSION_ID` **→** `None` |
 | fastembed cache | `ULTRA_MEMORY_FASTEMBED_CACHE` **→** `FASTEMBED_CACHE_PATH` **→** `~/.cache/ultra-memory/fastembed` |
 
@@ -37,7 +37,7 @@ Conventions that hold everywhere:
 
 With **no config file and no env vars**, the plugin runs safely out of the box:
 
-- Memory store: **`~/.ultra-knowledge/memory.db`** (one global DB, shared by all projects).
+- Memory store: **`~/.ultra-memory/memory.db`** (one global DB, shared by all projects).
 - Model: **`claude-sonnet-4-6`** (OAuth-only, maintenance beats).
 - Rehydration budget: **2000 chars**. Shadow mode: **ON** (gist logged to file, not injected).
 - Caller class: **`subagent`** (fail-closed → `SAFE_TYPES` only).
@@ -55,7 +55,7 @@ With **no config file and no env vars**, the plugin runs safely out of the box:
 
 | Name | Where | Default | Type | Meaning |
 |---|---|---|---|---|
-| `ULTRA_MEMORY_DB` | env / `config.py` | `~/.ultra-knowledge/memory.db` | path | Explicit override for the `memory.db` location; blank = global default; **never the cwd** (safety property). |
+| `ULTRA_MEMORY_DB` | env / `config.py` | `~/.ultra-memory/memory.db` | path | Explicit override for the `memory.db` location; blank = global default; **never the cwd** (safety property). |
 | `ULTRA_MEMORY_EXPORT_DIR` | env | `<db_parent>/memory_export` | path | Memory-export output directory (dump + snapshot + views). |
 | `CLAUDE_PROJECT_DIR` | env | cwd | path | Project root used to resolve relative paths in `config.toml`. |
 | `ULTRA_MEMORY_REBUILD_INDEX` | env | `"0"` | `"0"\|"1"` | `=1` forces a one-pass embedding-cache / `bm25_text` re-population on startup (SP-6 backfill). |
@@ -231,7 +231,7 @@ These surface in the plugin install UI; they map onto the engine env names above
 
 | userConfig key | Maps to | Default | Meaning |
 |---|---|---|---|
-| `data_db_path` | `ULTRA_MEMORY_DB` | `~/.ultra-knowledge/memory.db` | Where the global memory DB lives (the **one** value a consumer typically sets). |
+| `data_db_path` | `ULTRA_MEMORY_DB` | `~/.ultra-memory/memory.db` | Where the global memory DB lives (the **one** value a consumer typically sets). |
 | `caller_class` | `ULTRA_MEMORY_CALLER_CLASS` | `subagent` | The privilege class for this install's knowledge MCP. |
 | `rehydrate_budget` | `ULTRA_MEMORY_REHYDRATE_BUDGET` | `2000` | Char budget for the SessionStart gist. |
 | `oauth_token` | `CLAUDE_CODE_OAUTH_TOKEN` | (unset) | OAuth token for armed maintenance beats. |
