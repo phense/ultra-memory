@@ -7,6 +7,7 @@ is caught long before the (opt-in, publish-last) open-sourcing step.
 """
 import pathlib
 import re
+import subprocess
 
 _HOME_PATH = re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+")
 
@@ -46,6 +47,37 @@ def test_no_hardcoded_home_paths_in_plugin_wiring():
     assert not offenders, (
         "Hardcoded home path(s) in plugin wiring — violates project-agnostic invariant:\n"
         + "\n".join(offenders)
+    )
+
+
+def test_no_hardcoded_home_paths_in_tracked_docs():
+    """Every TRACKED doc/markdown file is publish surface — no home-path literal.
+
+    The package-only guards above missed a `/Users/<name>` (+ maintainer email)
+    leak in a consumer-flavored spec under `docs/` that had been committed. This
+    closes that gap over the whole markdown publish surface. It enumerates via
+    `git ls-files`, so gitignored/untracked working files (a local `BACKLOG.md`,
+    `docs/audit/`, the live `.db`) are never scanned — only what actually ships.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "*.md", "config.example"],
+        capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    offenders = []
+    for rel in listed:
+        if not rel or rel.split("/", 1)[0] == "tests":
+            continue
+        p = root / rel
+        if not p.exists():
+            continue
+        for lineno, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if _HOME_PATH.search(line):
+                offenders.append(f"{rel}:{lineno}: {line.strip()}")
+    assert not offenders, (
+        "Hardcoded home path(s) in tracked docs/markdown — the publish surface must "
+        "stay project-agnostic (the consumer-spec /Users/<name> leak that slipped the "
+        "package-only guards). Anonymize or move to config/env:\n" + "\n".join(offenders)
     )
 
 

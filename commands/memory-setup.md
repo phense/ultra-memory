@@ -29,7 +29,7 @@ The first run downloads the embedder model (~bge-small); this is cached afterwar
    PY="$CLAUDE_PLUGIN_DATA/venv/bin/python"
    ```
 
-2. **Resolve the DB path (zero-config — same derivation the knowledge MCP + hooks use).** The `data_db_path` userConfig is an *optional* override; leave it empty and the engine derives `<CLAUDE_PROJECT_DIR>/data/memory.db` (a project/local install) or `~/.claude/memory.db` (a user-scope install). Never cwd. We bridge the userConfig option into `ULTRA_MEMORY_DB` (exactly as `.mcp.json` does), then let `db_path_from_env` resolve — so the override wins when set, else it derives:
+2. **Resolve the DB path (zero-config — same derivation the knowledge MCP + hooks use).** The `data_db_path` userConfig is an *optional* override; leave it empty and the engine derives the fixed global `~/.ultra-memory/memory.db` — the single store shared by every project (the old `<CLAUDE_PROJECT_DIR>/data/memory.db` / `~/.claude/memory.db` fallback was retired 2026-06-01). Never cwd. We bridge the userConfig option into `ULTRA_MEMORY_DB` (exactly as `.mcp.json` does), then let `db_path_from_env` resolve — so the override wins when set, else it derives:
    ```bash
    export ULTRA_MEMORY_DB="${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH:-}"
    export ULTRA_MEMORY_DB="$("$PY" -c "import os; from ultra_memory.knowledge_mcp import db_path_from_env; print(db_path_from_env(os.environ))")"

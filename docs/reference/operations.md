@@ -88,13 +88,14 @@ agents which to use; this is the operator-facing list.
   `ULTRA_MEMORY_CALLER_CLASS`) comes from the userConfig→`CLAUDE_PLUGIN_OPTION_*`
   bridge **with bash-default fallbacks** so both ALWAYS resolve (zero-config —
   Claude Code rejects a server whose env references an unset `${CLAUDE_PLUGIN_OPTION_*}`,
-  and it does not inject manifest defaults): `ULTRA_MEMORY_DB` falls back to
-  `${CLAUDE_PROJECT_DIR}/data/memory.db` and `ULTRA_MEMORY_CALLER_CLASS` to `subagent`.
-  `knowledge_mcp.db_path_from_env` then DERIVES the same default (belt-and-suspenders for
-  the user-scope case where `CLAUDE_PROJECT_DIR` is empty), and
-  `knowledge_mcp.caller_class_from_env` fail-closes to `subagent`, so the MCP is safe even
-  if `${...}` substitution does not occur on a given Claude Code version (the SP-0 P1-D1
-  uncertainty).
+  and it does not inject manifest defaults): `ULTRA_MEMORY_DB` falls back to an
+  **empty string** (`${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH:-}`) and `ULTRA_MEMORY_CALLER_CLASS`
+  to `subagent` (`…:-subagent`). An empty `ULTRA_MEMORY_DB` ⇒
+  `knowledge_mcp.db_path_from_env` DERIVES the fixed global `~/.ultra-memory/memory.db`
+  (the single store shared by every project; the old project-local / `~/.claude` fallback
+  was retired 2026-06-01), and `knowledge_mcp.caller_class_from_env` fail-closes to
+  `subagent`, so the MCP is safe even if `${...}` substitution does not occur on a given
+  Claude Code version (the SP-0 P1-D1 uncertainty).
 - `hooks/hooks.json` → `hooks/um-hook.cmd {rehydrate|maintain|checkpoint}`,
   wired as SessionStart (rehydrate sync + maintain async) and Stop (checkpoint).
   The wrapper resolves all env explicitly (P1-D1, deterministic — no reliance on

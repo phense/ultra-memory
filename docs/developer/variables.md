@@ -242,9 +242,9 @@ These surface in the plugin install UI; they map onto the engine env names above
 
 ---
 
-## Worked consumer example — Trading's `~/.ultra-memory/config.toml`
+## Worked consumer example — the reference consumer's `<project>/.ultra-memory/config.toml`
 
-A concrete `[maintenance]` config from `/Users/USER/Agents/Trading/.ultra-memory/config.toml`,
+A concrete `[maintenance]` config from the reference consumer's `<project>/.ultra-memory/config.toml`,
 showing real overrides:
 
 | Key | Value | Note |
