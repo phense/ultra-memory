@@ -186,12 +186,26 @@ def test_pass_failopen_leaves_both_markers_unresolved(tmp_path):
 # run_session_ingest_pass.
 # --------------------------------------------------------------------------- #
 
+def test_enabled_default_on_when_unset():
+    assert si._enabled({}) is True                     # was False (opt-in); now opt-out
+
+
+def test_enabled_explicit_optout():
+    assert si._enabled({"SESSION_INGEST_ENABLE": "0"}) is False
+    assert si._enabled({"SESSION_INGEST_ENABLE": "off"}) is False
+
+
+def test_enabled_other_values_on():
+    assert si._enabled({"SESSION_INGEST_ENABLE": "1"}) is True
+
+
 def test_pass_disabled_is_noop(tmp_path):
     conn = _conn(tmp_path)
     si.enqueue(conn, session_id="s-1", transcript_path=str(_transcript(tmp_path)), ts=TS)
     calls = []
     res = si.run_session_ingest_pass(
-        conn, ts=TS, env={}, runner=lambda *a, **k: calls.append(1))
+        conn, ts=TS, env={"SESSION_INGEST_ENABLE": "0"},
+        runner=lambda *a, **k: calls.append(1))
     assert res["mode"] == "disabled" and not calls
     assert len(si.pending_sessions(conn)) == 1          # untouched
     conn.close()

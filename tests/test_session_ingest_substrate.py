@@ -52,8 +52,9 @@ def test_enqueue_idempotent_same_session_ts(tmp_path):
 
 def test_enqueue_if_enabled_gated(tmp_path):
     conn = _conn(tmp_path)
+    # Opt-OUT now: an explicit disable is a no-op; default-on / '1' both enqueue.
     assert si.enqueue_if_enabled(conn, session_id="s", transcript_path="/x",
-                                 ts=TS, env={}) is False
+                                 ts=TS, env={"SESSION_INGEST_ENABLE": "0"}) is False
     assert si.pending_sessions(conn) == []
     assert si.enqueue_if_enabled(conn, session_id="s", transcript_path="/x",
                                  ts=TS, env={"SESSION_INGEST_ENABLE": "1"}) is True
@@ -169,7 +170,7 @@ def test_checkpoint_enqueues_when_enabled(tmp_path, monkeypatch):
 
 def test_checkpoint_no_enqueue_when_disabled(tmp_path, monkeypatch):
     from ultra_memory.hooks import checkpoint
-    monkeypatch.delenv("SESSION_INGEST_ENABLE", raising=False)
+    monkeypatch.setenv("SESSION_INGEST_ENABLE", "0")   # explicit opt-out (default is now ON)
     db = _ready_db(tmp_path)
     t = _material_transcript(tmp_path)
     checkpoint.run({"session_id": "s-hook", "transcript_path": str(t)},

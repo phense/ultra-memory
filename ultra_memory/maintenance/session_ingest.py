@@ -30,6 +30,7 @@ from pathlib import Path
 
 from ultra_memory import memory_lib
 from ultra_memory.claude_cli import run_claude  # the OAuth chokepoint (injectable runner)
+from ultra_memory.maintenance.gate_commons import is_enabled_default_on
 from ultra_memory.maintenance.parse_utils import strip_json_fence
 
 PENDING_KIND = "session_ingest_pending"
@@ -46,7 +47,9 @@ DEFAULT_TIMEOUT = 300       # one OAuth call per session
 # --------------------------------------------------------------------------- #
 
 def _enabled(env) -> bool:
-    return str((env or {}).get(ENABLE_ENV, "")).strip() not in ("", "0", "false", "False")
+    """Opt-OUT: session capture is ON by default; disable with SESSION_INGEST_ENABLE
+    in ('0','false','no','off'). (Was opt-in / default-OFF before the autonomy flip.)"""
+    return is_enabled_default_on(ENABLE_ENV, env)
 
 
 def enqueue(conn, *, session_id: str, transcript_path: str, ts: str) -> None:
