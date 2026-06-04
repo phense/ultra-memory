@@ -27,7 +27,7 @@ run must clear to live-apply (else dry-run / skip):
       action in the digest, NOT applied. No live store ever sees an un-evaluated
       edit. STRICT θ (resolved fork D): reject ANY measurable probe regression —
       "first, do no harm" for an autonomous aggressive edit; a rejected edit is not
-      lost (it is in the digest for Peter), so strictness costs little.
+      lost (it is in the digest for the operator), so strictness costs little.
 
 THE WALL LIVES IN THE APPLY PATH (code), NEVER ONLY THE PROMPT (spec §4 design
 rule + the [[feedback-subagents-can-leak-secrets]] lesson: build the constraint
@@ -54,7 +54,7 @@ only ever make the pass apply LESS, never proceed unbounded" sense.
 The engine primitives it consumes (`unified_recall`, `open_memory_db`,
 `save_memory`, `consolidate`) are GENERIC + already on live master (ffcd414). The
 probe-set shape, the strict-θ policy, and the action-record schema are the
-CONSUMER's (Trading-side) POLICY.
+consumer's policy (e.g. a trading project).
 """
 from __future__ import annotations
 

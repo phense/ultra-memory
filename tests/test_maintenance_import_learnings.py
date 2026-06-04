@@ -250,7 +250,7 @@ def test_import_learnings_does_not_import_claude_cli():
 
 
 # --------------------------------------------------------------------------- #
-# D5 fence edge cases (ported from Trading at parity) — the stamp-discipline that
+# D5 fence edge cases (ported from the reference consumer at parity) — the stamp-discipline that
 # keeps the data-loss fence ARMED on a zero-capture-of-content-full or partial save.
 # --------------------------------------------------------------------------- #
 

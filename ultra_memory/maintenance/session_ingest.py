@@ -10,7 +10,7 @@ module is split capture-fast / process-slow, mirroring the skill-learning loop:
     the transcript DIGEST builder (a compact, tool-output-free view the LLM pass
     reads). The enqueue is gated by `SESSION_INGEST_ENABLE` — default OFF, a no-op,
     byte-identical behavior until armed (the north-star ships-active posture flip is
-    Peter's explicit step on a real consumer).
+    the operator's explicit step on a real consumer).
   • slice 4b (the drain beat): one OAuth `claude` call per pending session →
     {extracted_knowledge, correction_detected, correction} → route. Built on top of
     this substrate.

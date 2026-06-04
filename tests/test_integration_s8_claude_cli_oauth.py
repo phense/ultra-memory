@@ -1,6 +1,6 @@
 """Integration tests for seam S8-claude-cli-oauth.
 
-The HARD project rule: *every* LLM call in this codebase must run on Peter's
+The HARD project rule: *every* LLM call in this codebase must run on the operator's
 Claude Max OAuth subscription via the local `claude` CLI — NEVER the metered
 Anthropic API (no `anthropic` SDK, no `ANTHROPIC_API_KEY`, no `api.anthropic.com`,
 no `client.messages.create`, no `cache_control`). `ultra_memory/claude_cli.py` is

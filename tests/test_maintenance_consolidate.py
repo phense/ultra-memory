@@ -1,5 +1,5 @@
 """Tests for ultra_memory.maintenance.consolidate — the conservative Tier-2
-self-improvement consolidation drain (ported from Trading's
+self-improvement consolidation drain (ported from the reference consumer's
 test_consolidate_candidates.py, project-agnostic).
 
 The drain reads un-resolved `session_events kind='skill_learning_candidate'` rows

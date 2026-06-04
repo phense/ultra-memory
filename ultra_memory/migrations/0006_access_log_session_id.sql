@@ -6,7 +6,7 @@
 --
 -- The column records WHICH SESSION recalled which unit; it is a generic opaque
 -- string (any consumer's session id, read engine-side from the ULTRA_MEMORY_SESSION_ID
--- env var — no Trading concept). It is the harmless substrate the Trading-side
+-- env var — no consumer-specific concept). It is the harmless substrate the consumer-side
 -- usage-outcome attribution (record_link 'informed_by' + the EWMA fold) needs; this
 -- migration logs the session only and has NO ranking effect.
 ALTER TABLE access_log ADD COLUMN session_id TEXT;

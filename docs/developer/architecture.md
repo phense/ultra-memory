@@ -58,7 +58,7 @@ gateway extensibility contract).
 ## Session hooks (spec §9, §10) — the capture/replay edge
 
 Two hooks bracket each interactive session, both **fail-open** (a hook error or a
-not-yet-bootstrapped DB never blocks Peter) and **role-scoped** (no-op for
+not-yet-bootstrapped DB never blocks the operator) and **role-scoped** (no-op for
 cron/subagent runs via `ULTRA_MEMORY_AGENT_ROLE` or a non-interactive SessionStart
 `source`):
 
@@ -165,11 +165,11 @@ coupled:
   unaffected.
 
 **Decision D-S6** (the auditable why): the spec said `unified_recall` would *reuse*
-`wiki_query`'s backends + FU-4 RRF, but `wiki_query` is a Trading-side module the
+`wiki_query`'s backends + FU-4 RRF, but `wiki_query` is a consumer-side module the
 agnostic boundary forbids importing. So `unified_query` re-implements the
 *algorithm* engine-side — a generic in-module BM25 + cosine over `unified_index`,
 fused with a generic re-implementation of best-rank-per-backend RRF (k=60). True
-cross-codebase byte-parity with `wiki_query` is **deferred to an SP-5 Trading-side
+cross-codebase byte-parity with `wiki_query` is **deferred to an SP-5 consumer-side
 test** (which can import both). The memory-store byte-identity is enforced here.
 
 ### The topic / pin / scope model
@@ -237,7 +237,7 @@ cycle:
     a hand-maintained corpus that would go stale as the skill set changes.
 - `session_events.outcome_signal` (the deterministic capture hint) is accepted by
   `record_session_event` but **set by no engine writer** — the Stop-hook capture
-  that enqueues `skill_learning_candidate` rows is **Trading-side** (it lives in the
+  that enqueues `skill_learning_candidate` rows is **consumer-side** (it lives in the
   consumer repo, not this engine), and is paired with this commit, not shipped here.
 - `memories.outcome_weight` / `unified_index.outcome_weight` default 1.0 and are
   multiplicatively inert in `unified_recall`; no writer changes them this cycle.
@@ -287,7 +287,7 @@ Future:
   non-1.0 outcome weight have no writer yet.
 - **The D4 topic backfill** is a gated one-time data step (`backfill_topic`); the
   DDL is live but the row-touch awaits sign-off (spec §10).
-- **Cross-codebase wiki_query parity** is deferred to an SP-5 Trading-side test
+- **Cross-codebase wiki_query parity** is deferred to an SP-5 consumer-side test
   (D-S6); **doc consolidation + the generic `using-knowledge` split** are SP-5;
   the consumer-side `wiki/SCHEMA.md` / `CLAUDE.md` updates land with the post-merge
   Trading change, not here.

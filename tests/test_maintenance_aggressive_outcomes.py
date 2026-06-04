@@ -230,7 +230,7 @@ def test_aggregate_no_outcomes_leaves_weight_unchanged(tmp_path):
 
 def test_weight_write_is_audited(tmp_path):
     """The outcome_weight write rides the engine _audit row (op='outcome_weight')
-    — Peter is in the audit loop for the regression signal too (spec §2/§5.2)."""
+    — the operator is in the audit loop for the regression signal too (spec §2/§5.2)."""
     conn = _open_temp_db(tmp_path)
     _save(conn, id="audited")
     _link_unit_outcomes(conn, unit_id="audited", signals=["tests_passed"] * 12)

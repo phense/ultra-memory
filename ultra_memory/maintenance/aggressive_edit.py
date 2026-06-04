@@ -59,7 +59,7 @@ apply path it propagates as the zero-tolerance halt).
 The engine primitives the wall consumes (save_memory / consolidate / record_link /
 set_status) are GENERIC + already on live master (ffcd414). The selection trigger,
 the reflection prompt, the grounding rule, and the MAX_EDITS policy are the
-CONSUMER's (Trading-side) POLICY.
+consumer's policy (e.g. a trading project).
 """
 from __future__ import annotations
 

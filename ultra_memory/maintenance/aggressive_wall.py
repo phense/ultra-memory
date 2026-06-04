@@ -1,4 +1,4 @@
-"""The AGGRESSIVE SAFETY WALL (project-agnostic; ported from Trading SP-7 §4a/§4b).
+"""The AGGRESSIVE SAFETY WALL (project-agnostic; ported from the reference SP-7 implementation §4a/§4b).
 
 This module is the single chokepoint the three aggressive self-improvement
 capabilities (auto-edit / self-reversion / contradiction quarantine) MUST funnel
@@ -233,7 +233,7 @@ def _under_generated_root(path) -> bool:
 
 def _skill_is_protected(conn, slug: str) -> bool:
     """A generated skill pinned via the `sp10_skill_protect:<slug>` meta flag is
-    immutable to the loop (Peter's opt-out). Fail-closed: a read error → protected."""
+    immutable to the loop (the operator's opt-out). Fail-closed: a read error → protected."""
     try:
         row = conn.execute(
             "SELECT value FROM meta WHERE key=?",
@@ -335,7 +335,7 @@ def apply_quarantine_pair(conn, *, id_a: str, id_b: str, reason: str,
     contradictory pair flip to status='quarantined' (dropped out of recall by the
     engine's status='active' filter — fully reversible via `reactivate`), and a
     `contradicts` edge connects them. The loop does NOT pick a winner (that is a
-    gated edit) — it demotes BOTH for Peter's adjudication.
+    gated edit) — it demotes BOTH for the operator's adjudication.
 
     Provenance-gated for BOTH members FIRST (zero-tolerance: if either is
     protected the whole quarantine raises and NEITHER unit is touched)."""
@@ -356,7 +356,7 @@ def apply_revert(conn, *, regressed_id: str, prior_id: str | None,
     of reverting to nothing. Records a `reverted_from` edge.
 
     Provenance-gated on the regressed unit FIRST. (The orchestrator decides
-    whether to CALL this — fork A leans propose-for-Peter — but when it is called,
+    whether to CALL this — fork A leans propose-for-the-operator — but when it is called,
     the apply path is the same reversible FSM transition.)"""
     assert_mutable(conn, MemoryUnit(regressed_id))
     if prior_id is None:
@@ -376,7 +376,7 @@ def apply_revert(conn, *, regressed_id: str, prior_id: str | None,
 
 def reactivate(conn, *, id: str, ts: str, reason: str) -> None:
     """Flip a quarantined/reverted unit back to status='active' — the reversibility
-    primitive (Peter adjudicates a quarantine, or a mistaken revert is undone).
+    primitive (the operator adjudicates a quarantine, or a mistaken revert is undone).
     Provenance-gated (a human/pinned row should never have been demoted, but the
     gate is belt-and-suspenders here too)."""
     assert_mutable(conn, MemoryUnit(id))

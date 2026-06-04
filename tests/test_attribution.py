@@ -4,7 +4,7 @@ At session-end an outcome `session_event` (carrying an `outcome_signal` like
 'tests_passed') is joined to the memories that session actually recalled (logged in
 `access_log` with the session id + a 1-based fused `rank`). The join writes
 `informed_by` graph edges (one per policy-selected recalled memory) that a downstream
-consumer (Trading-side, NOT the engine) folds into an EWMA.
+consumer (consumer-side, NOT the engine) folds into an EWMA.
 
 This module is PROJECT-AGNOSTIC: `attribution.py` imports only stdlib +
 `from . import memory_lib`. No policy config, no Trading/wiki concept; the consumer

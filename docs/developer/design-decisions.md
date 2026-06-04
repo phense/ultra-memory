@@ -33,7 +33,7 @@ silos.
 ### The why
 
 The knowledge fabric must be *project-agnostic*, but the orchestrator (Claude, working
-across many projects) needs *global* context. Peter's preferences live in the `user`
+across many projects) needs *global* context. The operator's preferences live in the `user`
 topic, coding/infra knowledge in `programming`, project knowledge in `trading`. When
 Session Memory and Expert Knowledge were trapped per-project, a new project or a
 non-project query (e.g. "fix this build") had no access to accumulated knowledge.
@@ -285,7 +285,7 @@ candidate `resolved=1`.
 (per-run graduation cap). It **refuses any action targeting a `created_by='human'` or
 `pinned` unit** — a human fact is immutable; only `agent`/`background_review` lessons can be
 consolidated further. It is fail-open: a parse error or LLM failure leaves the candidate
-unresolved for the next run. Peter is in the **audit loop** (a digest lands in
+unresolved for the next run. The operator is in the **audit loop** (a digest lands in
 `briefings/`), never the **write loop** — the gate is *code-based*: provenance + bounds +
 archive-never-delete.
 
@@ -294,7 +294,7 @@ archive-never-delete.
 The self-correct beat (`SP7_AGGRESSIVE_ENABLE`) reads **agent-authored** lessons and their
 downstream usage outcomes (via `informed_by` edges from SP-8 attribution). Where evidence
 is net-negative and below baseline it proposes **auto-edit** (sharpen/merge/correct),
-**self-reversion** (revert a graduation — **propose-for-Peter**, never auto-reverts, FORK A),
+**self-reversion** (revert a graduation — **propose-for-the-operator**, never auto-reverts, FORK A),
 or **quarantine** (mark a contradictory pair disputed). It runs behind a **six-mechanism
 safety wall, enforced in the APPLY PATH (code), not the prompt** — the LLM *proposes*, the
 code *enforces*:
@@ -309,7 +309,7 @@ code *enforces*:
 4. **Pre-run git checkpoint** — `pre-sp7-aggressive-<date>` tag + a `memory_export` snapshot;
    refuses to apply on a dirty/untracked tree.
 5. **Audit + human digest** — every action to `briefings/.../sp7-self-improvement-*.md`;
-   Peter reviews, never gates.
+   the operator reviews, never gates.
 6. **Kill switch** — `SP7_AGGRESSIVE_ENABLE` (+ a `SP7_AGGRESSIVE_DRYRUN` plan-only mode).
 
 ### Beat 4 — Synthesize (newest, generates skills, seventh mechanism added)
@@ -372,13 +372,13 @@ are different questions; collapsing them into one predicate is a category error.
 
 **Decision (posture set 2026-06-03).** The system runs **fully autonomous** — the
 self-correct and synthesize beats are live, unattended, weekly. The safety net is **code**,
-not human approval. Human oversight is the **audit loop** (Peter reads the digest), not the
-**write loop** (Peter does not gate individual actions).
+not human approval. Human oversight is the **audit loop** (the operator reads the digest), not the
+**write loop** (the operator does not gate individual actions).
 
 ### Why autonomous over human-gated
 
 - **Decision windows.** A pattern causing trade losses should be corrected *this* week, not
-  next week when a human has time. An automated gate with a manual override (Peter can
+  next week when a human has time. An automated gate with a manual override (the operator can
   revert) beats a gate that waits on a schedule.
 - **Reversibility is the real safety.** Because archive-never-delete makes a revert a
   schema-level pointer flip (not an `rm`), the *cost of a mistake is low*. Eval-gates and

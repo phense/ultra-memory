@@ -14,8 +14,8 @@ it re-implements no guard.  In order, per the spec §5 pipeline diagram:
      aggregate fold (the no-LLM signal layer, `aggregate_all`).
   2. PLAN + APPLY the three tracks (each composes the wall + the bound + the eval):
        * edit      (§5.1, `aggressive_edit.run_edit_track`) — autonomous within the wall;
-       * revert    (§5.2, `aggressive_revert.run_revert_track`) — PROPOSE-FOR-PETER
-                    (fork A: apply=False ALWAYS in the autonomous pass; Peter confirms);
+       * revert    (§5.2, `aggressive_revert.run_revert_track`) — PROPOSE-FOR-THE-OPERATOR
+                    (fork A: apply=False ALWAYS in the autonomous pass; the operator confirms);
        * quarantine(§5.3, `aggressive_quarantine.run_quarantine_track`) — autonomous + gentle.
   3. PRE-RUN CHECKPOINT (§4d, `aggressive_bounds.pre_run_checkpoint`): a LIVE apply
      happens ONLY after a clean-tree git checkpoint of the repo + a memory_export
@@ -23,7 +23,7 @@ it re-implements no guard.  In order, per the spec §5 pipeline diagram:
      the LIVE pass applies NOTHING and the digest explains the skip.
   4. DIGEST (§4e): write `briefings/YYYY/sp7-self-improvement-YYYY-MM-DD.md` — the
      per-skill rates, edits proposed/applied/eval-rejected, the PROPOSED reversions
-     (for Peter), the quarantine pairs (for Peter's adjudication), any bound-hit,
+     (for the operator), the quarantine pairs (for the operator's adjudication), any bound-hit,
      and the EXACT one-command rollback (git reset + memory_import).  Plus a
      machine-audit jsonl row under briefings/maintenance-logs/sp7-*.jsonl.
 
@@ -48,7 +48,7 @@ runner + a stub embedder and NEVER spawn `claude` / NEVER load fastembed.
 The engine primitives the tracks consume (`set_outcome_weight`, `set_status`,
 `consolidate`, `save_memory`, `record_link`) are GENERIC + already on live master
 (ffcd414).  The caps, the cadence, the trading-aware digest, and the
-propose-for-Peter reversion policy are the CONSUMER's (Trading-side) POLICY.
+propose-for-the-operator reversion policy are the consumer's policy (e.g. a trading project).
 """
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ _DEFAULT_AUDIT = None       # derived from briefings_dir when set (None -> no au
 # BOTH the edit class AND the quarantine class are gated by their period cap in
 # _run_tracks (plan → enforce_caps[period] → apply), so stacked re-runs cannot
 # accumulate past the budget for EITHER class. The reversion class has NO active
-# period cap by design: under fork A (propose-for-Peter) the autonomous pass ALWAYS
+# period cap by design: under fork A (propose-for-the-operator) the autonomous pass ALWAYS
 # runs the revert track with apply=False, so reversions_applied is always [] and
 # there is nothing to accumulate. The constant is kept (documented) so that IF a
 # future decision flips reversion to autonomous-apply, the period gate is one
@@ -214,7 +214,7 @@ def outcome_evidence_coverage(conn) -> dict:
       * `with_outcomes` / `at_or_above_floor` count ANY outcome edge (bookkeeping +
         usage) — `at_or_above_floor` is the count the regression/edit tracks can act on.
       * `with_usage_outcomes` / `usage_at_or_above_floor` count specifically the
-        `informed_by` REAL-usage edges (SP-8), so Peter can tell loop-bookkeeping
+        `informed_by` REAL-usage edges (SP-8), so the operator can tell loop-bookkeeping
         evidence from real-usage evidence.
 
     Fail-open-to a minimal dict on a read error (never raises)."""
@@ -264,7 +264,7 @@ def _banner(mode: str) -> str:
     if mode == "live":
         return "LIVE — aggressive actions were APPLIED within the wall + bounds."
     if mode == "dryrun":
-        return "DRY-RUN — PROPOSED actions only; APPLIED NOTHING (Peter reviews this)."
+        return "DRY-RUN — PROPOSED actions only; APPLIED NOTHING (the operator reviews this)."
     return "NO-OP — the aggressive pass is DISABLED (no plan, no apply)."
 
 
@@ -289,8 +289,8 @@ def _attribution_policy_in_force() -> tuple[str, int, bool]:
 def render_digest(rr: RunResult) -> str:
     """Render the §4e human meta-learning digest from a RunResult.  Markdown with:
     a clear LIVE/DRY-RUN/NO-OP banner, per-skill outcome_weight rates, the edits
-    proposed/applied/eval-rejected, the PROPOSED reversions (for Peter), the
-    quarantine pairs (for Peter's adjudication), any bound-hit, the halt state, and
+    proposed/applied/eval-rejected, the PROPOSED reversions (for the operator), the
+    quarantine pairs (for the operator's adjudication), any bound-hit, the halt state, and
     the EXACT one-command rollback."""
     L: list[str] = []
     L.append(f"# SP-7 self-improvement digest — {rr.date}")
@@ -351,7 +351,7 @@ def render_digest(rr: RunResult) -> str:
              f"eval-rejected **{len(rr.edits_rejected)}**")
     L.append(f"- reversions: proposed **{len(rr.proposed_reversions)}**, "
              f"applied **{ac.get('reversions', 0)}** "
-             f"(propose-for-Peter — the autonomous pass applies NONE)")
+             f"(propose-for-the-operator — the autonomous pass applies NONE)")
     L.append(f"- quarantine pairs: applied **{ac.get('quarantines', 0)}**, "
              f"merged (duplicates) **{len(rr.merged_pairs)}**")
 
@@ -431,11 +431,11 @@ def render_digest(rr: RunResult) -> str:
     if not rr.edits_applied and not rr.edits_rejected:
         L.append("- (none)")
 
-    # --- the PROPOSED reversions (for Peter — fork A) ---------------------- #
+    # --- the PROPOSED reversions (for the operator — fork A) --------------- #
     L.append("")
-    L.append("## Proposed reversions — FOR PETER (propose-for-Peter, fork A)")
+    L.append("## Proposed reversions — FOR THE OPERATOR (propose-for-the-operator, fork A)")
     L.append("Reverting is the verb most likely to be itself wrong (a regression "
-             "may be noise). The loop PROPOSES; **Peter confirms** before any "
+             "may be noise). The loop PROPOSES; **the operator confirms** before any "
              "reversion lands.")
     if rr.proposed_reversions:
         for p in rr.proposed_reversions:
@@ -446,12 +446,12 @@ def render_digest(rr: RunResult) -> str:
     else:
         L.append("- (none)")
 
-    # --- the quarantine pairs (for Peter's adjudication) ------------------- #
+    # --- the quarantine pairs (for the operator's adjudication) ------------ #
     L.append("")
-    L.append("## Quarantine pairs — FOR PETER's adjudication")
+    L.append("## Quarantine pairs — FOR THE OPERATOR's adjudication")
     L.append("Two agent-authored units that DISAGREE were demoted out of recall "
              "(both quarantined, nothing edited/deleted — fully reversible). The "
-             "loop does NOT pick a winner; Peter adjudicates.")
+             "loop does NOT pick a winner; the operator adjudicates.")
     if rr.quarantine_pairs:
         for p in rr.quarantine_pairs:
             L.append(f"  - `{p.get('id_a')}`  ⟷  `{p.get('id_b')}`")
@@ -672,7 +672,7 @@ def _run_tracks(conn, rr: RunResult, *, probes, embedder, runner, ts, apply,
     per-run cap.
 
     The reversion track is ALWAYS propose-only in the autonomous pass (fork A:
-    propose-for-Peter); only `apply=True` LETS the edit + quarantine tracks write.
+    propose-for-the-operator); only `apply=True` LETS the edit + quarantine tracks write.
     """
     # --- edit track (§5.1) — autonomous within the wall -------------------- #
     # Build the reflection plan first (the no-LLM candidate select → the ONE batched
@@ -818,7 +818,7 @@ def beat(conn, config, ts, env):
     before any LIVE apply + the empty-evidence floor (inert until outcome attribution
     is armed). With no retrieval probe set (`probes=[]`) the edit track holds
     fail-closed (no auto-edits) — the conservative default; the revert track is
-    always propose-for-Peter; only the gentle, reversible quarantine track can act
+    always propose-for-the-operator; only the gentle, reversible quarantine track can act
     autonomously, and only on contradictory near-pairs with a real embedder."""
     date = ts[:10]
 

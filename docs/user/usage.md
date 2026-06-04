@@ -58,7 +58,7 @@ write raw SQL.
 
 ### Saving a memory
 
-Use `/memory-save` whenever something should be remembered durably — "Peter prefers
+Use `/memory-save` whenever something should be remembered durably — "the operator prefers
 German for conversation", "the order-execution engine is Rust", "this strategy is
 paper-only". Saving:
 

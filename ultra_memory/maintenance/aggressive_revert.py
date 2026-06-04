@@ -21,8 +21,8 @@ FORK A — PROPOSE-FOR-PETER (the resolved default, spec §5 banner / §10 fork 
   noise, not the lesson's fault — Risk §9.3). So unlike auto-edit + quarantine
   (which run autonomously within the wall), the self-reversion track's DEFAULT is
   to PROPOSE the reversion TO THE DIGEST — the regressed unit, its prior version,
-  the regression evidence — WITHOUT applying it. Peter confirms. The reversion
-  MECHANISM is still BUILT here (so a Peter-confirmed reversion can execute): the
+  the regression evidence — WITHOUT applying it. The operator confirms. The reversion
+  MECHANISM is still BUILT here (so an operator-confirmed reversion can execute): the
   `apply=True` path runs it through the same hard-gate + bound + wall as every
   aggressive verb. The mechanism is a pure FSM flip (regressed→'reverted',
   prior→'active') — archive-never-delete, fully reversible. A no-prior graduation
@@ -50,8 +50,8 @@ is supposed to have caught first; it propagates as the halt).
 
 The engine primitives the wall consumes (set_status / record_link) are GENERIC +
 already on live master (ffcd414). The regression definition, the MIN_EVIDENCE
-floor, the propose-for-Peter default, and the MAX_REVERSIONS policy are the
-CONSUMER's (Trading-side) POLICY.
+floor, the propose-for-the-operator default, and the MAX_REVERSIONS policy are the
+consumer's policy (e.g. a trading project).
 """
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ MAX_REVERSIONS = MAX_REVERSIONS_PER_RUN
 def _evidence_for(conn, *, regressed_id, prior_id) -> dict:
     """Bundle the deterministic regression evidence for a proposal — the
     (net score, count) of the regressed unit's linked outcomes + the prior's, so
-    Peter can adjudicate the reversion straight from the digest. NO LLM: it reads
+    the operator can adjudicate the reversion straight from the digest. NO LLM: it reads
     the same `aggressive_outcomes` aggregate the regression test reasons over.
     Fail-soft: a read error yields a minimal evidence dict (zeros), never raises."""
     try:
@@ -176,12 +176,12 @@ def select_reversions(conn, *, include_graduations: bool = False) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
-# 2. Build proposals (the propose-for-Peter digest payload).
+# 2. Build proposals (the propose-for-the-operator digest payload).
 # --------------------------------------------------------------------------- #
 
 def build_proposals(conn, candidates: list[dict]) -> list[dict]:
     """Turn the selected regression candidates into PROPOSALS for the digest — the
-    propose-for-Peter payload (fork A). Each proposal carries the regressed unit,
+    propose-for-the-operator payload (fork A). Each proposal carries the regressed unit,
     its prior version (or None), the deterministic regression EVIDENCE, and the
     `action` the confirm path would take: 'revert' (a prior exists → FSM flip) or
     'demote' (no prior → quarantine). Fail-open per candidate."""
@@ -204,7 +204,7 @@ def build_proposals(conn, candidates: list[dict]) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
-# 3. Apply — the reversion MECHANISM (the Peter-confirm path), gated + bounded.
+# 3. Apply — the reversion MECHANISM (the operator-confirm path), gated + bounded.
 # --------------------------------------------------------------------------- #
 
 def apply_reversions(conn, reversions: list, *, ts: str,
@@ -300,12 +300,12 @@ def run_revert_track(conn, *, ts: str, apply: bool = False,
 
     1. SELECT regressions (no-LLM): the auto-edit lineage regressions + (optional)
        the no-prior regressed graduations.
-    2. PROPOSE (always): build the propose-for-Peter payload — each {regressed_id,
-       prior_id, action, evidence}. This is the digest content Peter adjudicates.
-    3. APPLY (ONLY if `apply` is True — the Peter-CONFIRM path): run the confirmed
+    2. PROPOSE (always): build the propose-for-the-operator payload — each {regressed_id,
+       prior_id, action, evidence}. This is the digest content the operator adjudicates.
+    3. APPLY (ONLY if `apply` is True — the operator-CONFIRM path): run the confirmed
        reversions through the hard gate + the bound + the wall (`apply_reversions`).
-       The DEFAULT (`apply=False`) is the propose-for-Peter path: it PLANS +
-       PROPOSES but applies NOTHING — Peter confirms before any reversion lands.
+       The DEFAULT (`apply=False`) is the propose-for-the-operator path: it PLANS +
+       PROPOSES but applies NOTHING — the operator confirms before any reversion lands.
 
     Returns {proposed, applied, halt, forbidden_targets}. FAIL-OPEN: any error in
     selection / proposal degrades to an EMPTY result; never raises out into the
@@ -320,12 +320,12 @@ def run_revert_track(conn, *, ts: str, apply: bool = False,
     except Exception:
         return result                             # fail-open: empty proposal
 
-    # The propose-for-Peter DEFAULT: apply NOTHING. The digest carries `proposed`;
-    # Peter confirms, and only then is this called with apply=True.
+    # The propose-for-the-operator DEFAULT: apply NOTHING. The digest carries `proposed`;
+    # the operator confirms, and only then is this called with apply=True.
     if not apply:
         return result
 
-    # The Peter-CONFIRM path: apply the proposed reversions through the wall + bound.
+    # The operator-CONFIRM path: apply the proposed reversions through the wall + bound.
     # (A ForbiddenTargetError here is the §4a stop-the-world; it propagates — the
     #  hard gate should have caught it, so reaching it means a bug/injection.)
     reversions = [

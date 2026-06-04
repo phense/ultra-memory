@@ -1,6 +1,6 @@
 """Human-correction inbox importer (spec §14).
 
-Peter types directive lines into a watched inbox file (e.g. `data/memory_inbox.md`);
+The operator types directive lines into a watched inbox file (e.g. `data/memory_inbox.md`);
 this importer applies them to the DB via `memory_lib` (audited) and clears the file.
 Deterministic: only `pin`/`unpin`/`verify` directives are auto-applied — free-text
 prose is NOT interpreted (no LLM here), it is preserved under an "Unprocessed"

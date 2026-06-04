@@ -6,7 +6,7 @@ every recalled memory was logged to `access_log` with that session's `session_id
 and a 1-based fused `rank` (stage A1). This module is the engine primitive that, at
 session-end, JOINs the session's recalled memories to that outcome event by writing
 `informed_by` graph edges — one per policy-selected recalled memory. A downstream
-consumer (Trading-side, NOT this engine) then folds those edges into an EWMA.
+consumer (consumer-side, NOT this engine) then folds those edges into an EWMA.
 
 PROJECT-AGNOSTIC (hard NFR): this module imports only stdlib + `from . import
 memory_lib`. There is NO policy config and NO Trading/wiki concept here — the

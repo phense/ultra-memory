@@ -9,7 +9,7 @@ The 5 parity fences (the spec's HARD gates):
                                     topiced memories; orchestrator sees all. Both
                                     directions tested.
   3. Knowledge + cross-store self-golden regression fence (NOT wiki_query parity —
-                                    deferred to a Trading-side SP-5 test, per D-S6).
+                                    deferred to a consumer-side SP-5 test, per D-S6).
   4. outcome_weight=1.0 is inert  — multiplying by the default changes nothing.
   5. RRF rank-fusion is scale-invariant — a knowledge rank-1 hit in a tiny corpus
                                     is not buried by raw-score flattening (FU-4).
@@ -287,9 +287,9 @@ def test_fix4_empty_string_element_also_dropped(tmp_path):
 
 def test_fence3_cross_store_self_golden(tmp_path):
     """A regression fence over unified_recall's OWN output on a fixed (memory +
-    knowledge) fixture. This is NOT byte-identity with Trading's wiki_query (the
+    knowledge) fixture. This is NOT byte-identity with the consumer's wiki_query (the
     engine cannot import it — that cross-codebase parity is deferred to a
-    Trading-side SP-5 integration test, per D-S6); it locks the cross-store
+    consumer-side SP-5 integration test, per D-S6); it locks the cross-store
     ordering + shape against silent drift."""
     conn = _db(tmp_path)
     _save(conn, id="mem_macro", type="reference", title="macro note",

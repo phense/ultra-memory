@@ -294,12 +294,12 @@ best-rank-per-backend RRF, weighted by `outcome_weight` (`1.0` for units the
 self-correct beat has not yet scored). No LLM.
 
 > **Decision D-S6 (auditable).** Spec §5.6 says "reuse the wiki_query backends".
-> But `wiki_query` is a *Trading-side* module and the project-agnostic NFR forbids
+> But `wiki_query` is a *consumer-side* module and the project-agnostic NFR forbids
 > the engine importing it. So `unified_query` does **not** import `wiki_query`; it
 > re-implements the *algorithm* engine-side — a generic in-module BM25 + cosine
 > over `unified_index`, fused with a generic re-implementation of FU-4
 > best-rank-per-backend RRF (k=60). Cross-codebase byte-parity with `wiki_query`
-> is **deferred to an SP-5 Trading-side test** (which can import both). The
+> is **deferred to an SP-5 consumer-side test** (which can import both). The
 > memory-store byte-identity (below) *is* enforced here.
 >
 > **SP-6 (D11) — BM25 document is the FULL body.** `_knowledge_doc_text(row)`
@@ -392,7 +392,7 @@ The usage-outcome **attribution join** — deterministic, **NO LLM**, project-ag
 session-end it JOINs the memories a session actually recalled (logged in `access_log`
 with the session id + a 1-based fused `rank` — stage A1) to that session's outcome
 `session_event` (its `outcome_signal`) by writing `informed_by` graph edges; a
-downstream consumer (Trading-side, not the engine) folds those edges into an EWMA.
+downstream consumer (consumer-side, not the engine) folds those edges into an EWMA.
 
 - `recalled_units_for_session(conn, *, session_id) -> [{'id', 'rank'}]` — the
   session's recalled MEMORY units: one row per `access_log` entry with
@@ -490,7 +490,7 @@ earlier "ships-disabled / dry-run-first" posture is **superseded**.
   is marked `resolved=1`. ADD-only: it never rewrites, and the apply path refuses any
   `created_by='human'`/`pinned` target.
 - **Self-correct** (aggressive, weekly): folds SP-8 `informed_by` edges into an EWMA,
-  then proposes **auto-edit**, **self-reversion** (FORK A — flagged for Peter, never
+  then proposes **auto-edit**, **self-reversion** (FORK A — flagged for the operator, never
   auto-reverted), or **quarantine** on `('agent','background_review')` lessons whose
   evidence is net-negative. Behind the 6-mechanism wall (provenance gate, archive-
   never-delete FSM transitions, bounded blast radius ≤3 edits/≤3 reversions/≤5

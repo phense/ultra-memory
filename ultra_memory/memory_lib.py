@@ -567,7 +567,7 @@ def set_verified(conn, *, id, ts, reason="manual verify"):
 
 
 # ---------------------------------------------------------------------------
-# SP-7 GENERIC engine support (the substrate the Trading-side aggressive
+# SP-7 GENERIC engine support (the substrate the consumer-side aggressive
 # self-improvement loop COMPOSES — never the loop itself). These two primitives
 # are PROJECT-AGNOSTIC: they name no Trading concept and enforce NO "protected
 # row" policy (the SP-7 wall — "human/pinned is immutable" — lives wholly in the
@@ -749,7 +749,7 @@ def backfill_topic(conn, *, default_topic, ts, reason="topic backfill (D4)"):
     git-tracked export + audit_log + clearing the flag undo it. Returns a summary
     dict: {stamped, skipped_already_complete}.
 
-    NOTE: a one-time touch of the live canonical store — gated on Peter's sign-off
+    NOTE: a one-time touch of the live canonical store — gated on the operator's sign-off
     (spec §10). NEVER run on a live DB without that gate; the suite runs it on tmp DBs.
     """
     if not default_topic:

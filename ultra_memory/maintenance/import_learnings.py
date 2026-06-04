@@ -1,6 +1,6 @@
 """Self-learning `Learnings.md` import + projection driver (project-agnostic).
 
-Migrated from the Trading-side `scripts/maintenance/import_learnings.py` into the
+Migrated from the reference consumer's `scripts/maintenance/import_learnings.py` into the
 plugin so installing ultra-memory ships the whole self-learning projection loop. Two
 responsibilities:
 

@@ -206,7 +206,7 @@ code disposes):
    1 synthesized skill/run; per-period (`YYYY-MM`) caps live in `meta`; halt-on-exceed.
 4. **Pre-run git checkpoint** — tags the attempt + snapshots the DB; refuses to apply
    on a dirty/untracked tree.
-5. **Audit + human digest** — every action lands in `briefings_dir` (Peter is in the
+5. **Audit + human digest** — every action lands in `briefings_dir` (the operator is in the
    audit loop, never the write loop).
 6. **Kill switch** — the present-by-default `*_DISABLE` env vars above.
 7. **(synthesize only) eval-gate** — a behavioral trigger-probe proving the generated
@@ -275,7 +275,7 @@ data step** SP-3's `0004` migration deliberately keeps out of the `.sql`:
 - `default_topic` is **consumer-supplied** (content-free in the engine; Trading →
   `trading`).
 - **Gated on sign-off (spec §10):** it touches the live canonical store, so it runs
-  only behind Peter's explicit go, in the same paused-cron + git-checkpoint
+  only behind the operator's explicit go, in the same paused-cron + git-checkpoint
   discipline SP-2's wiki re-root used. The `0004` DDL itself is non-destructive and
   can land first; only this data step gates.
 

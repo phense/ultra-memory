@@ -1,4 +1,4 @@
-"""Tests for the human-correction inbox importer (spec §14): Peter types directive
+"""Tests for the human-correction inbox importer (spec §14): the operator types directive
 lines into a watched inbox file; the importer applies them via memory_lib and clears
 the file, preserving any unrecognized free-text under an Unprocessed section."""
 from ultra_memory import memory_inbox, memory_lib

@@ -309,7 +309,7 @@ def test_quality_gate_rejects_probe_regressing_edit(tmp_path):
     # The regressing edit is REJECTED — not admitted.
     admitted_ids = {a["old_id"] for a in rep["admitted"]}
     assert "vix-term" not in admitted_ids
-    # It survives as a PROPOSED-but-rejected action (digested for Peter).
+    # It survives as a PROPOSED-but-rejected action (digested for the operator).
     assert any(r["old_id"] == "vix-term" for r in rep["rejected"])
 
 

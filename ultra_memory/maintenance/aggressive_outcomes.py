@@ -46,7 +46,7 @@ outcome_weight + READS edges; it never deletes (a guard test asserts it).
 The engine primitives it consumes (`set_outcome_weight`, `record_session_event`'s
 `outcome_signal` column, the `links` reverse edge) are GENERIC + already on live
 master (ffcd414). The +1/-1 policy, the EWMA shape, the MIN_EVIDENCE floor, and
-the regression definition are the CONSUMER's (Trading-side) POLICY.
+the regression definition are the consumer's policy (e.g. a trading project).
 """
 from __future__ import annotations
 

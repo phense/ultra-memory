@@ -17,8 +17,8 @@ fork C) — a SHELL-level concern; this module's job is to honor the gate the en
 sets. A dedicated test asserts the gate short-circuits on DISABLE.
 
 DIGEST (spec §4e) under test: it renders per-skill outcome_weight rates, the
-edits proposed/applied/eval-rejected, the proposed reversions (for Peter), the
-quarantine pairs (for Peter's adjudication), any bound-hit, and the EXACT
+edits proposed/applied/eval-rejected, the proposed reversions (for the operator), the
+quarantine pairs (for the operator's adjudication), any bound-hit, and the EXACT
 rollback command (git reset + memory_import).
 
 OAUTH-ONLY (HARD): every LLM call routes through the tracks' INJECTED runner;
@@ -230,7 +230,7 @@ def test_dryrun_writes_digest_applies_nothing(tmp_path, monkeypatch):
     assert res.digest_path is not None
     digest = Path(res.digest_path).read_text()
     assert "bad" in digest
-    assert res.proposed_reversions  # the propose-for-Peter payload is populated
+    assert res.proposed_reversions  # the propose-for-the-operator payload is populated
 
 
 def test_dryrun_does_not_tag_the_repo(tmp_path, monkeypatch):
@@ -276,9 +276,9 @@ def test_render_digest_contains_all_sections():
     assert "proposed" in md.lower()
     assert "rejected" in md.lower() or "eval-rejected" in md.lower()
     assert "probe_regression" in md
-    # proposed reversions (for Peter).
+    # proposed reversions (for the operator).
     assert "n1" in md and "o1" in md
-    # quarantine pairs (for Peter).
+    # quarantine pairs (for the operator).
     assert "qa" in md and "qb" in md
     # bound-hit surfaced.
     assert "bound" in md.lower() and "cap=3" in md
@@ -287,7 +287,7 @@ def test_render_digest_contains_all_sections():
 
 
 def test_render_digest_dryrun_banner():
-    """A dry-run digest is clearly marked DRY-RUN / APPLIED NOTHING so Peter reads
+    """A dry-run digest is clearly marked DRY-RUN / APPLIED NOTHING so the operator reads
     it as a proposal, not a record of writes."""
     rr = ar.RunResult(mode="dryrun", date=DATE,
                       applied_counts={"edits": 0, "reversions": 0, "quarantines": 0})

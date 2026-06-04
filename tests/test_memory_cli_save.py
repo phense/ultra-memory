@@ -6,7 +6,7 @@ def test_save_roundtrips_a_new_fact(tmp_path):
     db = tmp_path / "m.db"
     memory_lib.open_memory_db(str(db)).close()  # migrate
     body = tmp_path / "body.txt"
-    body.write_text("Peter prefers German for conversation.")
+    body.write_text("The operator prefers German for conversation.")
     rc = memory_cli.main(
         ["save", "--id", "user_lang_pref", "--type", "user",
          "--title", "User language preference", "--from-file", str(body)],

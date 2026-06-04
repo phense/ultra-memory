@@ -1,5 +1,5 @@
 """The AGGRESSIVE pass's BOUNDS + CHECKPOINT + KILL SWITCH (project-agnostic;
-ported from Trading SP-7 §4c/§4d/§4f).
+ported from the reference SP-7 implementation §4c/§4d/§4f).
 
 This is the second pillar of the safety wall (alongside `aggressive_wall.py`, the
 §4a/§4b provenance-gate + archive-never-delete primitives). Where the wall decides

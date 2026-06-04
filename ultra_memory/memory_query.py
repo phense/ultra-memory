@@ -18,7 +18,7 @@ _TITLE_BOOST = 0.5
 # title-match + strength - staleness only (outcome_weight is applied at the fusion layer).
 # access_count is RETAINED for the SessionStart Hot-gist's ambient ordering (rehydrate.py),
 # which is not a recall-feedback ranking. Reintroduce a NON-feedback popularity signal
-# (e.g. explicit-recall-only) here if desired — Peter's call.
+# (e.g. explicit-recall-only) here if desired — the operator's call.
 _STALE_PENALTY = 0.2
 
 

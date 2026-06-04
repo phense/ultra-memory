@@ -2,7 +2,7 @@
 Stage 7 of the SP-7 build (spec §7 step 7). The THIRD (and gentlest) of the three
 aggressive self-improvement capabilities, built on top of the safety wall
 (Stages 1-4). It detects two agent-authored units that DISAGREE and ISOLATES them
-(demoted out of recall), not deletes them, for Peter's review — the loop does NOT
+(demoted out of recall), not deletes them, for the operator's review — the loop does NOT
 pick a winner.
 
 DETECTION (spec §5.3): an EMBEDDING PRE-FILTER (no-LLM, the SP-3/wiki embedder)
@@ -13,7 +13,7 @@ duplicate.
 
 APPLY (spec §5.3):
   * contradicts → BOTH units set_status('quarantined') (drop out of recall) +
-    record_link(predicate='contradicts') + listed in the digest for Peter's
+    record_link(predicate='contradicts') + listed in the digest for the operator's
     adjudication (the loop does NOT pick a winner);
   * duplicate   → routes to the SP-6 CONSERVATIVE MERGE path (engine consolidate —
     NOT quarantine);
@@ -196,8 +196,8 @@ def test_contradicts_quarantines_both_and_links(tmp_path):
 
 
 def test_contradicts_listed_in_digest(tmp_path):
-    """A quarantined contradicting pair is LISTED in the digest payload for Peter's
-    adjudication (the loop does not pick a winner — Peter does)."""
+    """A quarantined contradicting pair is LISTED in the digest payload for the operator's
+    adjudication (the loop does not pick a winner — the operator does)."""
     conn = _open_temp_db(tmp_path)
     id_a, id_b = _seed_opposing_pair(conn)
     runner = _runner_for({frozenset((id_a, id_b)): "contradicts"})
@@ -248,7 +248,7 @@ def test_compatible_is_a_noop(tmp_path):
 # =========================================================================== #
 
 def test_quarantine_is_reversible(tmp_path):
-    """Quarantine is the gentlest verb — fully reversible. After Peter adjudicates,
+    """Quarantine is the gentlest verb — fully reversible. After the operator adjudicates,
     a quarantined unit flips back to 'active' via the wall's reactivate."""
     conn = _open_temp_db(tmp_path)
     id_a, id_b = _seed_opposing_pair(conn)
@@ -256,7 +256,7 @@ def test_quarantine_is_reversible(tmp_path):
     aq.run_quarantine_track(conn, ts=TS, embedder=_stub_embedder, runner=runner,
                             env=FAKE_ENV)
     assert _row(conn, id_a)["status"] == "quarantined"
-    # Reverse it (Peter adjudicated unit A as the correct one).
+    # Reverse it (the operator adjudicated unit A as the correct one).
     aw.reactivate(conn, id=id_a, ts=TS, reason="peter adjudicated: A is correct")
     assert _row(conn, id_a)["status"] == "active"
     assert _row(conn, id_b)["status"] == "quarantined"   # B stays quarantined

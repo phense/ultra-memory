@@ -1,4 +1,4 @@
-"""SP-7 engine support — the two GENERIC primitives the Trading-side aggressive
+"""SP-7 engine support — the two GENERIC primitives the consumer-side aggressive
 self-improvement loop composes (the loop, its safety wall + eval-gate, and any
 "protected row" policy live in the CONSUMER, never here).
 

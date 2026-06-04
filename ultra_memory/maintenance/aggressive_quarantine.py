@@ -8,7 +8,7 @@ zero-tolerance provenance), and the bounds (`aggressive_bounds.MAX_QUARANTINES_P
 THE GENTLEST AGGRESSIVE VERB (spec §5.3): nothing is edited or deleted — two
 agent-authored units that DISAGREE just stop being recalled (a `status='quarantined'`
 FSM state, dropped out of `unified_recall`'s `status='active'` filter), are linked
-by a `contradicts` edge, and are LISTED in the digest for Peter's adjudication. The
+by a `contradicts` edge, and are LISTED in the digest for the operator's adjudication. The
 loop does NOT pick a winner (picking is an edit, gated separately) — it demotes BOTH
 "these disagree, stop surfacing either until reviewed". Fully reversible (the wall's
 `reactivate` flips a unit back to 'active').
@@ -58,7 +58,7 @@ zero-tolerance stop-the-world the hard gate enforces; it propagates as the halt)
 The engine primitives the wall + the merge consume (set_status / record_link /
 consolidate) are GENERIC + already on live master (ffcd414). The cosine BAND, the
 adjudication prompt, the duplicate→merge routing, and the MAX_QUARANTINES policy are
-the CONSUMER's (Trading-side) POLICY.
+the consumer's policy (e.g. a trading project).
 """
 from __future__ import annotations
 
@@ -456,7 +456,7 @@ def run_quarantine_track(conn, *, ts: str, embedder, runner=None,
     3. ROUTE + APPLY (only through the wall + bounded; only if `apply` and not
        halted):
          * contradicts → BOTH quarantined (`apply_quarantines`) + a `contradicts`
-           link + listed in the digest for Peter's adjudication;
+           link + listed in the digest for the operator's adjudication;
          * duplicate   → the conservative MERGE path (`apply_merges` → engine
            consolidate redirect-stub) — NOT quarantine;
          * compatible  → a no-op.
@@ -464,7 +464,7 @@ def run_quarantine_track(conn, *, ts: str, embedder, runner=None,
        digest, apply NOTHING.
 
     Returns {quarantined, merged, compatible, halt, forbidden_targets} — the digest
-    payload (`quarantined` is the list Peter adjudicates). FAIL-OPEN: any error in
+    payload (`quarantined` is the list the operator adjudicates). FAIL-OPEN: any error in
     pre-filter / adjudication / routing degrades to an EMPTY result; never raises out
     into the maintenance run. (A ForbiddenTargetError on the apply propagates as the
     §4a zero-tolerance stop-the-world — the orchestrator turns it into a run halt.)"""

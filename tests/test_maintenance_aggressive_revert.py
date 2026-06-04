@@ -7,16 +7,16 @@ built on top of the safety wall (Stages 1-4) + the outcome signal (Stage 3). It
 is the GEPA/Pareto *post-commit* defense: a graduated/auto-edited unit whose
 linked downstream outcomes REGRESSED (made things worse than the prior version)
 is reverted/demoted — but, per fork A, the DEFAULT is to PROPOSE the reversion to
-the digest WITHOUT applying it (Peter confirms). Auto-edit + quarantine run
+the digest WITHOUT applying it (the operator confirms). Auto-edit + quarantine run
 autonomously; reversion proposes — it is the verb most likely to be itself wrong
 (a regression may be noise, not the lesson's fault — Risk §9.3).
 
 HARD INVARIANTS under test (spec §7 step 6 / §8 / fork A):
   * a detected regression EMITS a proposed reversion to the digest WITHOUT
-    applying (the propose-for-Peter default — apply NOTHING on the default path);
+    applying (the propose-for-the-operator default — apply NOTHING on the default path);
   * the proposal carries the regressed unit + its prior version + the regression
-    evidence (so Peter can adjudicate from the digest);
-  * the reversion MECHANISM, when INVOKED (the Peter-confirm path), reverts to the
+    evidence (so the operator can adjudicate from the digest);
+  * the reversion MECHANISM, when INVOKED (the operator-confirm path), reverts to the
     prior version (a pure FSM flip: regressed→'reverted', prior→'active') — an
     archive-never-delete reversible transition;
   * a graduated-then-regressed unit with NO prior version DEMOTES to 'quarantined'
@@ -126,20 +126,20 @@ def _seed_regressed_lineage(conn, *, old_id="u-old", new_id="u-new",
 
 
 # =========================================================================== #
-# 1. The propose-for-Peter DEFAULT — a detected regression PROPOSES, applies NONE
+# 1. The propose-for-the-operator DEFAULT — a detected regression PROPOSES, applies NONE
 # =========================================================================== #
 
 def test_detect_regression_proposes_without_applying(tmp_path):
     """The fork-A default: a detected regression EMITS a proposed reversion to the
     digest WITHOUT applying it. apply=False (the default) plans + proposes but
-    flips NO status — Peter confirms before any reversion lands."""
+    flips NO status — the operator confirms before any reversion lands."""
     conn = _open_temp_db(tmp_path)
     old_id, new_id = _seed_regressed_lineage(conn)
     result = arv.run_revert_track(conn, ts=TS)   # apply defaults to False (propose)
     # A proposal was emitted for the regressed lineage.
     proposed_ids = {p["regressed_id"] for p in result["proposed"]}
     assert new_id in proposed_ids
-    # Nothing was applied (propose-for-Peter): both rows untouched.
+    # Nothing was applied (propose-for-the-operator): both rows untouched.
     assert result["applied"] == []
     assert _row(conn, new_id)["status"] == "active"      # regressed still active
     assert _row(conn, old_id)["status"] == "redirect"    # prior still redirected
@@ -147,7 +147,7 @@ def test_detect_regression_proposes_without_applying(tmp_path):
 
 def test_proposal_carries_regressed_prior_and_evidence(tmp_path):
     """The proposal carries the regressed unit, its prior version, AND the
-    regression evidence (net score + outcome count) — everything Peter needs to
+    regression evidence (net score + outcome count) — everything the operator needs to
     adjudicate the reversion straight from the digest."""
     conn = _open_temp_db(tmp_path)
     old_id, new_id = _seed_regressed_lineage(conn)
@@ -187,11 +187,11 @@ def test_noisy_single_bad_outcome_is_not_a_regression(tmp_path):
 
 
 # =========================================================================== #
-# 2. The reversion MECHANISM — the Peter-confirm path (apply=True) reverts
+# 2. The reversion MECHANISM — the operator-confirm path (apply=True) reverts
 # =========================================================================== #
 
 def test_confirm_reverts_to_prior_version_fsm_flip(tmp_path):
-    """The Peter-confirm path (apply=True) reverts to the prior version: a pure FSM
+    """The operator-confirm path (apply=True) reverts to the prior version: a pure FSM
     flip — the regressed unit demotes to 'reverted' (out of recall), the prior
     re-activates. Archive-never-delete: nothing is deleted, both rows survive."""
     conn = _open_temp_db(tmp_path)
@@ -239,7 +239,7 @@ def test_confirm_demotes_no_prior_graduation_to_quarantined(tmp_path):
 
 def test_no_prior_proposal_marks_demote_not_revert(tmp_path):
     """A no-prior regressed graduation is PROPOSED with prior_id=None and the
-    'demote' action (so the digest tells Peter it will be quarantined, not reverted
+    'demote' action (so the digest tells the operator it will be quarantined, not reverted
     to a non-existent prior)."""
     conn = _open_temp_db(tmp_path)
     _save(conn, id="u-grad", created_by="background_review", body="bad graduation")
@@ -352,7 +352,7 @@ def test_revert_module_never_deletes():
 
 def test_dryrun_path_applies_nothing_even_with_regressions(tmp_path):
     """Belt-and-suspenders: even if a caller passes apply=True for the confirm
-    mechanism, the propose-for-Peter DEFAULT (apply omitted/False) must apply
+    mechanism, the propose-for-the-operator DEFAULT (apply omitted/False) must apply
     nothing — re-asserting the fork-A default is propose, not auto-apply."""
     conn = _open_temp_db(tmp_path)
     _seed_regressed_lineage(conn)

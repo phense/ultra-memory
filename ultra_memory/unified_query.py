@@ -44,7 +44,7 @@ forbids the engine importing ANYTHING from Trading. We therefore do NOT import
 PARITY NOTE (auditable): the cross-store byte-identity to Trading's `wiki_query`
 output is NOT achievable here — the engine cannot import that module. Test #3
 below is a SELF-golden regression fence over unified_recall's OWN output. True
-cross-codebase parity with `wiki_query` is **deferred to a Trading-side SP-5
+cross-codebase parity with `wiki_query` is **deferred to a consumer-side SP-5
 integration test** (which CAN import both). The memory-store byte-identity (Test
 #1) IS enforced here, because that backend is engine-native.
 """

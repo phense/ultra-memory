@@ -5,7 +5,7 @@ user/feedback operational rows NULL; idempotent via meta.topic_backfill_complete
 audited per row; reversible. Plus no-regression checks for the new nullable
 columns on the existing write/read path.
 
-NOTE: every test runs on a tmp DB. The live-data backfill is Peter-gated and is
+NOTE: every test runs on a tmp DB. The live-data backfill is operator-gated and is
 NEVER executed here.
 """
 import pytest
