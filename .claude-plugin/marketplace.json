@@ -1,8 +1,8 @@
 {
   "name": "ultra-memory",
-  "owner": { "name": "Peter Hense" },
+  "owner": { "name": "Peter Hense", "email": "peter.hense@gmail.com" },
   "metadata": {
-    "description": "Project-agnostic agent-memory engine + read-only knowledge MCP for Claude Code (local plugin).",
+    "description": "Project-agnostic agent-memory engine + read-only knowledge MCP for Claude Code.",
     "version": "0.0.3"
   },
   "plugins": [
