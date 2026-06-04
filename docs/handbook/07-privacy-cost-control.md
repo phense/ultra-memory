@@ -137,4 +137,4 @@ ultra-memory keeps a human-readable, git-trackable export of your store under `<
 
 ---
 
-**Next:** [The self-learning loop in practice →](05-self-learning-in-practice.md) — reading a digest, confirming a proposed reversion, and rolling back a change. Or jump back to the [Configuration reference](06-configuration-reference.md) for the full settings table.
+**Next:** [Build your own domain →](08-build-your-own-domain.md) — extend ultra-memory with a new knowledge domain of your own. For the loop's day-to-day mechanics — reading a digest, confirming a proposed reversion, rolling back a change — see [The self-learning loop in practice](05-self-learning-in-practice.md); for the full settings table, the [Configuration reference](06-configuration-reference.md).

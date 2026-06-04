@@ -1,4 +1,4 @@
-# 09 · Curating a Domain
+# 9. Curating a domain
 
 A knowledge wiki that nobody curates rots in a predictable way: near-duplicate pages pile up, links go stale, the indexes drift out of sync with the files, and the thing you wrote six months ago is unfindable. ultra-memory's answer is that curation is **mostly not your job** — a deterministic maintenance pipeline lints, dedups, cross-links, and re-indexes your topic on a schedule, and the few writes that *are* your job go through audited verbs that keep the structure correct *by construction*.
 
@@ -48,7 +48,7 @@ It emits JSON — per-hit `slug` / `path` / `snippet` / `match_loc`, plus `graph
 
 **2 · Hand-browse (the master-over-masters).** When you want to *understand the lay of the land* rather than answer one question, browse top-down: open `wiki/index.md` → pick a topic master (`wiki/cooking/index.md`) → pick a `<slug>-index.md` theme-index → open the one atomic page you need. The index is engineered to be cheap to read; that is why entries are one line each.
 
-> **Privilege note.** Retrieval is scoped. A subagent caller sees `project` / `reference` knowledge but never `user` / `feedback` memories — fail-closed. The trusted top-level session gets full recall via the CLI. You don't configure this per-read; it comes from the caller's class. See [06 · The Knowledge MCP](06-knowledge-mcp.md) for the boundary.
+> **Privilege note.** Retrieval is scoped. A subagent caller sees `project` / `reference` knowledge but never `user` / `feedback` memories — fail-closed. The trusted top-level session gets full recall via the CLI. You don't configure this per-read; it comes from the caller's class. See [the privilege boundary](07-privacy-cost-control.md#the-privilege-boundary--subagents-cant-read-everything) for what it protects, or [Working with your memory](04-working-with-memory.md#the-privilege-boundary-from-where-you-sit) for how it looks from where you sit.
 
 ---
 
@@ -165,4 +165,8 @@ That is curation as a *system*: you write the knowledge, the verbs keep each wri
 - The **maintenance pipeline** (Tier-1 no-LLM + Tier-2 one bundled OAuth call) lints, dedups, cross-links, and re-indexes your topic on a schedule, fail-open, **never deleting** an atomic.
 - A domain that follows the reference conventions needs **no schema overrides**; divergences plug in through `config.toml` seams (`wiki_linter`, `wiki_merge_decider`, …).
 
-To stand up a *new* domain in the first place — the topic, the gateway subclass, the config wiring, the ingestion adapter — go back to **[08 · Build Your Own Domain](08-build-your-own-domain.md)**.
+To stand up a *new* domain in the first place — the topic, the gateway subclass, the config wiring, the ingestion adapter — go back to **[Build your own domain](08-build-your-own-domain.md)**.
+
+---
+
+This is the last of the user-facing chapters. **For developers:** [Architecture →](10-architecture.md) — the engine design, modules, and data flow under everything you've used so far.

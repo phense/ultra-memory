@@ -42,7 +42,7 @@ When it finishes it prints the **resolved database path** — confirm that path 
 ~/.ultra-memory/memory.db
 ```
 
-— one store shared across every project on your machine. You can point it elsewhere, but you don't have to; see [Configuration](06-configuration.md) for the one optional override and the full table.
+— one store shared across every project on your machine. You can point it elsewhere, but you don't have to; see [Configuration](06-configuration-reference.md) for the one optional override and the full table.
 
 ## Use it
 
@@ -60,7 +60,7 @@ Claude Code namespaces a plugin's commands with the plugin name, so every verb s
 
 You rarely have to *ask* for memory, though. Most of the value arrives without a command:
 
-- **At the start of every session,** ultra-memory injects a short summary — your pinned rules plus the memories most relevant right now — straight into Claude's context. (This is the "rehydration gist"; budget it in [Configuration](06-configuration.md).)
+- **At the start of every session,** ultra-memory injects a short summary — your pinned rules plus the memories most relevant right now — straight into Claude's context. (This is the "rehydration gist"; budget it in [Configuration](06-configuration-reference.md).)
 - **When a session ends,** it saves a checkpoint of what happened.
 - **Subagents** can read your memory through a read-only tool, but only the facts they're allowed to see — there's a privilege boundary between a trusted top-level session and a spawned subagent.
 

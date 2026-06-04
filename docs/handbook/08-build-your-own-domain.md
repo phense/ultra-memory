@@ -1,10 +1,10 @@
-# 08 · Build Your Own Domain
+# 8. Build your own domain
 
 A wiki that only knows about trading is a wiki someone hardcoded for trading. ultra-memory refuses to do that. The engine ships **content-free**: it knows *how* to route, dedup, frontmatter, anchor, and audit a page, but it knows **nothing** about what your pages are *about*. The subject matter — markets, recipes, case law, your home-lab runbook — is supplied by *you*, in two small, well-defined places. This chapter is the map of those two places.
 
 By the end you will have stood up a brand-new knowledge domain — pick whatever you like; we will build a "cooking" domain in parallel with the real "trading" reference so you can see the abstract contract and a concrete instance side by side.
 
-> **Prerequisite.** You have ultra-memory installed and bootstrapped (`/ultra-memory:memory-setup`). If not, start at [01 · Getting Started](01-getting-started.md). For *reading* and *writing* an existing domain's wiki, see [09 · Curating a Domain](09-curating-a-domain.md) — this chapter is about *creating* one.
+> **Prerequisite.** You have ultra-memory installed and bootstrapped (`/ultra-memory:memory-setup`). If not, start at the [Quick start](03-quick-start.md). For *reading* and *writing* an existing domain's wiki, see [Curating a domain](09-curating-a-domain.md) — this chapter is about *creating* one.
 
 ---
 
@@ -53,7 +53,7 @@ Here is the progressive-disclosure payoff: **the base `WikiGateway` is turnkey.*
 | in-page anchor | none (standalone atomic) |
 | confidence label | `"Standard"` |
 
-If those defaults fit your domain, you write **zero Python**. You leave `wiki_gateway` unset in config, point the engine at a wiki root, and start writing pages through the built-in CLI verbs (covered in [09 · Curating a Domain](09-curating-a-domain.md)). A "cooking" domain that just wants `cooking/concepts/<recipe>.md` pages tagged by cuisine could ship exactly like this.
+If those defaults fit your domain, you write **zero Python**. You leave `wiki_gateway` unset in config, point the engine at a wiki root, and start writing pages through the built-in CLI verbs (covered in [Curating a domain](09-curating-a-domain.md)). A "cooking" domain that just wants `cooking/concepts/<recipe>.md` pages tagged by cuisine could ship exactly like this.
 
 You only reach for a subclass when your domain has an *opinion* the defaults don't encode — a routing table, a richer frontmatter schema, dedup-on-write, stable anchors. The next sections are for that case.
 
@@ -236,4 +236,4 @@ That is the *whole* extension. The page write, the path-escape guard, the redact
 4. **Wire** the subclass with one line in `<project>/.ultra-memory/config.toml`.
 5. For a repeatable source, write a three-method **ingestion adapter** and reuse `run_adapter`.
 
-Your domain now exists and can be written to. Next, learn to keep it healthy: how to author pages through the gateway verbs, browse and retrieve them, and let the maintenance pipeline lint, dedup, and cross-link your topic — see **[09 · Curating a Domain](09-curating-a-domain.md)**.
+Your domain now exists and can be written to. Next, learn to keep it healthy: how to author pages through the gateway verbs, browse and retrieve them, and let the maintenance pipeline lint, dedup, and cross-link your topic — see **[Curating a domain](09-curating-a-domain.md)**.

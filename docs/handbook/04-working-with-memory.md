@@ -48,7 +48,7 @@ This returns a ranked list of hits — each with a `title`, a `snippet`, a relev
 
 Two mechanisms read your memory without you asking:
 
-- **The session-start rehydration gist.** When a session opens (or resumes, or after a compaction), ultra-memory builds a short summary — *every pinned memory*, plus the memories most relevant to the moment — and injects it directly into Claude's context. It's deliberately small (a character budget, default 2000, adjustable in [Configuration](06-configuration.md)) so it costs almost nothing and never crowds out your actual work. This is *why* pinning matters: a pinned memory is guaranteed a seat in that gist on every single session.
+- **The session-start rehydration gist.** When a session opens (or resumes, or after a compaction), ultra-memory builds a short summary — *every pinned memory*, plus the memories most relevant to the moment — and injects it directly into Claude's context. It's deliberately small (a character budget, default 2000, adjustable in [Configuration](06-configuration-reference.md)) so it costs almost nothing and never crowds out your actual work. This is *why* pinning matters: a pinned memory is guaranteed a seat in that gist on every single session.
 - **The end-of-session checkpoint.** When a session stops, a checkpoint of what happened is saved. This is also the raw material the self-learning loop later mines into durable memory (see [The self-learning loop in practice](05-self-learning-in-practice.md)).
 
 Both hooks are **fail-open**: if anything goes wrong they log one line and step aside. They can never wedge or block your session.
@@ -101,7 +101,7 @@ Three verbs maintain accuracy over time.
 
 You and a top-level Claude session get **full recall** through `/ultra-memory:memory-recall` — every type, including your private `user`/`feedback` memories.
 
-A **subagent** (one Claude spawns to do a scoped sub-task) reads through a different, read-only tool, and it is **fail-closed**: it only ever sees `project` and `reference` facts, *never* your `user`/`feedback` tier, and never another project's facts. So a subagent you dispatch to, say, summarize a file cannot accidentally surface a private preference or a secret in its output. You don't configure this per task — it's the default. (You *can* mark a top-level instance as a trusted `orchestrator` to widen its recall; that's a deliberate setting, covered in [Configuration](06-configuration.md).)
+A **subagent** (one Claude spawns to do a scoped sub-task) reads through a different, read-only tool, and it is **fail-closed**: it only ever sees `project` and `reference` facts, *never* your `user`/`feedback` tier, and never another project's facts. So a subagent you dispatch to, say, summarize a file cannot accidentally surface a private preference or a secret in its output. You don't configure this per task — it's the default. (You *can* mark a top-level instance as a trusted `orchestrator` to widen its recall; that's a deliberate setting, covered in [Configuration](06-configuration-reference.md).)
 
 The practical upshot: save personal or sensitive directives as `user`/`feedback` and they stay with you; save shareable project facts as `project`/`reference` and your helper agents can use them.
 
@@ -109,4 +109,4 @@ The practical upshot: save personal or sensitive directives as `user`/`feedback`
 
 **Next:** [The self-learning loop in practice →](05-self-learning-in-practice.md) — what curates your store automatically, the safety guarantees in plain language, and how to read a digest or turn any of it off.
 
-**See also:** [Configuration](06-configuration.md) for the database path, the gist budget, and the caller-class setting.
+**See also:** [Configuration](06-configuration-reference.md) for the database path, the gist budget, and the caller-class setting.

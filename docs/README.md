@@ -27,7 +27,7 @@ with a one-line "what you'll learn".
 
 ## Status (2026-06-04)
 
-The fabric is **live and tested** — **1160 green tests**: the two-store knowledge fabric
+The fabric is **live and tested** — **1197 green tests**: the two-store knowledge fabric
 (Session Memory in SQLite + the topic-partitioned LLM-Wiki), `unified_recall` deterministic
 RRF fusion, the typed-edge `links` graph, the single audited write gateway with redaction at
 persist *and* export, OAuth-only enforcement, SessionStart/Stop hooks, the read-only

@@ -77,6 +77,21 @@ The self-learning beats also read these enable/disable variables directly (see t
 
 LLM-call authentication is **not** a knob you turn here. There is no `ULTRA_MEMORY_API_KEY`. Every LLM beat runs through your local `claude` CLI on your own subscription; an `ANTHROPIC_API_KEY` on the process is a hard error that refuses to run. See [Privacy, cost & control](07-privacy-cost-control.md) for the full chokepoint.
 
+### Advanced / internal tuning
+
+These seams exist for headless runs, multi-agent topic-scoping, the inbox verb, and the synthesis eval-gate. Most people never touch them — the engine derives a safe value for each — but they are real env vars the code reads, so they are listed here for completeness. Treat them as advanced/internal: change them only when you have a specific need.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `ULTRA_MEMORY_SESSION_ID` | derived from the harness | Explicit session id for capture/attribution. Set by cron/tests (or a non-interactive caller) when no harness session id is available. |
+| `ULTRA_MEMORY_AGENT_NAME` | unset | The calling agent's name. With a DB connection, its `agent_topic_bindings` rows contribute to the caller's topic scope (the persistent topic binding). |
+| `ULTRA_MEMORY_CALLER_TOPIC` | unset (→ empty topic set) | Comma/`os.pathsep`-separated topic list scoping a subagent's recall. No binding from here **or** `agent_topic_bindings` ⇒ the caller sees only `topic IS NULL` operational memories — the topic boundary fails closed. |
+| `ULTRA_MEMORY_INBOX` | the default inbox path | Path to the memory-correction inbox the `memory-inbox` verb applies. Override to point the verb at a non-default file. |
+| `SP8_ATTRIBUTION_POLICY` | `top_k` | Which recalled units an outcome credits. `top_k` = the top-k by recall rank; a bad value falls back to `top_k`. |
+| `SP8_ATTRIBUTION_K` | `1` | The `k` for `top_k` attribution. A non-integer value falls back to `1`. |
+| `ULTRA_MEMORY_PROBE_RUNS` | `3` (clamped 1–10) | Repeat count per probe query in the skill-synthesis eval-gate — higher = steadier verdict, slower run. |
+| `ULTRA_MEMORY_PROBE_WORKERS` | `6` | Parallel workers the eval-gate uses to run its trigger-probe set. |
+
 ---
 
 ## Layer 3 — `<project>/.ultra-memory/config.toml`

@@ -6,21 +6,21 @@ That sounds alarming until you see how it's fenced. The whole loop is **safe by 
 
 It is **on by default** in v0.0.4. Nothing below requires you to turn anything *on*.
 
-## The four beats, and when each runs
+## The beats, and when each runs
 
 The loop advances automatically whenever you open Claude Code — an async session-start hook checks which steps are *due* and runs only those. Each step (a "beat") is throttled on its own clock, so opening ten sessions in a day doesn't re-run a weekly job. There's also a daily, AI-free cleanup that prunes old session events and refreshes your exports.
 
-The beats run in a fixed order — capture first (it's the input the others feed on), the heavier reasoning beats in the middle, the projection rebuild last:
+There are **four AI beats** — capture, consolidate, self-correct, synthesize — each throttled on its own clock and run in a fixed order: capture first (it's the input the others feed on), the heavier reasoning beats in the middle, the projection rebuild last. **Outcome attribution** is the one no-AI step woven through them — it isn't scheduled on its own clock; it credits recalled facts as part of the loop and is toggled with the same `_enable` switch as the rest:
 
-| Beat | What it does | Uses AI? | Default cadence |
+| Step | What it does | Uses AI? | Default cadence |
 |---|---|---|---|
 | **Session capture** | Mines each finished session's transcript into durable memory candidates. | yes (your login) | ~daily |
-| **Outcome attribution** | Credits which recalled facts actually helped, so good memories rise and dead ones fade. | no | with capture |
+| **Outcome attribution** | Credits which recalled facts actually helped, so good memories rise and dead ones fade. *(No-AI; runs as part of the loop, not on its own clock — toggled via `SP8_ATTRIBUTION_ENABLE`.)* | no | with the loop |
 | **Consolidate** | Promotes lessons that have proven their worth into the store / wiki; merges near-duplicates conservatively. | yes (your login) | ~weekly |
 | **Self-correct** | Sharpens, retires, or sets aside the loop's *own* earlier agent-authored notes — never yours. | yes (your login) | ~monthly |
 | **Synthesize** | Turns a cluster of repeated, positively-scored lessons into a new reusable skill. | yes (your login) | ~monthly |
 
-The cadences are defaults you can change (see [Configuration](06-configuration.md)). The two boldest beats — self-correct and synthesize — are deliberately the rarest.
+The cadences are defaults you can change (see [Configuration](06-configuration-reference.md)). The two boldest beats — self-correct and synthesize — are deliberately the rarest.
 
 If you run a headless or always-on box where sessions don't open often, `/ultra-memory:memory-setup` offers an OS-scheduler snippet you can install yourself for a deterministic cadence. It prints it; it never installs it for you.
 
@@ -54,7 +54,7 @@ There's also a machine-readable audit trail in JSON-Lines alongside the digests,
 The honest way to trust an autonomous system is to verify it's reversible, then watch it for a while. ultra-memory makes both easy:
 
 - **Verify reversibility once.** Pick a recent digest, find its checkpoint tag, and confirm `git revert <tag>` cleanly undoes the run. Now you know the floor.
-- **Watch the cadence.** The defaults are tight on purpose (a few edits, one new skill per run). Read a digest or two; if you're comfortable, you can loosen the caps in [Configuration](06-configuration.md) and watch the effect in the next summary.
+- **Watch the cadence.** The defaults are tight on purpose (a few edits, one new skill per run). Read a digest or two; if you're comfortable, you can loosen the caps in [Configuration](06-configuration-reference.md) and watch the effect in the next summary.
 
 Prefer to start narrow, or pause a step entirely? Every beat has an individual off switch in the `/plugin` config, no code required:
 
@@ -69,4 +69,4 @@ Setting a toggle to `off` disables exactly that beat and nothing else. There's n
 
 ---
 
-**Back to:** [Working with your memory](04-working-with-memory.md) · **Continue to:** [Configuration](06-configuration.md) for the cadences, caps, and per-beat toggles.
+**Back to:** [Working with your memory](04-working-with-memory.md) · **Continue to:** [Configuration](06-configuration-reference.md) for the cadences, caps, and per-beat toggles.
