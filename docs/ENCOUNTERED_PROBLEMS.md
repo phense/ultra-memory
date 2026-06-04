@@ -33,9 +33,9 @@ time** at the draft source-gate. Two sites, one category error.
 
 **The fix.** Decouple visibility from provenance by their semantic intent, not
 their convenient shared code. Cluster selection now filters by
-`node_type='learning'` (provenance-agnostic, `98f5c81`); the source-gate uses a
+`node_type='learning'` (provenance-agnostic); the source-gate uses a
 brand-new `assert_synthesis_source()` that reads from any source except pinned
-rows (`c97fe48`). Suddenly all 137 lessons were visible and synthesis worked.
+rows. Suddenly all 137 lessons were visible and synthesis worked.
 
 **Lesson learned.** *Reusing a write-gate predicate as a read-gate is a category
 error — and you will make it twice if you make it once. Decouple gates by what
@@ -172,8 +172,7 @@ actually wired into the Stage-2 beat?* It wasn't (M1 was unfinished). The tests
 were a veneer painted over broken wiring. All green, all hollow.
 
 **The fix.** Orchestrator **structural** verification plus an Opus review caught
-the unwired resolver before it could do more damage, then truly wired it
-(`4af5828`). The same discipline later caught a `create_page` contract creep
+the unwired resolver before it could do more damage, then truly wired it. The same discipline later caught a `create_page` contract creep
 before *it* shipped.
 
 **Lesson learned.** *Green tests without structural verification are a veneer.
@@ -271,10 +270,9 @@ skills. A safety gate that times itself to death is not, strictly, safe.
 *same* probe filename — a delightful race hazard quietly waiting for the day
 someone parallelized it.
 
-**The fix.** First, the panic button: `RUNS_PER_QUERY 5→2` to fit the budget
-(`a3a8125`). Then the real one (§1.4.7): a bounded `ThreadPoolExecutor`
+**The fix.** First, the panic button: `RUNS_PER_QUERY 5→2` to fit the budget. Then the real one (§1.4.7): a bounded `ThreadPoolExecutor`
 (`PROBE_MAX_WORKERS=6`), each probe with a **unique** per-probe temp file
-(`<slug>-probe-<nonce>.md`). ~50 min → ~12 min (`c87389b`), and we could afford
+(`<slug>-probe-<nonce>.md`). ~50 min → ~12 min, and we could afford
 `RUNS_PER_QUERY` back up to 3.
 
 **Lesson learned.** *Tight-deadline evaluation loops need parallelism, and every
@@ -357,7 +355,7 @@ silently halted.
 retry. Long bodies — exactly the valuable ones — were the most fragile.
 
 **The fix.** Wrap draft generation in a `retry_on_parse` loop — one parse failure
-triggers one retry, which handles occasional LLM fragility gracefully (`956bbce`).
+triggers one retry, which handles occasional LLM fragility gracefully.
 
 **Lesson learned.** *LLM-generated structured output is fragile by nature. Design
 for a single-pass retry on parse failure; one bad newline shouldn't sink the

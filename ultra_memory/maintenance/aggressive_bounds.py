@@ -25,8 +25,8 @@ precondition, and the kill switch. The LLM cannot talk its way past a bound.
   START (fail-soft skip). The result carries the exact one-command rollback.
 
 §4f — KILL SWITCH + DRY-RUN + FAIL-OPEN.
-  SP7_AGGRESSIVE_DISABLE (default PRESENT in the cron env until the operator opts
-  in) short-circuits the whole pass to a no-op. SP7_AGGRESSIVE_DRYRUN runs
+  SP7_AGGRESSIVE_DISABLE (absent by default → the beat runs; a consumer SETS it to
+  disable) short-circuits the whole pass to a no-op. SP7_AGGRESSIVE_DRYRUN runs
   reflection + eval + the full plan + the digest, but applies NOTHING. FAIL-OPEN:
   any error degrades to a SAFE no-op + one diagnostic line — never wedges the run,
   never proceeds unbounded.

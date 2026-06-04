@@ -4,8 +4,8 @@ ADDITIVE (spec §4f): this leaves the shipped SP-7 ``aggressive_bounds.run_gate`
 UNTOUCHED. It reuses the generic ``GateDecision`` dataclass but reads the SP10
 env-var triad, and adds the highest-blast-radius cap (1 generated skill / run).
 
-§4f kill switch (mirrors SP-7): SP10_SYNTHESIS_DISABLE (default PRESENT in the cron
-env → no-op) outranks SP10_SYNTHESIS_DRYRUN (plan + eval + digest, apply nothing).
+§4f kill switch (mirrors SP-7): SP10_SYNTHESIS_DISABLE (absent by default → the beat
+runs; a consumer SETS it to no-op the whole beat) outranks SP10_SYNTHESIS_DRYRUN (plan + eval + digest, apply nothing).
 §4c bounded blast radius: MAX_SKILLS_INDUCED_PER_RUN=1 (the tightest cap in the
 project — a generated skill shapes every future session's routing) + an optional
 per-period aggregate cap under its OWN meta namespace. HALT-ON-EXCEED. FAIL-OPEN,
