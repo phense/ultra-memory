@@ -52,8 +52,7 @@ anchors, or confidence labels subclasses it and overrides only the relevant hook
 materializer + audit infrastructure is inherited. The binding is a thin config seam:
 `wiki_gateway = "<module>:<Class>"` in `<project>/.ultra-memory/config.toml`. Unset → the
 built-in turnkey gateway. No consumer config at all → a pure-memory install with no wiki (all
-wiki beats are no-ops). This resolves BACKLOG §5.3.4 (the doc-discipline reminder for the
-gateway extensibility contract).
+wiki beats are no-ops).
 
 ## Session hooks (spec §9, §10) — the capture/replay edge
 

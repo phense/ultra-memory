@@ -11,3 +11,8 @@ __pycache__/
 # Internal audit artifacts — process notes that embed local /Users paths; never
 # part of the public release (removed from tracking 2026-06-03, BACKLOG §5.2.2).
 docs/audit/
+
+# The numbered engineering backlog is the maintainer's private working doc (internal
+# process notes + local paths); it stays on disk but out of the public repo. The
+# public-facing roadmap lives in the README "Status" section. (untracked 2026-06-04)
+/BACKLOG.md

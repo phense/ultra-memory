@@ -37,8 +37,7 @@ synthesis eval-gate). Full autonomy in *whether* it acts; conservative, reversib
 *how*. See [design-decisions.md](developer/design-decisions.md) §5–6 for the rationale.
 
 **Single-root today.** The engine is parameterized over a `(global, project)` root pair; the
-global cross-project root is designed and built, activation pending (tracked in
-[`../BACKLOG.md`](../BACKLOG.md) §2). Public-release polish is tracked in BACKLOG §5.2.
+global cross-project root is designed and built, activation pending.
 
 The repo is **content-free**: only code ships here; your `memory.db`, exports, and any secrets
 stay in your own project, injected via config. A `test_no_hardcoded_paths` guard enforces it.

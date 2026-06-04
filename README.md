@@ -200,8 +200,7 @@ accumulating, re-queryable base.)
 ² Runs automatically but conservatively: in code it can't touch facts you authored or pinned, can't delete
 (only archive), is capped per run, and checks a new skill won't collide before creating it — broader than
 the dedup-only tools.
-³ Native zero-config plugin, but <strong>not public yet</strong> (see <a href="BACKLOG.md">BACKLOG §5.2</a>).
-Marked ⚠️ until published.
+³ Native zero-config plugin, but <strong>not public yet</strong>. Marked ⚠️ until published.
 ⁴ Pre-public, zero stars — the field's clearest advantage over us today; claude-mem (~80k★) and mem0
 (~56k★, funded, hosted, millions of downloads) have distribution we have yet to earn.
 </sub>
@@ -246,7 +245,7 @@ docs match reality":
   kill switch, and a collision check before any new skill). The defaults are deliberately tight (a few
   edits / a few reversions / one new skill per run); you can loosen them and watch the effect in the next
   summary. Outcome-attribution and session-import ship turned off until you opt in.
-- ⬜ **Before a clean public release** (tracked in [`BACKLOG.md`](BACKLOG.md) §5.2): continuous-integration
+- ⬜ **Before a clean public release:** continuous-integration
   + contributor files (CONTRIBUTING / CHANGELOG) + a dependency license notice, plus a couple of small doc
   fixes. Today everything is per-machine; sharing one store across projects is designed but not yet on.
 
