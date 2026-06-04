@@ -30,6 +30,17 @@ def is_env_present(name: str, env=None) -> bool:
     return env.get(name) is not None
 
 
+_OPTOUT_VALUES = ("0", "false", "no", "off")
+
+
+def is_enabled_default_on(name, env=None) -> bool:
+    """Opt-OUT reader: a feature is ON unless its env var is an explicit disable
+    value ('0'/'false'/'no'/'off', case-insensitive). Unset ⇒ ON. The inverse of
+    `is_env_present` (which is the opt-IN / kill-switch reader)."""
+    src = env if env is not None else os.environ
+    return str(src.get(name, "")).strip().lower() not in _OPTOUT_VALUES
+
+
 def period_meta_key(prefix: str, period: str, cls: str) -> str:
     """The ``meta`` KV key for the (period, cls) per-period counter."""
     return f"{prefix}:{period}:{cls}"
