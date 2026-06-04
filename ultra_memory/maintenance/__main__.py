@@ -18,6 +18,7 @@ import os
 import sys
 
 from ultra_memory import memory_lib
+from ultra_memory._time import now_utc_zulu
 from ultra_memory.maintenance.config import load_config
 from ultra_memory.maintenance.run import run_pipeline
 
@@ -50,10 +51,15 @@ def main(argv=None) -> int:
     sys.stderr.write(
         f"[maintenance] ran={result.ran} skipped={result.skipped} "
         f"errors={list(result.errors)}\n")
-    # The beats are individually fail-open (they never raise — by the time we get
-    # here every due beat has run), so this exit code is a pure SIGNAL, not a wedge:
-    # non-zero iff a beat recorded a (caught) error, so a consumer cron wrapper can
-    # email on it (preserving the old consolidate_candidates.py exit-1-on-error).
+    # The beats are individually fail-open. On a recorded (caught) error, fire the
+    # consumer notifier (FAIL-OPEN — never wedges) AND return exit 1 as the signal a
+    # catastrophic-only consumer cron net still watches (timeout/SIGKILL the in-process
+    # notifier cannot cover).
+    if result.errors:
+        from ultra_memory.maintenance import notify
+        notify.notify_failure(
+            config, result=result, ts=now_utc_zulu(),
+            log=lambda msg: sys.stderr.write(f"[maintenance] {msg}\n"))
     return 1 if result.errors else 0
 
 
