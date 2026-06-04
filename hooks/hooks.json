@@ -19,6 +19,16 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/um-hook.cmd maintain"
           }
         ]
+      },
+      {
+        "matcher": "startup|resume|clear|compact",
+        "async": true,
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/um-hook.cmd beats"
+          }
+        ]
       }
     ],
     "Stop": [
