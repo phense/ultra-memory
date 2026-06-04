@@ -252,10 +252,10 @@ def db_path_from_env(env):
     is never opened), and (since 2026-06-01) NEVER a project-local path.
 
     Resolution order — the local-vs-project fallback was deliberately abandoned: the
-    knowledge fabric always lives at ONE fixed user-path (``~/.ultra-knowledge/``), the
+    knowledge fabric always lives at ONE fixed user-path (``~/.ultra-memory/``), the
     single global store shared by every project:
       1. ``ULTRA_MEMORY_DB`` (the explicit override), if set + non-blank.
-      2. else ``~/.ultra-knowledge/memory.db`` (the fixed global default).
+      2. else ``~/.ultra-memory/memory.db`` (the fixed global default).
 
     The path is only RESOLVED, never created here — ``open_memory_db`` downstream does
     the create+migrate, and an empty store recalls nothing gracefully. Blank values are
@@ -265,13 +265,13 @@ def db_path_from_env(env):
     raw = (env.get("ULTRA_MEMORY_DB") or "").strip()
     if raw:
         return Path(raw)
-    return Path.home() / ".ultra-knowledge" / "memory.db"
+    return Path.home() / ".ultra-memory" / "memory.db"
 
 
 def _open_db_for_mcp(db_path):
     """Open the memory.db for the stdio MCP, surviving a FRESH install.
 
-    On a clean machine ``~/.ultra-knowledge/`` does not exist yet, and the MCP starts
+    On a clean machine ``~/.ultra-memory/`` does not exist yet, and the MCP starts
     on the post-install restart BEFORE ``/memory-setup`` creates it — ``sqlite3.connect``
     then raises "unable to open database file" and the server silently never registers
     (the headline release blocker). Create the parent dir defensively (idempotent), then

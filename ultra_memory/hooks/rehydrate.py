@@ -212,7 +212,7 @@ def _budget_from_env():
 def main(stdin, stdout):
     payload = common.read_payload(stdin)
     # Zero-config-consistent with the knowledge MCP: explicit ULTRA_MEMORY_DB wins,
-    # else the fixed global ~/.ultra-knowledge/memory.db (never cwd, never project-local).
+    # else the fixed global ~/.ultra-memory/memory.db (never cwd, never project-local).
     db_path = common.resolve_db_path()
     shadow = os.environ.get("ULTRA_MEMORY_SHADOW", "1") == "1"
     shadow_out = os.environ.get("ULTRA_MEMORY_SHADOW_OUT") or None

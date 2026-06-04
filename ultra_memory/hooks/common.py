@@ -25,7 +25,7 @@ def agent_role_optout(payload=None):
 def resolve_db_path(env=None):
     """Resolve the memory.db path the SAME way the knowledge MCP does, so the whole
     plugin is zero-config-consistent: explicit ``ULTRA_MEMORY_DB`` wins, else the
-    fixed global ``~/.ultra-knowledge/memory.db`` — never cwd, never project-local.
+    fixed global ``~/.ultra-memory/memory.db`` — never cwd, never project-local.
     Delegates to the single engine resolver (``knowledge_mcp.db_path_from_env``).
     Returns a ``str`` (hooks feed it to ``db_ready`` / ``open_memory_db``)."""
     from ..knowledge_mcp import db_path_from_env

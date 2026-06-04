@@ -372,12 +372,12 @@ def test_fix3_recall_survives_audit_write_failure(tmp_path, monkeypatch):
 
 def test_db_path_from_env_derives_default(tmp_path):
     """Zero-config: the DB path DERIVES the FIXED global default instead of raising —
-    explicit override wins, else ~/.ultra-knowledge/memory.db. NEVER cwd, and (since
+    explicit override wins, else ~/.ultra-memory/memory.db. NEVER cwd, and (since
     2026-06-01) NEVER project-local: CLAUDE_PROJECT_DIR is no longer consulted; the
     fabric always lives at one fixed user-path."""
     from pathlib import Path
     p = tmp_path / "memory.db"
-    GLOBAL = Path.home() / ".ultra-knowledge" / "memory.db"
+    GLOBAL = Path.home() / ".ultra-memory" / "memory.db"
     # (i) explicit ULTRA_MEMORY_DB wins outright.
     assert knowledge_mcp.db_path_from_env({"ULTRA_MEMORY_DB": str(p)}) == p
     # (ii) unset → the fixed global user-path; CLAUDE_PROJECT_DIR is IGNORED now.
@@ -393,7 +393,7 @@ def test_db_path_from_env_derives_default(tmp_path):
 
 def test_open_db_for_mcp_creates_missing_parent_and_migrates(tmp_path):
     """Fresh-install release blocker (§5.2.1): the MCP starts on the post-install
-    restart BEFORE /memory-setup, so ~/.ultra-knowledge/ may not exist yet.
+    restart BEFORE /memory-setup, so ~/.ultra-memory/ may not exist yet.
     _open_db_for_mcp must mkdir the parent (so sqlite can open the file) AND migrate
     (the MCP writes access_log audit rows on recall), returning a usable empty store
     instead of crashing the server at startup so it silently never registers."""

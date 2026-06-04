@@ -138,7 +138,7 @@ def main(argv=None):
     rebuild = ("--rebuild" in args) or (
         os.environ.get("ULTRA_MEMORY_REBUILD_INDEX", "") == "1")
     # Zero-config-consistent with the knowledge MCP + session hooks: explicit
-    # ULTRA_MEMORY_DB wins, else the fixed global ~/.ultra-knowledge/memory.db
+    # ULTRA_MEMORY_DB wins, else the fixed global ~/.ultra-memory/memory.db
     # (never cwd, never project-local). A derived path that does not exist yet
     # → no-op (fail-open): maintain only runs over an existing, ready store.
     from ultra_memory.knowledge_mcp import db_path_from_env

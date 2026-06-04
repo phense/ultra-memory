@@ -51,7 +51,7 @@ def test_userconfig_fields_have_valid_type_and_description():
 
 def test_data_db_path_field_is_optional_zero_config():
     """Zero-config install (2026-06-01): data_db_path is now OPTIONAL — leaving it
-    empty auto-derives the fixed global ~/.ultra-knowledge/memory.db, so
+    empty auto-derives the fixed global ~/.ultra-memory/memory.db, so
     `/plugin install` prompts nothing required. The field stays a
     declared userConfig key (with title + description), just not `required: True`."""
     uc = _manifest()["userConfig"]

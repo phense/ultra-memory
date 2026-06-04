@@ -39,10 +39,10 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 
-# Default DB path lives in the global ultra-knowledge store.
+# Default DB path lives in the global ultra-memory store.
 # All public functions accept db_path= overrides; this default is only
 # used when no consumer passes an explicit path.
-DB_PATH = Path.home() / ".ultra-knowledge" / "wiki_embeds.db"
+DB_PATH = Path.home() / ".ultra-memory" / "wiki_embeds.db"
 
 EMBED_DIM = 384  # BAAI/bge-small-en-v1.5; must match scripts/youtube_to_wiki.py:EMBED_DIM
 

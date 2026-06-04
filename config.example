@@ -9,9 +9,9 @@
 # --- Storage (OPTIONAL override) ------------------------------------------------
 # Canonical SQLite memory DB. The knowledge MCP and the hooks read this; the engine
 # resolves it from config, NEVER from cwd (the MCP-launcher-ignores-cwd trap).
-# DEFAULT (unset): the fixed global user-path ~/.ultra-knowledge/memory.db — the single
+# DEFAULT (unset): the fixed global user-path ~/.ultra-memory/memory.db — the single
 # store shared by every project. Set this ONLY to override that fixed location.
-export ULTRA_MEMORY_DB="$HOME/.ultra-knowledge/memory.db"
+export ULTRA_MEMORY_DB="$HOME/.ultra-memory/memory.db"
 
 # Legacy harness memory dir the one-time bootstrap import reads (the *.md files +
 # MEMORY.md index). Used by memory_import; not needed once the DB is canonical.
@@ -23,7 +23,7 @@ export ULTRA_MEMORY_WIKI_DIR="/abs/path/to/consumer/wiki"
 # --- Tier-2 wiki-maintenance (the wiki_maintenance beat / wiki_curate CLI) -------
 # The active wiki root(s) maintenance curates (comma/pathsep-separated). Unset → the
 # wiki_maintenance beat is a no-op (a pure-memory install). config.wiki_roots reads this.
-# export ULTRA_MEMORY_WIKI_ROOTS="$HOME/.ultra-knowledge/wiki"
+# export ULTRA_MEMORY_WIKI_ROOTS="$HOME/.ultra-memory/wiki"
 #
 # The remaining wiki seams live in <project>/.ultra-memory/config.toml [maintenance]:
 #   wiki_gateway        = "scripts/wiki_lib.py"   # the audited write gateway (create-page/log/…)

@@ -23,7 +23,7 @@
       "title": "Canonical memory.db path",
       "required": false,
       "default": "",
-      "description": "Optional override. Leave empty to auto-derive the fixed global ~/.ultra-knowledge/memory.db (the single store shared by every project). Set an absolute path only to override that fixed location."
+      "description": "Optional override. Leave empty to auto-derive the fixed global ~/.ultra-memory/memory.db (the single store shared by every project). Set an absolute path only to override that fixed location."
     },
     "caller_class": {
       "type": "string",

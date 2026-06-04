@@ -7,7 +7,7 @@ from ultra_memory.maintenance.config import MaintenanceConfig, load_config
 def test_defaults_no_file_no_env(tmp_path):
     cfg = load_config(project_dir=tmp_path, env={})
     assert isinstance(cfg, MaintenanceConfig)
-    assert cfg.db_path == Path.home() / ".ultra-knowledge" / "memory.db"
+    assert cfg.db_path == Path.home() / ".ultra-memory" / "memory.db"
     assert cfg.wiki_roots == [] and cfg.briefings_dir is None and cfg.probe_corpus is None
     assert cfg.wiki_gateway is None            # no wiki by default → wiki-write beats degrade
     assert cfg.topics == [] and cfg.model == "claude-sonnet-4-6"
