@@ -45,7 +45,8 @@ Engine env seams the wrapper / consumer can also set (SP-3):
 | `ULTRA_MEMORY_BACKFILL_CMD` | A consumer's **cold-start session-cache backfill** runner (e.g. `./scripts/run_backfill.sh`). Set ⇒ `/ultra-memory:memory-setup` prints a one-time *hint* to run it (never auto-runs). Unset ⇒ never offered (greenfield-safe). Independent of the `import_complete` gate — see [`backfill_complete`](#the-import_complete-gate). Backfilled rows are `created_by='backfill_import'`. |
 | `ULTRA_MEMORY_PROBE_WORKERS` | Bounded thread-pool size for the SP-10 eval-gate's hijack-direction probes (default `6`). Caps concurrent `claude -p` probe subprocesses so a full eval pass fits the maintenance window (~50 min serial → ~12 min parallel) without swamping the OAuth CLI. |
 | `SP7_AGGRESSIVE_DISABLE` / `SP10_SYNTHESIS_DISABLE` | Kill switches for the autonomous self-correct / synthesize beats — any value makes the whole beat a no-op + one log line. **Present-by-default in cron** until a consumer arms the beat; remove the var to run live. `SP7_AGGRESSIVE_DRYRUN` / `SP10_SYNTHESIS_DRYRUN` plan+eval+digest but apply nothing. |
-| `SESSION_INGEST_ENABLE` | Additional gate for the `session_ingest` beat (capture + SP-8 attribution); default OFF — the enqueue/fold is a no-op until set. |
+| `SESSION_INGEST_ENABLE` | Gate for the `session_ingest` beat's capture (mining a finished session into durable memory). Default **ON** (opt-out, since 0.0.4) — the enqueue/fold runs unless explicitly disabled; opt-out with `=0` (also `false`/`no`/`off`, case-insensitive). Reads only the local session transcript. |
+| `SP8_ATTRIBUTION_ENABLE` | Gate for the SP-8 outcome-attribution fold (crediting which recalled facts helped; writes `informed_by` edges). Default **ON** (opt-out, since 0.0.4); opt-out with `=0` (also `false`/`no`/`off`). `SP8_ATTRIBUTION_POLICY` (default `top_k`) + `SP8_ATTRIBUTION_K` (default `1`) tune it. |
 
 `/ultra-memory:memory-setup` builds the runtime venv under `${CLAUDE_PLUGIN_DATA}/venv`,
 optionally imports a legacy memory dir **once**, stamps the DB ready (the
@@ -177,6 +178,31 @@ the four-beat self-learning loop. The heavy beats make ONE OAuth call each (via
 governed by the code safety wall rather than a human approval step. The earlier
 "ships-disabled / dry-run-first" posture is **superseded** (2026-06-03).
 
+### The session-lifecycle driver (no user cron needed)
+
+The heavy beats run from a **third async SessionStart hook** —
+`hooks/um-hook.cmd beats`, wired in `hooks/hooks.json` alongside the `rehydrate`
+(sync) and `maintain` (async) entries. It invokes the heavy-beat dispatcher
+`python -m ultra_memory.maintenance` on the plugin venv. So the loop **advances
+automatically as you open Claude Code** — no operator-installed cron is required for
+the default install.
+
+- **Async + fail-open.** The arm is `async: true` in `hooks/hooks.json` and the
+  wrapper exits 0 on any error (`… 2>/dev/null || exit 0`), so it never blocks or
+  wedges a session.
+- **Per-beat throttle does the rest.** The dispatcher runs every session start, but
+  each beat self-skips until its `[maintenance.cadence_hours]` window has elapsed
+  (daily `session_ingest`, weekly `consolidate`/`learnings`, monthly
+  `aggressive`/`synthesize`), so opening Claude five times in an hour does not run a
+  beat five times.
+- **Optional OS scheduler (offered, never auto-installed).** For a headless box that
+  rarely opens an interactive Claude session, `/ultra-memory:memory-setup` prints a
+  copy-paste OS-scheduler snippet (`launchd` on macOS, a `systemd --user` timer on
+  Linux — `setup.detect_scheduler_platform` / `setup.scheduler_offer_text`) that runs
+  the same `python -m ultra_memory.maintenance` on a daily cadence. The command only
+  **prints** it; the user installs it themselves if they want a deterministic clock
+  independent of session starts.
+
 Each beat is enabled in `config.toml [maintenance.beats]` (every beat defaults
 **ON**) and throttled by `[maintenance.cadence_hours]`. The two aggressive beats
 carry an additional **present-by-default kill switch** — remove the env var (the
@@ -187,7 +213,7 @@ plans+evals+digests but applies nothing.
 |---|---|---|---|---|
 | consolidate | 168h (weekly) | one batched call | graduate / merge / skip un-resolved `skill_learning_candidate` rows; writes `validated_as` edges; ADD-only (never rewrites) | — |
 | learnings | 168h (weekly) | none (Tier-1) | regenerate each `Learnings.md` projection from `memories` rows | — |
-| session_ingest | 24h (daily) | one call | capture + SP-8 attribution fold; writes `informed_by` edges | `SESSION_INGEST_ENABLE` env |
+| session_ingest | 24h (daily) | one call | capture + SP-8 attribution fold; writes `informed_by` edges | `SESSION_INGEST_ENABLE` / `SP8_ATTRIBUTION_ENABLE` (both default **ON**; opt-out with `=0`) |
 | aggressive (self-correct) | 720h (monthly) | one call | auto-edit / propose-revert / quarantine net-negative agent lessons | `SP7_AGGRESSIVE_DISABLE` kill switch (present by default) |
 | synthesize | 720h (monthly) | one call | induce a `gen-<slug>` skill from a matured lesson cluster | `SP10_SYNTHESIS_DISABLE` kill switch (present by default) |
 
