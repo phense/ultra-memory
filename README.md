@@ -179,7 +179,7 @@ the field's real edge over us is **adoption** — we're not public yet.
 
 Legend: ✅ shipped & live · ⚠️ partial / opt-in / caveated (see notes) · ❌ absent
 
-| Capability | **ultra-memory** | [claude-mem](https://github.com/thedotmack/claude-mem) (~80k★) | [mem0](https://github.com/mem0ai/mem0) (~56k★) | [Basic Memory](https://github.com/basicmachines-co/basic-memory) (~2.8k★) | [STORM](https://github.com/stanford-oval/storm) (~28k★) |
+| Capability | **ultra-memory** | [claude-mem](https://github.com/thedotmack/claude-mem) (~80k★) | [mem0](https://github.com/mem0ai/mem0) (~58k★) | [Basic Memory](https://github.com/basicmachines-co/basic-memory) (~3.1k★) | [STORM](https://github.com/stanford-oval/storm) (~28k★) |
 |---|:--:|:--:|:--:|:--:|:--:|
 | **Durable knowledge wiki** ¹ (separate from session memory) | ✅ | ❌ | ❌ | ⚠️ | ⚠️ |
 | **One ranked search across memory + wiki** | ✅ | ❌ | ⚠️ | ⚠️ | ❌ |
@@ -187,10 +187,10 @@ Legend: ✅ shipped & live · ⚠️ partial / opt-in / caveated (see notes) · 
 | **Self-learning** ² (dedup · consolidate · self-correct · synthesize) | ✅ | ⚠️ | ⚠️ | ⚠️ | ❌ |
 | **Audited writes + secret stripping** (one gateway) | ✅ | ⚠️ | ❌ | ⚠️ | ❌ |
 | **Privilege boundary on recall** | ✅ | ❌ | ⚠️ | ❌ | ❌ |
-| **Local-first, no paid API key** | ✅ | ✅ | ❌ | ✅ | ❌ |
+| **Local-first, no paid API key** ⁵ | ✅ | ✅ | ⚠️ | ✅ | ⚠️ |
 | **Plain-text, git-trackable storage** | ✅ | ⚠️ | ❌ | ✅ | ⚠️ |
-| **Claude-Code-native, one-command install** ³ | ⚠️ | ✅ | ❌ | ✅ | ❌ |
-| **Adoption / community** ⁴ | ❌ | ✅ | ✅ | ⚠️ | ✅ |
+| **Claude-Code-native, one-command install** ³ | ⚠️ | ✅ | ⚠️ | ✅ | ❌ |
+| **Adoption / community** ⁴ | ❌ | ✅ | ✅ | ✅ | ✅ |
 
 <sub>
 ¹ ultra-memory ships the wiki as an <em>engine</em> (sync, the cross-store search, the full curation
@@ -202,7 +202,10 @@ accumulating, re-queryable base.)
 the dedup-only tools.
 ³ Native zero-config plugin, but <strong>not public yet</strong>. Marked ⚠️ until published.
 ⁴ Pre-public, zero stars — the field's clearest advantage over us today; claude-mem (~80k★) and mem0
-(~56k★, funded, hosted, millions of downloads) have distribution we have yet to earn.
+(~58k★, funded, hosted, millions of downloads) have distribution we have yet to earn.
+⁵ mem0 and STORM can run fully local with no paid key (mem0 self-hosted with an Ollama LLM; STORM with
+Ollama + a keyless search backend such as SearXNG / DuckDuckGo) — but their <em>default, documented</em>
+path uses a paid LLM and/or search API, so ⚠️ not ✅. ultra-memory has no metered path at all.
 </sub>
 
 **Bottom line:** ultra-memory is the only Claude-memory layer that ships the *whole thing in one box* —
