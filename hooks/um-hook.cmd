@@ -35,11 +35,17 @@ case "$HOOK" in
   rehydrate)  MOD="ultra_memory.hooks.rehydrate" ;;
   checkpoint) MOD="ultra_memory.hooks.checkpoint" ;;
   maintain)   MOD="ultra_memory.maintain" ;;
+  beats)      MOD="ultra_memory.maintenance" ;;
   *) exit 0 ;;
 esac
 
 if [ "$HOOK" = "maintain" ]; then
   "$PY" -c "import sys; from ultra_memory.maintain import main; sys.exit(main())" 2>/dev/null || exit 0
+elif [ "$HOOK" = "beats" ]; then
+  # The throttled heavy-beat dispatcher (consolidate / session_ingest / learnings /
+  # aggressive / synthesize). Each beat is per-cadence throttled + fail-open; this
+  # whole arm is async in hooks.json and never blocks a session.
+  "$PY" -m ultra_memory.maintenance 2>/dev/null || exit 0
 else
   "$PY" -c "
 import sys
