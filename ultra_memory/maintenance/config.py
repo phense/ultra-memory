@@ -86,6 +86,10 @@ class MaintenanceConfig:
     # dedup pair MERGES. Empty → the engine default (auto-merge only at dedup_upper).
     # A consumer wires its calibrated judge here to restore grey-band merges.
     wiki_merge_decider: str = ""
+    # An optional consumer notifier hook ("module:function", same resolution as
+    # wiki_linter) called FAIL-OPEN with a NotifyEvent when a maintenance run records
+    # beat errors. Empty -> no-op (the plugin sends nothing). ULTRA_MEMORY_NOTIFIER overrides.
+    notifier: str = ""
 
     def beat_enabled(self, name: str) -> bool:
         return bool(self.beats.get(name, _DEFAULT_BEATS.get(name, False)))
@@ -186,6 +190,7 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
     wiki_linter = env.get("ULTRA_MEMORY_WIKI_LINTER") or raw.get("wiki_linter") or ""
     wiki_merge_decider = (env.get("ULTRA_MEMORY_WIKI_MERGE_DECIDER")
                           or raw.get("wiki_merge_decider") or "")
+    notifier = env.get("ULTRA_MEMORY_NOTIFIER") or raw.get("notifier") or ""
 
     beats = dict(_DEFAULT_BEATS)
     if isinstance(raw.get("beats"), dict):
@@ -215,4 +220,5 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
         wiki_graph_extractor=graph_extractor,
         wiki_linter=str(wiki_linter),
         wiki_merge_decider=str(wiki_merge_decider),
+        notifier=str(notifier),
     )
