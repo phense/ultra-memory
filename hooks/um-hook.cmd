@@ -10,8 +10,8 @@ HOOK="${1:-}"
 # DB path (zero-config): prefer the userConfig-injected option, then an already-set
 # env. We do NOT hard-code a default here — when both are empty we leave ULTRA_MEMORY_DB
 # unset so the engine resolver (knowledge_mcp.db_path_from_env, via hooks/common.resolve_db_path)
-# DERIVES the same default the MCP uses: <CLAUDE_PROJECT_DIR>/data/memory.db, else
-# ~/.claude/memory.db (never cwd). The whole plugin stays zero-config-consistent.
+# DERIVES the fixed global ~/.ultra-memory/memory.db (the old project-local / ~/.claude
+# fallback was retired 2026-06-01). Never cwd. The whole plugin stays zero-config-consistent.
 export ULTRA_MEMORY_DB="${CLAUDE_PLUGIN_OPTION_DATA_DB_PATH:-${ULTRA_MEMORY_DB:-}}"
 
 # Caller privilege class (fail-closed at the engine; default subagent here).
