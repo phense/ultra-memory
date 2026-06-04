@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ultra_memory.maintenance._hooks import resolve_hook as _resolve_hook
 from ultra_memory.wiki_maintenance import adjudicate as adj
 from ultra_memory.wiki_maintenance import run_stage1 as rs
 from ultra_memory.wiki_maintenance.schema_config import WikiSchemaConfig, load_wiki_schema
@@ -68,31 +69,6 @@ def _make_vec_loader(conn, schema: WikiSchemaConfig):
             return {}
         return {tid: (None, vec) for tid, vec in vecs.items()}
     return load_vecs
-
-
-def _resolve_hook(config, spec: str, what: str):
-    """Resolve a consumer hook ("module:function") to a callable, with the project dir
-    + its scripts/ on sys.path so an in-tree module is importable. Empty / unresolvable
-    → None. Fail-open: a bad hook logs one line and degrades to the engine default,
-    never wedges maintenance."""
-    import importlib
-    import sys
-
-    spec = (spec or "").strip()
-    if not spec or ":" not in spec:
-        return None
-    mod_name, _, fn_name = spec.partition(":")
-    if not mod_name or not fn_name:
-        return None
-    for p in (str(config.project_dir / "scripts"), str(config.project_dir)):
-        if p not in sys.path:
-            sys.path.insert(0, p)
-    try:
-        return getattr(importlib.import_module(mod_name), fn_name)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[wiki_curate] could not resolve {what} {spec!r}: {exc!r} — "
-              f"using the engine default", file=sys.stderr)
-        return None
 
 
 def _resolve_gateway(spec, config) -> list[str]:
