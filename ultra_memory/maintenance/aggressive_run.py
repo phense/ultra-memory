@@ -66,6 +66,7 @@ from ultra_memory.maintenance import aggressive_edit as aedit  # noqa: E402
 from ultra_memory.maintenance import aggressive_revert as arev  # noqa: E402
 from ultra_memory.maintenance import aggressive_quarantine as aq  # noqa: E402
 from ultra_memory.maintenance.aggressive_wall import ForbiddenTargetError  # noqa: E402
+from ultra_memory.maintenance.gate_commons import is_enabled_default_on  # noqa: E402
 
 # The engine — generic, project-agnostic primitives (wiki_lib.py:24 precedent).
 from ultra_memory import memory_lib  # noqa: E402
@@ -277,13 +278,14 @@ def _env_truthy(name: str) -> bool:
 def _attribution_policy_in_force() -> tuple[str, int, bool]:
     """The SP-8 attribution policy currently in force, read from the env (the single
     runtime source of truth, mirrored in config.py): (policy, k, enabled). Defaults
-    'top_k' / 1 / OFF; a bad SP8_ATTRIBUTION_K ⇒ 1."""
+    'top_k' / 1 / ON; a bad SP8_ATTRIBUTION_K ⇒ 1."""
     policy = (os.environ.get("SP8_ATTRIBUTION_POLICY") or "top_k").strip() or "top_k"
     try:
         k = int(os.environ.get("SP8_ATTRIBUTION_K") or "1")
     except Exception:
         k = 1
-    return policy, k, _env_truthy("SP8_ATTRIBUTION_ENABLE")
+    # Opt-OUT: attribution is ON by default; disable with SP8_ATTRIBUTION_ENABLE=0.
+    return policy, k, is_enabled_default_on("SP8_ATTRIBUTION_ENABLE")
 
 
 def render_digest(rr: RunResult) -> str:

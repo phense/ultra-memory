@@ -730,11 +730,22 @@ def test_coverage_dict_counts_informed_by_usage(tmp_path):
     assert cov["usage_at_or_above_floor"] == 1      # only the >=MIN_EVIDENCE one
 
 
+def test_attribution_enabled_by_default(monkeypatch):
+    monkeypatch.delenv("SP8_ATTRIBUTION_ENABLE", raising=False)
+    _policy, _k, enabled = ar._attribution_policy_in_force()
+    assert enabled is True                              # was False (opt-in)
+
+
+def test_attribution_explicit_optout(monkeypatch):
+    monkeypatch.setenv("SP8_ATTRIBUTION_ENABLE", "0")
+    assert ar._attribution_policy_in_force()[2] is False
+
+
 def test_render_digest_usage_attribution_lines_and_policy_gate_off(monkeypatch):
     """The rendered digest surfaces the usage-attribution lines + the policy-in-force
-    line. With SP8_ATTRIBUTION_ENABLE unset (OFF, ships-disabled default) and no
-    usage outcomes, the digest says attribution is disabled by design."""
-    monkeypatch.delenv("SP8_ATTRIBUTION_ENABLE", raising=False)
+    line. With SP8_ATTRIBUTION_ENABLE explicitly opted out (=0) and no usage outcomes,
+    the digest says attribution is disabled by design."""
+    monkeypatch.setenv("SP8_ATTRIBUTION_ENABLE", "0")
     monkeypatch.delenv("SP8_ATTRIBUTION_POLICY", raising=False)
     monkeypatch.delenv("SP8_ATTRIBUTION_K", raising=False)
     rr = ar.RunResult(
