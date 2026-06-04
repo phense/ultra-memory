@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![version](https://img.shields.io/badge/version-0.0.3-informational.svg)](.claude-plugin/plugin.json)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-1175%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-1176%20passing-brightgreen.svg)](tests/)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-8A63D2.svg)](https://docs.claude.com/en/docs/claude-code)
 
 Most "memory for Claude" tools give you one bucket: they save a session, compress it, and replay it
@@ -241,16 +241,18 @@ docs match reality":
 - ✅ **Live today:** the two-store memory, one ranked search across both, the graph of links, the single
   audited write path with secret stripping, the "your-login-only" rule, the session-start/-end hooks, the
   read-only recall tool with its privilege boundary, the wiki-curation pipeline, zero-config install,
-  **1175 passing tests**, and a content-free repository.
+  **1176 passing tests**, and a content-free repository.
 - ✅ **Self-learning loop — automatic and conservative:** all four steps (consolidate, attribute,
   self-correct, and create-new-skill) run on a weekly schedule behind the in-code safety rules
   (can't touch your facts, archive-not-delete, capped per run, git checkpoint, a written summary, a
   kill switch, and a collision check before any new skill). The defaults are deliberately tight (a few
   edits / a few reversions / one new skill per run); you can loosen them and watch the effect in the next
   summary. Outcome-attribution and session-import ship turned off until you opt in.
-- ⬜ **Before a clean public release:** continuous-integration
-  + contributor files (CONTRIBUTING / CHANGELOG) + a dependency license notice, plus a couple of small doc
-  fixes. Today everything is per-machine; sharing one store across projects is designed but not yet on.
+- ✅ **Release hygiene — shipped:** continuous integration, contributor files (CONTRIBUTING / CHANGELOG),
+  a third-party-license notice, and a content-free / path-free guard over the whole markdown publish surface.
+- ⬜ **At publish time:** a one-time git-history scrub (the working tree is clean, but older commits still
+  carry internal notes). Today everything is per-machine; sharing one store across projects is designed but
+  not yet on.
 
 ---
 
