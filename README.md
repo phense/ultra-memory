@@ -272,3 +272,5 @@ suite with `uv run pytest`. See [`docs/developer/contributing.md`](docs/develope
 ## License
 
 [MIT](LICENSE). Code-only and content-free — your data and config stay private in your own project.
+Third-party dependency licenses (all permissive — MIT / Apache-2.0) are listed in
+[`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md).

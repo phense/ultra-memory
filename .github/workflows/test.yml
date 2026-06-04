@@ -1,0 +1,22 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      # Install the optional extras so every import resolves, but skip the `slow`
+      # marker (model-loading / stdio-smoke tests) to keep CI network-free and fast.
+      - name: Run tests
+        run: uv run --extra retrieval --extra mcp --extra maintenance pytest -q -m "not slow"
