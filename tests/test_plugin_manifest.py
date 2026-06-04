@@ -71,6 +71,14 @@ def test_no_userconfig_field_is_required_zero_config():
         )
 
 
+def test_userconfig_exposes_loop_optouts():
+    uc = json.loads(_PLUGIN_JSON.read_text())["userConfig"]
+    for key in ("session_ingest_enable", "attribution_enable",
+                "aggressive_enable", "synthesize_enable"):
+        assert key in uc, f"missing userConfig opt-out: {key}"
+        assert uc[key].get("default") in ("on", "1", True), f"{key} must default ON"
+
+
 def test_marketplace_json_is_valid_and_points_at_this_plugin():
     mk = json.loads(_MARKETPLACE_JSON.read_text(encoding="utf-8"))
     assert mk.get("name") == "ultra-memory"

@@ -46,6 +46,30 @@
       "sensitive": true,
       "required": false,
       "description": "OAuth token, NEVER an ANTHROPIC_API_KEY. Only needed if a consumer runs LLM maintenance; the memory maintenance slice (prune+export) does not use it."
+    },
+    "session_ingest_enable": {
+      "type": "string",
+      "title": "Session capture (self-learning input)",
+      "default": "on",
+      "description": "On by default. Mines each finished session into durable memory on YOUR Claude login (no API key). Set to 'off' to disable. Reads your local session transcript only."
+    },
+    "attribution_enable": {
+      "type": "string",
+      "title": "Outcome attribution",
+      "default": "on",
+      "description": "On by default. Credits which recalled facts helped. 'off' to disable."
+    },
+    "aggressive_enable": {
+      "type": "string",
+      "title": "Self-correction (rewrite/revert/quarantine)",
+      "default": "on",
+      "description": "On by default, behind the safety wall; acts only where a git checkpoint exists, else self-skips. 'off' to disable."
+    },
+    "synthesize_enable": {
+      "type": "string",
+      "title": "Skill synthesis",
+      "default": "on",
+      "description": "On by default, behind the safety wall + eval-gate; acts only where a git checkpoint exists. 'off' to disable."
     }
   }
 }
