@@ -137,3 +137,40 @@ def backfill_hint(backfill_cmd):
         f"then stamp meta.backfill_complete via setup.mark_backfill_complete(db) "
         f"so this hint stops."
     )
+
+
+# --- optional OS scheduler offer (§4 — deterministic cadence) -------------
+# The self-learning loop advances whenever Claude Code opens (the async
+# SessionStart `beats` hook). For a headless box that rarely opens Claude, a
+# user MAY install an OS scheduler for deterministic cadence. /memory-setup
+# only OFFERS it (prints the snippet); these helpers are pure — the caller
+# prints, never installs.
+
+def detect_scheduler_platform(platform: str) -> str | None:
+    """Map sys.platform → the OS scheduler kind, or None if unsupported (→ no offer)."""
+    if platform == "darwin":
+        return "launchd"
+    if platform.startswith("linux"):
+        return "systemd"
+    return None
+
+
+def scheduler_offer_text(platform_kind: str | None, *, py: str) -> str:
+    """A copy-paste OPTIONAL scheduler snippet running the heavy-beat dispatcher daily.
+    Empty string for an unsupported platform. Never installs anything — the user pastes
+    it if they want deterministic cadence (e.g. a headless box that rarely opens Claude)."""
+    cmd = f"{py} -m ultra_memory.maintenance"
+    if platform_kind == "launchd":
+        return ("OPTIONAL — deterministic cadence via launchd (else the loop advances "
+                "whenever you open Claude Code). Save as "
+                "~/Library/LaunchAgents/ng.ultra-memory.maintenance.plist with a "
+                f"daily StartCalendarInterval running:\n    {cmd}\n"
+                "then: launchctl load ~/Library/LaunchAgents/ng.ultra-memory.maintenance.plist")
+    if platform_kind == "systemd":
+        return ("OPTIONAL — deterministic cadence via a systemd --user timer (else the "
+                "loop advances when you open Claude Code). Create "
+                "~/.config/systemd/user/ultra-memory.service running:\n"
+                f"    ExecStart={cmd}\n"
+                "and a matching .timer (OnCalendar=daily), then: "
+                "systemctl --user enable --now ultra-memory.timer")
+    return ""
