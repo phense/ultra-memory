@@ -24,6 +24,16 @@ export ULTRA_MEMORY_REHYDRATE_BUDGET="${CLAUDE_PLUGIN_OPTION_REHYDRATE_BUDGET:-$
 # a plugin consumer wants the gist actually injected.
 export ULTRA_MEMORY_SHADOW="${ULTRA_MEMORY_SHADOW:-0}"
 
+# Self-learning opt-OUT toggles (userConfig → engine env). The two enable-flags pass
+# through (default unset ⇒ engine default-on). The aggressive pair INVERTS: a UI value
+# of 'off'/'0' must SET the kill switch (present ⇒ disabled); anything else leaves it unset.
+export SESSION_INGEST_ENABLE="${CLAUDE_PLUGIN_OPTION_SESSION_INGEST_ENABLE:-${SESSION_INGEST_ENABLE:-}}"
+export SP8_ATTRIBUTION_ENABLE="${CLAUDE_PLUGIN_OPTION_ATTRIBUTION_ENABLE:-${SP8_ATTRIBUTION_ENABLE:-}}"
+_agg="${CLAUDE_PLUGIN_OPTION_AGGRESSIVE_ENABLE:-on}"
+case "$_agg" in off|0|false|no) export SP7_AGGRESSIVE_DISABLE=1 ;; esac
+_syn="${CLAUDE_PLUGIN_OPTION_SYNTHESIZE_ENABLE:-on}"
+case "$_syn" in off|0|false|no) export SP10_SYNTHESIS_DISABLE=1 ;; esac
+
 # Interpreter: the venv /memory-setup builds under CLAUDE_PLUGIN_DATA (survives updates).
 PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
 if [ ! -x "$PY" ]; then
