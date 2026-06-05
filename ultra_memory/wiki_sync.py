@@ -29,9 +29,30 @@ Returns a small summary {upserted, skipped, pruned, embedded, errors} so
 `maintain.run` can surface the reconciliation count (Risk §14.4).
 """
 import json
+import re
 
 from ultra_memory import retrieval_core
 from ultra_memory.redact_secrets import strip_secrets
+
+# Recall-Reflex: the optional `## Signal` H2 section — the observable condition
+# under which a page should be recalled. Indexed as a DISTINCT embedding channel
+# (target_kind='knowledge_signal') so a future error/market text matches the
+# recorded observable even when the page's Mechanism prose differs. The section
+# body runs from the header to the next `## ` heading, a `---` line, or EOF.
+_SIGNAL_RE = re.compile(
+    r"^##[ \t]+Signal[ \t]*$\n(.+?)(?=\n##[ \t]|\n---|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def extract_signal_text(body):
+    """Body of the optional `## Signal` H2 section, or None if absent/empty.
+    `body` is the post-frontmatter markdown."""
+    m = _SIGNAL_RE.search(body or "")
+    if not m:
+        return None
+    t = m.group(1).strip()
+    return t or None
 
 
 def _split_frontmatter(text):
@@ -132,13 +153,16 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts):
     from pathlib import Path
 
     roots = [Path(r) for r in wiki_roots]
-    summary = {"upserted": 0, "skipped": 0, "pruned": 0, "embedded": 0, "errors": 0}
+    summary = {"upserted": 0, "skipped": 0, "pruned": 0, "embedded": 0,
+               "embedded_signal": 0, "errors": 0}
 
     # Slugs seen in THIS call's roots — the reconciliation prune is scoped to them
     # (a row from a root not in this call must survive). We track the (slug -> path)
     # so we can also detect within-root orphans precisely.
     seen_slugs = set()
     embed_targets = []  # (slug, title+snippet) for pages that changed / are new
+    signal_targets = []  # (slug, ## Signal text) for changed/new pages that carry one
+    signal_removed = []  # changed/new slugs that NO LONGER carry a ## Signal (drop stale vec)
 
     for root in roots:
         for path, topic, slug in _iter_pages(root):
@@ -154,6 +178,7 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts):
                 title = fm.get("title") or _first_heading(body) or slug
                 snippet = _snippet(body)
                 bm25_text = _bm25_text(body)
+                signal_text = extract_signal_text(body)  # Recall-Reflex channel
                 frontmatter_json = json.dumps(fm, ensure_ascii=False, sort_keys=True)
                 sha = retrieval_core.content_sha256(text)
                 # wiki_sync is a REDACTION CHOKEPOINT, equivalent to the memory
@@ -166,6 +191,8 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts):
                 title = strip_secrets(title)
                 snippet = strip_secrets(snippet)
                 bm25_text = strip_secrets(bm25_text)
+                if signal_text:
+                    signal_text = strip_secrets(signal_text)
                 frontmatter_json = strip_secrets(frontmatter_json)
             except Exception:
                 summary["errors"] += 1
@@ -208,6 +235,12 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts):
             # Only (re-)embed pages that changed/are new; the embeddings cache's own
             # sha invalidation is a second guard, but we avoid even feeding skips.
             embed_targets.append((slug, f"{title}\n{snippet}"))
+            # Recall-Reflex: the ## Signal section is a DISTINCT embed channel. A
+            # changed page that dropped its signal must lose its stale signal vector.
+            if signal_text:
+                signal_targets.append((slug, signal_text))
+            else:
+                signal_removed.append(slug)
 
     # Reconciliation: prune unified_index rows whose slug is no longer a file
     # WITHIN the synced roots. Scope by the PATH-PREFIX of this call's roots — a row
@@ -249,6 +282,11 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts):
                     "DELETE FROM embeddings WHERE target_kind='knowledge' "
                     "AND target_id=?",
                     [(s,) for s in orphans])
+                # Recall-Reflex: prune the orphaned ## Signal vector too.
+                conn.executemany(
+                    "DELETE FROM embeddings WHERE target_kind='knowledge_signal' "
+                    "AND target_id=?",
+                    [(s,) for s in orphans])
                 conn.execute("COMMIT")
             except Exception:
                 try:
@@ -269,6 +307,34 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts):
                 conn, items, embedder=embedder)
             summary["embedded"] = len(result)
         except Exception:
+            summary["errors"] += 1
+
+    # Recall-Reflex: embed the ## Signal channel as 'knowledge_signal' — a distinct
+    # cache row per signal-keyed page (get_or_embed_batch's content_sha256 means a
+    # signal edit re-embeds). The BOOST is a separate RRF backend in unified_recall.
+    if embedder is not None and signal_targets:
+        sitems = [("knowledge_signal", slug, text) for slug, text in signal_targets]
+        try:
+            sresult = retrieval_core.get_or_embed_batch(
+                conn, sitems, embedder=embedder)
+            summary["embedded_signal"] = len(sresult)
+        except Exception:
+            summary["errors"] += 1
+
+    # Drop stale signal vectors for changed pages that no longer carry a ## Signal.
+    if signal_removed:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany(
+                "DELETE FROM embeddings WHERE target_kind='knowledge_signal' "
+                "AND target_id=?",
+                [(s,) for s in signal_removed])
+            conn.execute("COMMIT")
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
             summary["errors"] += 1
 
     return summary

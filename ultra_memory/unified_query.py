@@ -378,6 +378,42 @@ def _knowledge_candidates(conn, query, *, agent_topics, embedder, dim):
     return bm25_ranked, embed_ranked, by_slug
 
 
+def _signal_candidates(conn, query, *, by_slug, embedder, dim):
+    """Recall-Reflex BOOST backend: rank the optional `## Signal` embedding channel
+    (`target_kind='knowledge_signal'`) for the in-scope slugs. Returns [slug, …]
+    best-first; EMPTY when there is no embedder or no slug carries a signal vector.
+
+    Scope-consistent + efficient: it considers ONLY the slugs already in `by_slug`
+    (the topic/type-scoped knowledge candidates), so it inherits the privilege wall
+    and never widens scope. Fused as a SEPARATE RRF backend in `unified_recall`, so
+    a page whose recorded observable matches the query earns extra rank credit —
+    reusing the scale-invariant RRF with no new scoring math. Fail-open: a slug with
+    no cached signal vector is simply absent (mirrors the main embed backend)."""
+    if embedder is None or not by_slug:
+        return []
+    slugs = list(by_slug)
+    fetched = {}
+    for start in range(0, len(slugs), _EMBED_FETCH_CHUNK):
+        chunk = slugs[start:start + _EMBED_FETCH_CHUNK]
+        placeholders = ",".join("?" for _ in chunk)
+        for vrow in conn.execute(
+                "SELECT target_id, dim, vector FROM embeddings "
+                "WHERE target_kind='knowledge_signal' AND model_name=? "
+                f"AND target_id IN ({placeholders})",
+                (retrieval_core.EMBED_MODEL, *chunk)).fetchall():
+            if vrow["dim"] == dim:
+                fetched[vrow["target_id"]] = retrieval_core.unpack_vector(
+                    vrow["vector"], dim)
+    cached = {slug: fetched[slug] for slug in slugs if slug in fetched}
+    if not cached:
+        return []
+    q_vec = embedder([query])[0]
+    if len(q_vec) != dim:
+        return []
+    scored = retrieval_core.cosine_search(q_vec, list(cached.items()))
+    return [slug for slug, score in scored if score > 0.0]
+
+
 # ---------------------------------------------------------------------------
 # The warm cross-store recall surface.
 # ---------------------------------------------------------------------------
@@ -471,6 +507,10 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
     # --- Knowledge backends (generic BM25 + cosine over unified_index) ----------
     bm25_ranked, embed_ranked, kn_by_slug = _knowledge_candidates(
         conn, query, agent_topics=agent_topics, embedder=embedder, dim=dim)
+    # Recall-Reflex BOOST: the optional ## Signal channel as a separate RRF backend,
+    # scoped to the same in-scope slugs (inherits the privilege wall, never widens).
+    signal_ranked = _signal_candidates(
+        conn, query, by_slug=kn_by_slug, embedder=embedder, dim=dim)
 
     # MEMORY-ONLY BYTE-IDENTITY (§5.6 invariant, Test #1): when NO knowledge row is
     # in scope (empty unified_index, or a fail-closed empty topic set), the only
@@ -478,7 +518,7 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
     # We instead return `query_memories`' OWN output dicts, verbatim, truncated to
     # top_k: same order, same fields, same scores — byte-identical. (We still audit,
     # exactly as the knowledge MCP does.) This is the FU-4 single-store fence.
-    if not bm25_ranked and not embed_ranked:
+    if not bm25_ranked and not embed_ranked and not signal_ranked:
         results = []
         for m in mem_results[:top_k]:
             d = dict(m)
@@ -508,6 +548,8 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
         [_mk("memory", mid) for mid in mem_ranked],
         [_mk("knowledge", slug) for slug in bm25_ranked],
         [_mk("knowledge", slug) for slug in embed_ranked],
+        # Recall-Reflex BOOST: ## Signal matches earn extra rank credit here.
+        [_mk("knowledge", slug) for slug in signal_ranked],
     ]
     rrf = _best_rank_rrf(backends)
 
