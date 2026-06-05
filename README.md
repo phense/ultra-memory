@@ -198,46 +198,34 @@ design rationale.
 
 ## Comparison
 
-How ultra-memory compares to the most popular Claude/AI memory **and knowledge** projects — including
-[STORM](https://github.com/stanford-oval/storm), Stanford's ~28k★ "LLM-writes-a-wiki" system, to test
-our knowledge-wiki claim against a *real* one. We lead on features today and say plainly where we don't:
-the field's real edge over us is **adoption** — we're not public yet.
+How ultra-memory stacks up against the most-starred AI-memory and knowledge projects — [claude-mem](https://github.com/thedotmack/claude-mem) (81k★), [mem0](https://github.com/mem0ai/mem0) (58k★), [Khoj](https://github.com/khoj-ai/khoj) (35k★), Stanford's [STORM](https://github.com/stanford-oval/storm) (28k★), Zep's [Graphiti](https://github.com/getzep/graphiti) (27k★), and [Letta / MemGPT](https://github.com/letta-ai/letta) (23k★). They lead on adoption, breadth, and hosting; ultra-memory leads on *architecture* — it's the only one that ships the whole stack in one Claude-native box. Every cell is marked honestly, including where the field's reach beats ours.
 
-Legend: ✅ shipped & live · ⚠️ partial / opt-in / caveated (see notes) · ❌ absent
+Legend: ✅ shipped & live · ⚠️ partial / opt-in / caveated · ❌ absent
 
-| Capability | **ultra-memory** | [claude-mem](https://github.com/thedotmack/claude-mem) (~80k★) | [mem0](https://github.com/mem0ai/mem0) (~58k★) | [Basic Memory](https://github.com/basicmachines-co/basic-memory) (~3.1k★) | [STORM](https://github.com/stanford-oval/storm) (~28k★) |
-|---|:--:|:--:|:--:|:--:|:--:|
-| **Durable knowledge wiki** ¹ (separate from session memory) | ✅ | ❌ | ❌ | ⚠️ | ⚠️ |
-| **One ranked search across memory + wiki** | ✅ | ❌ | ⚠️ | ⚠️ | ❌ |
-| **Knowledge graph / typed links** | ✅ | ❌ | ✅ | ✅ | ⚠️ |
-| **Self-learning** ² (dedup · consolidate · self-correct · synthesize) | ✅ | ⚠️ | ⚠️ | ⚠️ | ❌ |
-| **Audited writes + secret stripping** (one gateway) | ✅ | ⚠️ | ❌ | ⚠️ | ❌ |
-| **Privilege boundary on recall** | ✅ | ❌ | ⚠️ | ❌ | ❌ |
-| **Local-first, no paid API key** ⁵ | ✅ | ✅ | ⚠️ | ✅ | ⚠️ |
-| **Plain-text, git-trackable storage** | ✅ | ⚠️ | ❌ | ✅ | ⚠️ |
-| **Claude-Code-native, one-command install** ³ | ⚠️ | ✅ | ⚠️ | ✅ | ❌ |
-| **Adoption / community** ⁴ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Capability | **ultra-memory** | claude-mem · 81k | mem0 · 58k | Khoj · 35k | STORM · 28k | Graphiti · 27k | Letta · 23k |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| **Durable knowledge wiki** — separate from session memory ¹ | ✅ | ❌ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ |
+| **One ranked search across memory + wiki** ² | ✅ | ❌ | ⚠️ | ⚠️ | ❌ | ✅ | ❌ |
+| **Knowledge graph / typed links** | ✅ | ❌ | ⚠️ | ❌ | ⚠️ | ✅ | ❌ |
+| **Self-learning** ³ — dedup · consolidate · self-correct · synthesize | ✅ | ⚠️ | ⚠️ | ❌ | ❌ | ⚠️ | ✅ |
+| **Audited writes + secret stripping** (one gateway) | ✅ | ⚠️ | ❌ | ❌ | ❌ | ❌ | ⚠️ |
+| **Privilege boundary on recall** | ✅ | ❌ | ⚠️ | ⚠️ | ❌ | ❌ | ❌ |
+| **Local-first, no paid API key** ⁴ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ |
+| **Plain-text, git-trackable storage** | ✅ | ⚠️ | ❌ | ❌ | ⚠️ | ❌ | ⚠️ |
+| **Claude-Code-native, one-command install** | ✅ | ✅ | ❌ | ❌ | ❌ | ⚠️ | ❌ |
+| **Adoption / community** ⁵ | ⚠️ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 <sub>
-¹ ultra-memory ships the wiki as an <em>engine</em> (sync, the cross-store search, the full curation
-pipeline) with a subclassable write path — git-canonical and bring-your-own-layout, not a point-and-click
-authoring UI. (Basic Memory has durable notes but one flat store; STORM writes standalone articles, not an
-accumulating, re-queryable base.)
-² Runs automatically but conservatively: in code it can't touch facts you authored or pinned, can't delete
-(only archive), is capped per run, and checks a new skill won't collide before creating it — broader than
-the dedup-only tools.
-³ Native zero-config plugin, but <strong>not public yet</strong>. Marked ⚠️ until published.
-⁴ Pre-public, zero stars — the field's clearest advantage over us today; claude-mem (~80k★) and mem0
-(~58k★, funded, hosted, millions of downloads) have distribution we have yet to earn.
-⁵ mem0 and STORM can run fully local with no paid key (mem0 self-hosted with an Ollama LLM; STORM with
-Ollama + a keyless search backend such as SearXNG / DuckDuckGo) — but their <em>default, documented</em>
-path uses a paid LLM and/or search API, so ⚠️ not ✅. ultra-memory has no metered path at all.
+¹ The durable tier is a re-queryable, accumulating <strong>knowledge wiki</strong> kept distinct from chat/session memory. STORM writes one-shot cited articles (not an accumulating base); mem0/Khoj/Graphiti/Letta persist facts, but in one LLM-extracted/graph store rather than a separately curatable wiki.<br>
+² One ranked query that fuses multiple signals in a single pass. ultra-memory's spans <strong>two tiers</strong> (the session store + the durable wiki); Graphiti fuses keyword+vector+graph in one retrieval. mem0/Khoj rank within a single memory tier; claude-mem/STORM don't blend a durable tier at all.<br>
+³ Automatic dedup + consolidate + self-correct + synthesize, behind a code-enforced safety wall. <strong>Letta earns ✅</strong> — its self-editing memory + "sleep-time" reorganizer genuinely self-improve (the closest peer); the rest do single-step extraction/dedup.<br>
+⁴ ultra-memory has <strong>no metered path at all</strong> (your Claude OAuth login only, no key on disk). The others <em>can</em> run keyless (Ollama / a local model), but their default documented path uses a paid LLM/API key → ⚠️.<br>
+⁵ ultra-memory is <strong>newly public</strong> — the field's clearest edge over us. claude-mem (~81k★) and mem0 (~58k★, funded + hosted) have distribution we're still earning.
 </sub>
 
-**Bottom line:** ultra-memory is the only Claude-memory layer that ships the *whole thing in one box* —
-a session store **and** a git-tracked knowledge wiki, blended into one ranked search over a graph of
-links, behind a single secret-stripping write path, on your Claude login only. No competitor combines all
-of these. It out-features the field on architecture today; it has yet to earn the field's reach.
+**Bottom line:** the big-star incumbents each nail one slice — claude-mem session capture, mem0 a portable memory layer, Graphiti the graph, Letta self-editing memory, STORM the wiki. **ultra-memory is the only one that combines them in a single box:** a volatile session store *and* a git-tracked knowledge wiki, fused into one ranked search over a typed graph, behind a single secret-stripping gateway, scoped by caller, improving itself autonomously — on your Claude login, no API key. They've earned the reach; ultra-memory has earned the architecture.
+
+> **On Hermes.** ultra-memory's self-learning loop (capture → consolidate → self-correct → synthesize) is modeled on the [Hermes agent](https://github.com/NousResearch/hermes-agent)'s autonomous skill-Curator (~183k★). Hermes is a whole agent *runtime*; ultra-memory brings that same self-improving-organism pattern to the *memory + knowledge layer* as a plugin — so the two **compose, not compete**.
 
 ---
 
