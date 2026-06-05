@@ -33,6 +33,8 @@ _agg="${CLAUDE_PLUGIN_OPTION_AGGRESSIVE_ENABLE:-on}"
 case "$_agg" in off|0|false|no) export SP7_AGGRESSIVE_DISABLE=1 ;; esac
 _syn="${CLAUDE_PLUGIN_OPTION_SYNTHESIZE_ENABLE:-on}"
 case "$_syn" in off|0|false|no) export SP10_SYNTHESIS_DISABLE=1 ;; esac
+_grad="${CLAUDE_PLUGIN_OPTION_GRADUATE_ENABLE:-on}"
+case "$_grad" in off|0|false|no) export ATOMIC_GRADUATE_DISABLE=1 ;; esac
 
 # Interpreter: the venv /memory-setup builds under CLAUDE_PLUGIN_DATA (survives updates).
 PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
