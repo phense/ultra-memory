@@ -75,6 +75,7 @@ def run_stage1(
     today: str | None = None,
     marker_path: Path | None = None,
     load_vecs=None,                       # callable(wiki_root, new_atomics) -> {path:(sha,vec)}
+    load_signal_vecs=None,                # same shape, over the ## Signal channel (Recall-Reflex)
     graph_extractor_cmd: list[str] | None = None,
     repo_root: Path | None = None,
     lint_findings=None,                    # callable(wiki_root, schema) -> findings dict
@@ -114,10 +115,18 @@ def run_stage1(
             print(f"[run_stage1] vec load failed ({exc!r}); dedup sees no vectors",
                   file=sys.stderr)
             vecs = {}
+    signal_vecs: dict = {}
+    if load_signal_vecs is not None:
+        try:
+            signal_vecs = load_signal_vecs(wiki_root, w["new_atomics"]) or {}
+        except Exception as exc:  # noqa: BLE001 — fail-open (signal axis just goes dark)
+            print(f"[run_stage1] signal-vec load failed ({exc!r}); dedup signal axis off",
+                  file=sys.stderr)
+            signal_vecs = {}
     detect_dedup.run(w, new_atomics=w["new_atomics"], vecs=vecs,
                      text_of=lambda p: (_resolve(p).read_text(encoding="utf-8")
                                         if _resolve(p).exists() else ""),
-                     schema=schema)
+                     schema=schema, signal_vecs=signal_vecs)
 
     # 3. lint (fail-open — a routing error must never block the worklist write). A
     #    consumer may inject `lint_findings(wiki_root, schema)` to supply findings from
@@ -176,6 +185,7 @@ def run_stage1_multi(
     do_graph: bool = True,
     today: str | None = None,
     load_vecs=None,
+    load_signal_vecs=None,
     graph_extractor_cmd: list[str] | None = None,
     lint_findings=None,
 ) -> dict:
@@ -196,8 +206,8 @@ def run_stage1_multi(
         per_root_out = Path(str(out_path) + f".{root.name}.part")
         w = run_stage1(
             root, per_root_out, schema=schema, since_ref=since_ref, do_graph=do_graph,
-            today=today, load_vecs=load_vecs, graph_extractor_cmd=graph_extractor_cmd,
-            lint_findings=lint_findings,
+            today=today, load_vecs=load_vecs, load_signal_vecs=load_signal_vecs,
+            graph_extractor_cmd=graph_extractor_cmd, lint_findings=lint_findings,
             marker_path=marker_for(root) if since_ref is None else None)
         merged["items"].extend(w["items"])
         merged["new_atomics"].extend(w["new_atomics"])

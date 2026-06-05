@@ -67,6 +67,25 @@ def test_recall_knowledge_only_skips_memory_and_works_without_embedder(tmp_path)
     conn.close()
 
 
+def test_recall_excludes_index_and_redirect_pages(tmp_path):
+    """Navigational pages (type: index / redirect) are noise as 'prior art' — recall
+    drops them and still returns the real atomic."""
+    conn = memory_lib.open_memory_db(tmp_path / "m.db")
+    d = tmp_path / "wiki" / "trading" / "concepts"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "widget-atomic.md").write_text(
+        "---\ntype: mechanism\ntitle: widget gizmo error trace\n---\n\nbody about the widget\n")
+    (d / "widget-index.md").write_text(
+        "---\ntype: index\ntitle: widget things index\n---\n\nlists widget pages\n")
+    wiki_sync.wiki_sync(conn, [tmp_path / "wiki"], embedder=None, ts=1)
+    hits = recall.recall("widget", conn=conn, build_embedder=False,
+                         knowledge_only=True, top_k=10)
+    slugs = [h.get("slug") for h in hits]
+    assert "widget-atomic" in slugs
+    assert "widget-index" not in slugs
+    conn.close()
+
+
 def test_recall_fail_open_returns_empty_on_bad_db(tmp_path):
     """A db_path that cannot be opened/queried -> [] (fail-open), never raises."""
     out = recall.recall("anything", db_path=str(tmp_path / "nonexistent" / "x.db"),

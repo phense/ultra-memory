@@ -30,6 +30,7 @@ def run(
     text_of,                      # callable: path -> str
     cosine=None,                  # callable(vec, vec) -> float; default retrieval_core.cosine
     schema: WikiSchemaConfig | None = None,
+    signal_vecs: dict | None = None,   # path -> (sha|None, vec) for the ## Signal channel
 ) -> None:
     """Populate worklist *w* with dedup findings for each new atomic.
 
@@ -40,6 +41,7 @@ def run(
     cache's row order.
     """
     schema = schema or WikiSchemaConfig()
+    signal_vecs = signal_vecs or {}
     if cosine is None:
         from ultra_memory.retrieval_core import cosine as cosine  # lazy
     lower = schema.dedup_lower
@@ -53,6 +55,7 @@ def run(
             continue
 
         _, new_vec = vecs[new_path]
+        new_sig = signal_vecs.get(new_path)  # (sha|None, vec) or None
 
         best_path: str | None = None
         best_cosine: float = 0.0
@@ -60,6 +63,14 @@ def run(
             if other_path == new_path:
                 continue
             sim = cosine(new_vec, other_vec)
+            # Recall-Reflex signal axis: if BOTH carry a ## Signal vector, a high
+            # signal cosine can lift the pair (same observable, different prose).
+            # Take the max so a strong match on EITHER axis surfaces.
+            other_sig = signal_vecs.get(other_path)
+            if new_sig is not None and other_sig is not None:
+                sig = cosine(new_sig[1], other_sig[1])
+                if sig > sim:
+                    sim = sig
             # Strict > keeps the existing selection; the tie clause determinizes an
             # EXACT cosine tie on path (vecs has no inherent order). Smaller path wins.
             if sim > best_cosine or (

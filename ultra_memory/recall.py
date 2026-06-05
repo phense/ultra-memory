@@ -21,6 +21,9 @@ import sys
 
 from . import knowledge_mcp, retrieval_core, unified_query
 
+# Navigational page-types are noise as recalled "prior art" — never a lesson.
+_EXCLUDED_PAGE_TYPES = ("index", "redirect")
+
 
 def _to_hit(row):
     """Map a ``unified_recall`` row to a uniform, frugal hit dict.
@@ -52,7 +55,7 @@ def _to_hit(row):
 
 def recall(signal_text, *, top_k=5, caller_class="subagent", agent_topics=None,
            db_path=None, embedder=None, build_embedder=True, knowledge_only=False,
-           conn=None, now_ts=None):
+           exclude_page_types=_EXCLUDED_PAGE_TYPES, conn=None, now_ts=None):
     """Return up to ``top_k`` frugal hits for an observed signal. Fail-open -> [].
 
     Args:
@@ -79,11 +82,17 @@ def recall(signal_text, *, top_k=5, caller_class="subagent", agent_topics=None,
                     embedder = retrieval_core.default_embedder()
                 except Exception:
                     embedder = None  # fail-soft: BM25-only knowledge recall
+            # Over-fetch so the page-type filter can drop navigational pages without
+            # starving the result below top_k.
+            excluded = set(exclude_page_types or ())
+            fetch_k = min(max(top_k * 3, top_k), 50) if excluded else top_k
             hits = unified_query.unified_recall(
                 conn, signal_text, caller_class=caller_class,
-                agent_topics=agent_topics, embedder=embedder, top_k=top_k,
+                agent_topics=agent_topics, embedder=embedder, top_k=fetch_k,
                 now_ts=now_ts, ts=now_ts, include_memory=not knowledge_only)
-            return [_to_hit(h) for h in hits]
+            out = [_to_hit(h) for h in hits
+                   if h.get("page_type") not in excluded]
+            return out[:top_k]
         finally:
             if own_conn:
                 try:

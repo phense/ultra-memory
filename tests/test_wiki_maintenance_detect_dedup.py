@@ -82,3 +82,28 @@ def test_custom_thresholds_via_schema():
 def test_no_trading_or_path_literal():
     src = Path(dd.__file__).read_text().lower()
     assert "trading" not in src and "/users/" not in src
+
+
+def test_signal_axis_flags_pair_when_mechanism_is_below_band():
+    """Recall-Reflex: a pair with LOW mechanism cosine but HIGH ## Signal cosine is
+    flagged via the signal axis (the literal-observable dedup the mechanism misses)."""
+    w = _w()
+    vecs = {"new.md": (None, ["nm"]), "old.md": (None, ["om"])}
+    signal_vecs = {"new.md": (None, ["ns"]), "old.md": (None, ["os"])}
+    cos = _cosine_table({("nm", "om"): 0.50, ("ns", "os"): 0.90})
+    dd.run(w, new_atomics=["new.md"], vecs=vecs, text_of=_text_of, cosine=cos,
+           signal_vecs=signal_vecs)
+    assert len(w["items"]) == 1
+    it = w["items"][0]
+    assert it["candidate_path"] == "old.md"
+    assert it["cosine"] == 0.9 and it["priority"] == 1
+
+
+def test_signal_axis_absent_preserves_mechanism_only_behavior():
+    """No signal_vecs → identical to before: a mechanism cosine below the band
+    yields no finding (backward-compatible)."""
+    w = _w()
+    vecs = {"new.md": (None, ["nm"]), "old.md": (None, ["om"])}
+    cos = _cosine_table({("nm", "om"): 0.50})
+    dd.run(w, new_atomics=["new.md"], vecs=vecs, text_of=_text_of, cosine=cos)
+    assert w["items"] == []

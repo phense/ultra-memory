@@ -71,6 +71,39 @@ def _make_vec_loader(conn, schema: WikiSchemaConfig):
     return load_vecs
 
 
+def _make_signal_vec_loader(conn, schema: WikiSchemaConfig):
+    """A load_signal_vecs(wiki_root, new_atomics) → {atomic_path: (None, vec)} over the
+    ## Signal channel (Recall-Reflex): ONLY atomics that carry a ## Signal section get
+    a vector. Backs the signal-axis dedup in detect_dedup (a pair with near-identical
+    observables but different mechanism prose is flagged). Fail-opens to {}."""
+    def load_signal_vecs(wiki_root, new_atomics):
+        if not new_atomics:
+            return {}
+        try:
+            from ultra_memory import retrieval_core, wiki_sync
+            embedder = retrieval_core.default_embedder(schema.embed_model)
+        except Exception:
+            return {}
+        items = []
+        for f in _atomic_pages(Path(wiki_root), schema):
+            try:
+                _, _, body = split_frontmatter(f.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+            sig = wiki_sync.extract_signal_text(body)
+            if sig:
+                items.append(("wiki_atomic_signal", rel_atomic_path(f, wiki_root), sig))
+        if not items:
+            return {}
+        try:
+            vecs = retrieval_core.get_or_embed_batch(
+                conn, items, embedder=embedder, model_name=schema.embed_model)
+        except Exception:
+            return {}
+        return {tid: (None, vec) for tid, vec in vecs.items()}
+    return load_signal_vecs
+
+
 def _resolve_gateway(spec, config) -> list[str]:
     """Resolve a wiki gateway spec to an argv prefix list for the beats.
 
@@ -171,10 +204,11 @@ def stage1_build(conn, config, *, out_path, schema=None):
     schema = schema or load_wiki_schema(config.wiki_schema)
     extractor = list(config.wiki_graph_extractor) if config.wiki_graph_extractor else None
     load_vecs = _make_vec_loader(conn, schema)
+    load_signal_vecs = _make_signal_vec_loader(conn, schema)
     return rs.run_stage1_multi(
         out_path, roots=roots, schema=schema, do_graph=True,
-        load_vecs=load_vecs, graph_extractor_cmd=extractor,
-        lint_findings=_resolve_linter(config))
+        load_vecs=load_vecs, load_signal_vecs=load_signal_vecs,
+        graph_extractor_cmd=extractor, lint_findings=_resolve_linter(config))
 
 
 def stage2_adjudicate(conn, config, *, worklist_path, schema=None, env=None):
