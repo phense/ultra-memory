@@ -81,7 +81,8 @@ def run_atomic_graduate_pass(conn, *, ts, env, gateway_run, signal_match, wiki_r
                              recall_fn=None, index_fn=None, quarantine_fn=None,
                              embedder=None, cap=DEFAULT_CAP,
                              dedup_upper=DEFAULT_DEDUP_UPPER, dedup_lower=DEFAULT_DEDUP_LOWER,
-                             eval_top_n=DEFAULT_EVAL_TOP_N, log=lambda _m: None) -> dict:
+                             eval_top_n=DEFAULT_EVAL_TOP_N, valid_topics=None,
+                             default_topic="trading", log=lambda _m: None) -> dict:
     """Drain `atomic_candidate` markers → create / merge / skip `## Signal`-keyed atomics,
     capped + fenced + fail-open. `gateway_run(verb, args:list[str], content:str|None)` is
     injected (production: shells the consumer gateway; test: a recorder)."""
@@ -94,7 +95,12 @@ def run_atomic_graduate_pass(conn, *, ts, env, gateway_run, signal_match, wiki_r
             log(f"atomic_graduate: blast-radius cap {cap} reached — "
                 f"{len(pend) - cap} candidate(s) left for next run")
             break
-        topic = c.get("topic") or "trading"
+        # Normalize the candidate topic against the known topics: the extraction may
+        # put a THEME (e.g. "tooling") in the topic field, which would otherwise create
+        # a spurious top-level topic tree. Unknown → the consumer's default topic.
+        raw_topic = c.get("topic") or default_topic
+        topic = raw_topic if (valid_topics is None or raw_topic in valid_topics) \
+            else default_topic
         try:
             m = signal_match(conn, c["signal"], embedder=embedder, topic=topic)
             cos = m[1] if m else 0.0
@@ -255,6 +261,7 @@ def beat(conn, config, ts, env):
         return recall_mod.recall(signal, top_k=top_k, conn=conn, embedder=embedder,
                                  knowledge_only=True, build_embedder=False)
 
+    topics = list(getattr(config, "topics", None) or ["trading"])
     return run_atomic_graduate_pass(
         conn, ts=ts, env=env, gateway_run=gateway_run,
         signal_match=unified_query.best_signal_match, wiki_root=wiki_root,
@@ -262,4 +269,5 @@ def beat(conn, config, ts, env):
         embedder=embedder, cap=_cap_from_env(env),
         dedup_upper=_float_env(env, "ATOMIC_GRADUATE_DEDUP_UPPER", DEFAULT_DEDUP_UPPER),
         dedup_lower=_float_env(env, "ATOMIC_GRADUATE_DEDUP_LOWER", DEFAULT_DEDUP_LOWER),
+        valid_topics=set(topics), default_topic=topics[0],
         log=lambda m: print(f"[atomic_graduate] {m}", file=sys.stderr))

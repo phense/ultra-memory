@@ -138,6 +138,25 @@ def test_eval_gate_quarantines_unfindable(tmp_path):
     conn.close()
 
 
+def test_topic_normalized_to_a_valid_topic(tmp_path):
+    # The extraction may put a THEME ("tooling") in the topic field; it must be
+    # normalized to a known topic (not create a spurious wiki/tooling/ topic tree).
+    conn = _db(tmp_path)
+    _seed(conn, topic="tooling")
+    gw = _gw()
+    res = ag.run_atomic_graduate_pass(
+        conn, ts=TS, env={}, gateway_run=gw, signal_match=lambda *a, **k: None,
+        wiki_root=tmp_path / "wiki", cap=3,
+        valid_topics={"trading", "programming"}, default_topic="trading")
+    assert res["created"] == 1
+    cp = next(c for c in gw.calls if c[0] == "create-page")
+    path_arg = cp[1][cp[1].index("--path") + 1]
+    topic_arg = cp[1][cp[1].index("--topic") + 1]
+    assert "/trading/concepts/" in path_arg and "/tooling/" not in path_arg
+    assert topic_arg == "trading"
+    conn.close()
+
+
 def test_dedup_gate_merges_at_calibrated_default_085(tmp_path):
     # Pilot calibration: 0.85 cosine MERGES under the 0.84 default (same-incident
     # paraphrase) — at the old 0.86 it was a perpetual grey-SKIP.
