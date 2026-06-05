@@ -38,8 +38,9 @@ from ultra_memory.knowledge_mcp import db_path_from_env
 # run effectively every session (throttled by maintain.py's own 20h clock). The
 # `learnings` projection-regen beat is no-LLM (Tier-1) and weekly — it rebuilds the
 # per-skill Learnings.md views + refreshes the Model B gen-skill managed blocks.
-_DEFAULT_CADENCE = {"session_ingest": 24, "consolidate": 168, "aggressive": 720,
-                    "synthesize": 720, "learnings": 168, "wiki_maintenance": 24}
+_DEFAULT_CADENCE = {"session_ingest": 24, "atomic_graduate": 24, "consolidate": 168,
+                    "aggressive": 720, "synthesize": 720, "learnings": 168,
+                    "wiki_maintenance": 24}
 # The autonomous posture (north-star decision 1): beats default ON, governed by the
 # wall (decision 2). A consumer can still gate any beat off in its config. The
 # `session_ingest` beat is additionally gated by SESSION_INGEST_ENABLE in its own

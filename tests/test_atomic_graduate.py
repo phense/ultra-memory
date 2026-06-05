@@ -138,6 +138,20 @@ def test_eval_gate_quarantines_unfindable(tmp_path):
     conn.close()
 
 
+def test_dedup_gate_merges_at_calibrated_default_085(tmp_path):
+    # Pilot calibration: 0.85 cosine MERGES under the 0.84 default (same-incident
+    # paraphrase) — at the old 0.86 it was a perpetual grey-SKIP.
+    conn = _db(tmp_path); _seed(conn)
+    gw = _gw()
+    res = ag.run_atomic_graduate_pass(
+        conn, ts=TS, env={}, gateway_run=gw,
+        signal_match=lambda *a, **k: ("existing", 0.85),
+        wiki_root=tmp_path / "wiki", cap=3)
+    assert res["merged"] == 1 and res["created"] == 0
+    assert si.pending_atomic_candidates(conn) == []
+    conn.close()
+
+
 def test_beat_disabled_by_killswitch():
     # Kill-switch short-circuits before touching conn/config.
     assert ag.beat(None, None, TS, {"ATOMIC_GRADUATE_DISABLE": "1"})["mode"] == "disabled"

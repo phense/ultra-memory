@@ -19,7 +19,13 @@ from ultra_memory.maintenance.session_ingest import (
     pending_atomic_candidates, resolve_atomic_candidate)
 
 DEFAULT_CAP = 3
-DEFAULT_DEDUP_UPPER = 0.86
+# Signal-channel merge band, CALIBRATED from the 2026-06-05 live pilot: same-incident
+# paraphrased observables cluster at ~0.855 cosine (e.g. the fastembed gotcha captured by
+# 9 independent sessions). The wiki's Mechanism-block band uses 0.86, but for the `##
+# Signal` channel that leaves same-incident paraphrases stuck in the grey zone (perpetual
+# SKIP). 0.84 merges them (distinct incidents score far lower → no false merge). Env-tunable
+# via ATOMIC_GRADUATE_DEDUP_UPPER / _LOWER as the channel populates.
+DEFAULT_DEDUP_UPPER = 0.84
 DEFAULT_DEDUP_LOWER = 0.78
 DEFAULT_EVAL_TOP_N = 5
 _GOTCHA_THEME = "tooling"
@@ -153,6 +159,13 @@ def _cap_from_env(env) -> int:
         return DEFAULT_CAP
 
 
+def _float_env(env, key, default) -> float:
+    try:
+        return float((env.get(key) or "").strip() or default)
+    except ValueError:
+        return default
+
+
 def _index_new_page(conn, *, slug, topic, title, signal, body, embedder):
     """Make a just-created atomic recall-reachable THIS run: upsert its unified_index row
     (BM25) + embed its ## Signal (knowledge_signal). Minimal one-page mirror of wiki_sync;
@@ -247,4 +260,6 @@ def beat(conn, config, ts, env):
         signal_match=unified_query.best_signal_match, wiki_root=wiki_root,
         recall_fn=recall_fn, index_fn=_index_new_page, quarantine_fn=_quarantine_page,
         embedder=embedder, cap=_cap_from_env(env),
+        dedup_upper=_float_env(env, "ATOMIC_GRADUATE_DEDUP_UPPER", DEFAULT_DEDUP_UPPER),
+        dedup_lower=_float_env(env, "ATOMIC_GRADUATE_DEDUP_LOWER", DEFAULT_DEDUP_LOWER),
         log=lambda m: print(f"[atomic_graduate] {m}", file=sys.stderr))
