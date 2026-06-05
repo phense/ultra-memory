@@ -5,7 +5,7 @@ verb so the create+wire path is exercised for real.
 """
 from pathlib import Path
 
-from ultra_memory import memory_lib, wiki_gateway
+from ultra_memory import memory_lib, retrieval_core, wiki_gateway
 from ultra_memory.maintenance import atomic_graduate as ag
 from ultra_memory.maintenance import session_ingest as si
 
@@ -14,6 +14,22 @@ TS = "2026-06-05T00:00:00"
 
 def _db(tmp_path):
     return memory_lib.open_memory_db(str(tmp_path / "m.db"))
+
+
+def _embedder():
+    """A tiny deterministic embedder: each text → its own orthogonal 384-d axis, so two
+    distinct candidates never cluster (each forms its own seedless create cluster)."""
+    seen = {}
+
+    def embed(texts):
+        out = []
+        for t in texts:
+            seen.setdefault(t, len(seen))
+            v = [0.0] * retrieval_core.EMBED_DIM
+            v[seen[t] % retrieval_core.EMBED_DIM] = 1.0
+            out.append(v)
+        return out
+    return embed
 
 
 def test_e2e_new_theme_created_and_wired_via_real_gateway(tmp_path):
@@ -59,4 +75,52 @@ def test_e2e_new_theme_created_and_wired_via_real_gateway(tmp_path):
     index_texts = [p.read_text() for p in root.rglob("index.md")]
     assert any("[[gotcha-index]]" in t for t in index_texts), \
         "the new theme-index must be wired into the index hierarchy"
+    conn.close()
+
+
+def test_e2e_clustering_create_path_drives_real_gateway(tmp_path):
+    """The NEW clustering CREATE path (an injected embedder, a seedless cluster) drives
+    the SAME real gateway verbs (create-page + register-index) as the legacy path — the
+    gateway-call shape is unchanged under clustering. Two near-dup candidates graduate to
+    exactly ONE real page; the second resolves as clustered."""
+    root = tmp_path / "wiki"
+    (root / "trading" / "concepts").mkdir(parents=True)
+    conn = _db(tmp_path)
+    emb = _embedder()
+    # Two candidates with the SAME signal text → the embedder gives them the same axis →
+    # they cluster → ONE create.
+    si._save_atomic_candidates(conn, [
+        {"kind": "gotcha", "signal": "onnxruntime NoSuchFile model_optimized.onnx",
+         "title": "fastembed cache purged by the OS reaper",
+         "body": "pin a persistent cache dir", "topic": "trading"},
+        {"kind": "gotcha", "signal": "onnxruntime NoSuchFile model_optimized.onnx",
+         "title": "fastembed model file vanished",
+         "body": "the longer body: the OS temp reaper deletes the cached model on a "
+                 "periodic schedule; anchor the cache under $HOME.",
+         "topic": "trading"}],
+        session_id="S1", ts=TS)
+
+    def gw(verb, args, content):
+        a = list(args)
+        if content is not None:
+            f = tmp_path / "page.md"
+            f.write_text(content)
+            a += ["--from-file", str(f)]
+        rc = wiki_gateway.cli(argv=[verb, *a], wiki_root=root)
+        assert rc == 0, f"real gateway verb {verb!r} failed (rc={rc})"
+
+    res = ag.run_atomic_graduate_pass(
+        conn, ts=TS, env={}, gateway_run=gw, signal_match=lambda *a, **k: None,
+        wiki_root=root, embedder=emb, cap=3,
+        valid_topics={"trading"}, default_topic="trading")
+
+    assert res["created"] == 1 and res["clustered"] == 1, res
+    atomics = [p for p in (root / "trading" / "concepts").glob("*.md")
+               if not p.name.endswith("-index.md")]
+    assert len(atomics) == 1, "the cluster must graduate to exactly one real page"
+    page = atomics[0].read_text()
+    assert "## Signal" in page
+    # Representative = longest body → the second candidate's body wins.
+    assert "OS temp reaper deletes" in page
+    assert si.pending_atomic_candidates(conn) == []   # both resolved, none grey-stuck
     conn.close()
