@@ -37,6 +37,7 @@ ENABLE_ENV = "SESSION_INGEST_ENABLE"
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_FACTS = 8
 DEFAULT_MAX_SKILL_LEARNINGS = 8   # per-session cap on skill-tagged learnings
+DEFAULT_MAX_ATOMIC_CANDIDATES = 5  # per-session cap on wiki-atomic candidates (Atomic Graduation)
 DEFAULT_LIMIT = 10          # max pending sessions drained per pass
 DEFAULT_TIMEOUT = 300       # one OAuth call per session
 
@@ -127,6 +128,60 @@ def resolve_skill_candidates(conn, session_id: str) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Atomic-candidate markers (Atomic Graduation — the capture-findably backstop).
+# --------------------------------------------------------------------------- #
+
+_ATOMIC_CANDIDATE_KIND = "atomic_candidate"
+
+
+def _save_atomic_candidates(conn, atomic_candidates, *, session_id, ts) -> int:
+    """Persist each atomic_candidate as an `atomic_candidate` session_events marker
+    (structured `detail` JSON: signal/body/topic/kind). The atomic_graduate beat drains
+    these later. Idempotent (record_session_event content-addresses on
+    session/ts/kind/title/detail). Per-entry fail-open. Returns rows written."""
+    n = 0
+    for c in atomic_candidates or []:
+        try:
+            detail = json.dumps({"signal": c["signal"], "body": c["body"],
+                                 "topic": c.get("topic"), "kind": c["kind"]},
+                                ensure_ascii=False)
+            memory_lib.record_session_event(
+                conn, session_id=session_id, kind=_ATOMIC_CANDIDATE_KIND,
+                title=c["title"], detail=detail, ts=ts)
+            n += 1
+        except Exception:
+            continue   # one bad candidate never sinks the rest
+    return n
+
+
+def pending_atomic_candidates(conn, *, limit: int = 50) -> list[dict]:
+    """Up to `limit` un-resolved atomic_candidate markers, oldest first. Each:
+    {event_id, session_id, ts, title, signal, body, topic, kind}. A marker whose
+    `detail` JSON is unparseable is skipped (fail-open)."""
+    rows = conn.execute(
+        "SELECT id, session_id, ts, title, detail FROM session_events "
+        "WHERE kind=? AND resolved=0 ORDER BY id LIMIT ?",
+        (_ATOMIC_CANDIDATE_KIND, int(limit))).fetchall()
+    out = []
+    for r in rows:
+        try:
+            d = json.loads(r["detail"] or "{}")
+        except (ValueError, TypeError):
+            continue
+        out.append({"event_id": r["id"], "session_id": r["session_id"], "ts": r["ts"],
+                    "title": r["title"], "signal": d.get("signal"), "body": d.get("body"),
+                    "topic": d.get("topic"), "kind": d.get("kind")})
+    return out
+
+
+def resolve_atomic_candidate(conn, *, event_id) -> None:
+    """Mark a graduated atomic_candidate marker resolved=1 (idempotent; never deleted)."""
+    def work():
+        conn.execute("UPDATE session_events SET resolved=1 WHERE id=?", (event_id,))
+    memory_lib._with_immediate_retry(conn, work)
+
+
+# --------------------------------------------------------------------------- #
 # The transcript digest (deterministic, no-LLM, tool-output-free).
 # --------------------------------------------------------------------------- #
 
@@ -196,8 +251,17 @@ def build_sys() -> str:
         "transcript (the kind of line that belongs in that skill's Learnings.md). Emit a "
         "skill ONLY if it is in the list AND the transcript shows a real durable lesson; "
         "otherwise omit it. NEVER invent a lesson and NEVER tag a skill not in the list.\n"
+        "atomic_candidates: durable, REUSABLE lessons that deserve a FINDABLE wiki page — "
+        "either an engineering GOTCHA (a solved environment-/tooling-specific problem you "
+        "debugged — THESE ARE WANTED here, unlike extracted_knowledge/skill_learnings which "
+        "exclude environment-specific items) OR a durable TRADING/STRATEGY lesson. Each "
+        "{kind:'gotcha'|'lesson', signal, title, body, topic?}, where `signal` is the LITERAL "
+        "observable in the words it appears (the error text / market condition a future "
+        "occurrence would contain). Emit ONLY genuinely durable/recurring lessons with a clear "
+        "findable signal; NEVER a one-off transient, routine narration, or anything with no "
+        "observable. Empty list if none.\n"
         "If nothing durable: extracted_knowledge=[], skill_learnings=[], "
-        "correction_detected=false."
+        "atomic_candidates=[], correction_detected=false."
     )
 
 
@@ -209,13 +273,16 @@ def build_prompt(digest: str, *, skills_used=None) -> str:
         f"SKILLS USED THIS SESSION (only these may appear in skill_learnings): {skills}\n\n"
         'Return JSON: {"extracted_knowledge": [{"title": <str>, "body": <str>, '
         '"topic": <str|null>}], "skill_learnings": [{"skill": <str>, "title": <str>, '
-        '"body": <str>}], "correction_detected": <bool>, '
+        '"body": <str>}], "atomic_candidates": [{"kind": "gotcha"|"lesson", '
+        '"signal": <str>, "title": <str>, "body": <str>, "topic": <str|null>}], '
+        '"correction_detected": <bool>, '
         '"correction": {"behavior": <str>, "do_instead": <str>} | null}'
     )
 
 
 def parse_ingest(stdout: str, *, max_facts: int = DEFAULT_MAX_FACTS,
                  max_skill_learnings: int = DEFAULT_MAX_SKILL_LEARNINGS,
+                 max_atomic_candidates: int = DEFAULT_MAX_ATOMIC_CANDIDATES,
                  skills_used=None) -> dict:
     """Parse the drain JSON → {facts, correction|None, skill_learnings}.
     GROUNDED-OR-DROPPED: factless entries dropped, facts capped, a correction kept
@@ -258,7 +325,27 @@ def parse_ingest(stdout: str, *, max_facts: int = DEFAULT_MAX_FACTS,
         skill_learnings.append({"skill": skill, "title": title, "body": body})
         if len(skill_learnings) >= max_skill_learnings:
             break
-    return {"facts": facts, "correction": corr, "skill_learnings": skill_learnings}
+    # Atomic Graduation: durable lessons that deserve a findable wiki page. GROUNDED-OR-
+    # DROPPED — require kind∈{gotcha,lesson} + signal + title + body (no findable observable
+    # → no atomic). topic is optional.
+    atomic_candidates = []
+    for a in (data.get("atomic_candidates") or []):
+        if not isinstance(a, dict):
+            continue
+        kind = str(a.get("kind", "")).strip()
+        signal = str(a.get("signal", "")).strip()
+        title = str(a.get("title", "")).strip()
+        body = str(a.get("body", "")).strip()
+        if kind not in ("gotcha", "lesson") or not signal or not title or not body:
+            continue
+        topic = a.get("topic")
+        atomic_candidates.append({"kind": kind, "signal": signal, "title": title,
+                                  "body": body,
+                                  "topic": str(topic).strip() if topic else None})
+        if len(atomic_candidates) >= max_atomic_candidates:
+            break
+    return {"facts": facts, "correction": corr, "skill_learnings": skill_learnings,
+            "atomic_candidates": atomic_candidates}
 
 
 def _fact_id(title: str, body: str) -> str:
@@ -346,8 +433,8 @@ def run_session_ingest_pass(conn, *, ts, env, runner=subprocess.run,
     un-resolved for retry), idempotent."""
     if not _enabled(env):
         return {"mode": "disabled", "sessions": 0, "ingested": 0,
-                "skill_learnings": 0, "corrections": 0}
-    ingested = corrections = sessions = skill_learnings_n = 0
+                "skill_learnings": 0, "corrections": 0, "atomic_candidates": 0}
+    ingested = corrections = sessions = skill_learnings_n = atomic_n = 0
     for p in pending_sessions(conn, limit=limit):
         try:
             digest = build_digest(p["transcript_path"], max_chars=max_digest_chars)
@@ -362,6 +449,8 @@ def run_session_ingest_pass(conn, *, ts, env, runner=subprocess.run,
             ingested += _save_facts(conn, result["facts"],
                                     session_id=p["session_id"], ts=ts)
             skill_learnings_n += _save_skill_learnings(conn, result["skill_learnings"], ts=ts)
+            atomic_n += _save_atomic_candidates(conn, result["atomic_candidates"],
+                                                session_id=p["session_id"], ts=ts)
             if result["correction"]:
                 corrections += _save_correction(conn, result["correction"],
                                                 session_id=p["session_id"], ts=ts)
@@ -371,9 +460,11 @@ def run_session_ingest_pass(conn, *, ts, env, runner=subprocess.run,
         except Exception as exc:          # per-session fail-open (leave BOTH markers un-resolved)
             log(f"session-ingest failed for {p.get('session_id')}: {exc!r} — retry next run")
     _emit_audit(audit_dir, ts, {"sessions": sessions, "ingested": ingested,
-                                "skill_learnings": skill_learnings_n, "corrections": corrections})
+                                "skill_learnings": skill_learnings_n, "corrections": corrections,
+                                "atomic_candidates": atomic_n})
     return {"mode": "ran", "sessions": sessions, "ingested": ingested,
-            "skill_learnings": skill_learnings_n, "corrections": corrections}
+            "skill_learnings": skill_learnings_n, "corrections": corrections,
+            "atomic_candidates": atomic_n}
 
 
 def _emit_audit(audit_dir, ts, row) -> None:

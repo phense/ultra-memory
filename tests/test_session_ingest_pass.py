@@ -23,9 +23,10 @@ def _transcript(tmp_path, name="t.jsonl"):
     return p
 
 
-def _payload(facts=None, correction=None, skill_learnings=None):
+def _payload(facts=None, correction=None, skill_learnings=None, atomic_candidates=None):
     return {"extracted_knowledge": facts or [],
             "skill_learnings": skill_learnings or [],
+            "atomic_candidates": atomic_candidates or [],
             "correction_detected": correction is not None,
             "correction": correction}
 
@@ -91,6 +92,69 @@ def test_parse_ingest_extracts_skill_learnings_grounded():
     r = si.parse_ingest(out, skills_used={"backtest", "risk-manager"})
     assert [s["skill"] for s in r["skill_learnings"]] == ["backtest"]
     assert r["skill_learnings"][0]["title"] == "Fill at bid/ask"
+
+
+def test_parse_ingest_parses_atomic_candidates():
+    out = json.dumps({
+        "extracted_knowledge": [], "skill_learnings": [],
+        "correction_detected": False, "correction": None,
+        "atomic_candidates": [
+            {"kind": "gotcha", "signal": "onnxruntime NoSuchFile model_optimized.onnx",
+             "title": "fastembed cache purge", "body": "pin via persistent_cache_dir",
+             "topic": "trading"},
+            {"kind": "lesson", "signal": "sector-wide drawdown > 8%",
+             "title": "breadth collapse", "body": "tighten stops", "topic": "trading"},
+            {"kind": "gotcha", "signal": "", "title": "x", "body": "y"},   # no signal → dropped
+            {"kind": "bogus", "signal": "s", "title": "t", "body": "b"},   # bad kind → dropped
+        ],
+    })
+    ac = si.parse_ingest(out)["atomic_candidates"]
+    assert [c["title"] for c in ac] == ["fastembed cache purge", "breadth collapse"]
+    assert ac[0]["kind"] == "gotcha" and ac[0]["signal"].startswith("onnxruntime")
+    assert ac[0]["topic"] == "trading"
+
+
+def test_parse_ingest_caps_atomic_candidates():
+    cands = [{"kind": "gotcha", "signal": f"sig{i}", "title": f"t{i}", "body": "b"}
+             for i in range(20)]
+    out = json.dumps({"extracted_knowledge": [], "skill_learnings": [],
+                      "correction_detected": False, "atomic_candidates": cands})
+    assert len(si.parse_ingest(out, max_atomic_candidates=5)["atomic_candidates"]) == 5
+
+
+def test_save_atomic_candidates_and_pending_and_resolve(tmp_path):
+    conn = _conn(tmp_path)
+    cands = [{"kind": "gotcha", "signal": "onnxruntime NoSuchFile", "title": "fastembed",
+              "body": "pin cache", "topic": "trading"}]
+    assert si._save_atomic_candidates(conn, cands, session_id="S1", ts=TS) == 1
+    row = conn.execute(
+        "SELECT title, detail FROM session_events WHERE kind='atomic_candidate'").fetchone()
+    assert row["title"] == "fastembed"
+    d = json.loads(row["detail"])
+    assert d["signal"] == "onnxruntime NoSuchFile" and d["kind"] == "gotcha"
+    pend = si.pending_atomic_candidates(conn, limit=10)
+    assert len(pend) == 1 and pend[0]["signal"] == "onnxruntime NoSuchFile"
+    assert pend[0]["topic"] == "trading" and pend[0]["title"] == "fastembed"
+    # idempotent re-save → still one row
+    si._save_atomic_candidates(conn, cands, session_id="S1", ts=TS)
+    assert conn.execute(
+        "SELECT COUNT(*) FROM session_events WHERE kind='atomic_candidate'").fetchone()[0] == 1
+    # resolve removes from pending
+    si.resolve_atomic_candidate(conn, event_id=pend[0]["event_id"])
+    assert si.pending_atomic_candidates(conn, limit=10) == []
+    conn.close()
+
+
+def test_pass_saves_atomic_candidates(tmp_path):
+    conn = _conn(tmp_path)
+    si.enqueue(conn, session_id="S1", transcript_path=str(_transcript(tmp_path)), ts=TS)
+    runner = _runner(_payload(atomic_candidates=[
+        {"kind": "gotcha", "signal": "sig", "title": "t", "body": "b", "topic": "trading"}]))
+    res = si.run_session_ingest_pass(conn, ts=TS, env=ON, runner=runner)
+    assert res["atomic_candidates"] == 1
+    assert conn.execute(
+        "SELECT COUNT(*) FROM session_events WHERE kind='atomic_candidate'").fetchone()[0] == 1
+    conn.close()
 
 
 def test_parse_ingest_drops_incomplete_skill_learnings():
