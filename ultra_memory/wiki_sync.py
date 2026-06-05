@@ -272,3 +272,76 @@ def wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts):
             summary["errors"] += 1
 
     return summary
+
+
+def main(argv=None):
+    """CLI: populate the unified_index + knowledge-embeddings mirror from wiki roots.
+
+    `python -m ultra_memory.wiki_sync [--roots R] [--db DB] [--rebuild] [--no-embed]`
+    Roots default to $ULTRA_MEMORY_WIKI_ROOTS, db to $ULTRA_MEMORY_DB (then
+    ~/.ultra-memory/memory.db). No roots → rc 0 no-op (pure-memory skip). Opens +
+    migrates the db itself (open_memory_db). Fail-soft: an embedder-build failure
+    degrades to a BM25-only populate; rc 1 only on a hard open/populate failure."""
+    import argparse
+    import os
+    import sys
+    import time
+    from pathlib import Path
+
+    ap = argparse.ArgumentParser(
+        prog="ultra_memory.wiki_sync",
+        description="Populate the unified_index + knowledge-embeddings mirror.")
+    ap.add_argument("--roots", default=os.environ.get("ULTRA_MEMORY_WIKI_ROOTS", ""),
+                    help="os.pathsep- or comma-separated wiki root paths "
+                         "(default: $ULTRA_MEMORY_WIKI_ROOTS)")
+    ap.add_argument("--db", default=(os.environ.get("ULTRA_MEMORY_DB")
+                                     or str(Path.home() / ".ultra-memory" / "memory.db")))
+    ap.add_argument("--rebuild", action="store_true",
+                    help="force re-populate every page even when content is unchanged")
+    ap.add_argument("--no-embed", action="store_true",
+                    help="skip embedding (BM25-only populate; no fastembed load)")
+    args = ap.parse_args(argv)
+
+    roots = []
+    for chunk in (args.roots or "").split(os.pathsep):
+        roots.extend(c.strip() for c in chunk.split(",") if c.strip())
+    if not roots:
+        print("wiki_sync: no roots (set --roots or ULTRA_MEMORY_WIKI_ROOTS); "
+              "nothing to do", file=sys.stderr)
+        return 0
+
+    from ultra_memory import memory_lib
+    try:
+        conn = memory_lib.open_memory_db(args.db)
+    except Exception as exc:  # hard failure: cannot open/migrate the store
+        print(f"wiki_sync: cannot open db {args.db}: {exc}", file=sys.stderr)
+        return 1
+
+    embedder = None
+    if not args.no_embed:
+        try:
+            embedder = retrieval_core.default_embedder()
+        except Exception as exc:  # fail-soft: BM25-only populate
+            print(f"wiki_sync: no embedder ({type(exc).__name__}); BM25-only populate",
+                  file=sys.stderr)
+
+    try:
+        summary = wiki_sync(conn, roots, embedder=embedder,
+                            rebuild=args.rebuild, ts=int(time.time()))
+        conn.commit()
+    except Exception as exc:  # hard failure: populate aborted
+        print(f"wiki_sync: populate failed: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    print(json.dumps(summary))
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    raise SystemExit(main(sys.argv[1:]))

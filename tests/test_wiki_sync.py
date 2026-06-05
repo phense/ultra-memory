@@ -551,3 +551,30 @@ def test_fix2_wiki_sync_keeps_nonsecret_text_intact(tmp_path):
     assert "institutional-grade-discipline" in row["bm25_text"]
     assert "[REDACTED]" not in row["snippet"]
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# CLI entry: `python -m ultra_memory.wiki_sync` populates the mirror from roots.
+# (Recall-Reflex Phase 0 — keep the unified_index mirror fresh from the cron.)
+# ---------------------------------------------------------------------------
+
+def test_main_cli_populates_index_from_roots(tmp_path):
+    """`wiki_sync.main(["--roots", ROOT, "--db", DB, "--no-embed"])` opens/migrates
+    the db itself and upserts every page; returns rc 0."""
+    root = tmp_path / "wiki"
+    _make_wiki(root, "trading", "alpha-cli-page",
+               "Alpha body about widgets and gizmos.", title="Alpha CLI")
+    dbp = tmp_path / "m.db"
+    rc = wiki_sync.main(["--roots", str(root), "--db", str(dbp), "--no-embed"])
+    assert rc == 0
+    conn = memory_lib.open_memory_db(dbp)
+    n = conn.execute(
+        "SELECT COUNT(*) FROM unified_index WHERE slug='alpha-cli-page'").fetchone()[0]
+    assert n == 1
+    conn.close()
+
+
+def test_main_cli_no_roots_is_noop_rc0(tmp_path):
+    """No roots (unset/blank) → rc 0, no crash (the pure-memory skip)."""
+    dbp = tmp_path / "m.db"
+    assert wiki_sync.main(["--roots", "", "--db", str(dbp), "--no-embed"]) == 0
