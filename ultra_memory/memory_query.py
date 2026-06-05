@@ -77,7 +77,7 @@ def _title_hit(title, query):
 
 def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
                    include_statuses=_DEFAULT_STATUSES, include_types=None,
-                   now_ts=None, staleness_days=90, topic=None):
+                   now_ts=None, staleness_days=90, topic=None, query_vec=None):
     """Rank active memories for `query`. Returns a list of JSON-serialisable dicts
     ordered by final score desc (cosine + title boost + ranking signals).
 
@@ -134,7 +134,10 @@ def query_memories(conn, query, *, embedder, top_k=5, dim=rc.EMBED_DIM,
         conn, [("memory", r["id"], _doc_text(r)) for r in rows],
         embedder=embedder, dim=dim)
 
-    q_vec = embedder([query])[0]
+    # D2-4: reuse the caller's pre-computed query vector when supplied (unified_recall
+    # embeds the query ONCE and threads it into every backend) — same deterministic
+    # vector, so ranking is unchanged; only the redundant re-embeds are removed.
+    q_vec = query_vec if query_vec is not None else embedder([query])[0]
     if len(q_vec) != dim:
         raise ValueError(
             f"query embedding dim {len(q_vec)} != expected {dim}; embedder/model mismatch")

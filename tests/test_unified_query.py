@@ -1167,3 +1167,30 @@ def test_perf_fix2_fingerprint_is_hashseed_stable(tmp_path):
         return r.stdout.strip().splitlines()[-1]
 
     assert _run(0) == _run(1) == _run(99999)
+
+
+def test_query_embedded_once_across_backends(tmp_path):
+    """D2-4: a single unified_recall that exercises the memory + knowledge + signal
+    backends embeds the QUERY string exactly ONCE. Pre-fix each backend embedded the
+    query itself (3 identical forward passes); the vector is now computed once in
+    unified_recall and threaded in. Corpus-doc embeds (cache-miss) are not the query
+    string and are not counted."""
+    conn = _db(tmp_path)
+    _save(conn, id="m1", title="alpha note", body="alpha body")          # NULL-topic memory
+    _add_knowledge(conn, slug="kn1", topic="trading", title="alpha kn", snippet="alpha snip")
+    _embed_knowledge(conn, "kn1", [1.0, 0.0, 0.0])                        # knowledge embed backend
+    _embed_signal(conn, "kn1", [1.0, 0.0, 0.0])                          # signal boost backend
+
+    QUERY = "alpha query"
+    base = _fake_embedder({"alpha": [1.0, 0.0, 0.0]}, dim=3)
+    n = {"q": 0}
+
+    def counting(texts):
+        if QUERY in texts:
+            n["q"] += 1
+        return base(texts)
+
+    unified_query.unified_recall(
+        conn, QUERY, caller_class="orchestrator", agent_topics=None,
+        embedder=counting, dim=3, top_k=5, now_ts="2026-05-02T00:00:00", audit=False)
+    assert n["q"] == 1, f"query embedded {n['q']}x across backends (expected 1)"

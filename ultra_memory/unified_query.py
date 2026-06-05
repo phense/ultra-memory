@@ -296,7 +296,7 @@ def _knowledge_doc_text(row):
     return f"{title}\n{bm25}"
 
 
-def _knowledge_candidates(conn, query, *, agent_topics, embedder, dim):
+def _knowledge_candidates(conn, query, *, agent_topics, embedder, dim, query_vec=None):
     """Rank `unified_index` rows whose `topic ∈ agent_topics` via two generic
     backends — BM25 and embedding-cosine — and return:
         (bm25_ranked, embed_ranked, by_slug)
@@ -370,7 +370,7 @@ def _knowledge_candidates(conn, query, *, agent_topics, embedder, dim):
         # `embed_ranked` byte-identical to the pre-batch behavior.
         cached = {slug: fetched[slug] for slug in slugs if slug in fetched}
         if cached:
-            q_vec = embedder([query])[0]
+            q_vec = query_vec if query_vec is not None else embedder([query])[0]
             if len(q_vec) == dim:
                 scored = retrieval_core.cosine_search(q_vec, list(cached.items()))
                 embed_ranked = [slug for slug, score in scored if score > 0.0]
@@ -378,7 +378,7 @@ def _knowledge_candidates(conn, query, *, agent_topics, embedder, dim):
     return bm25_ranked, embed_ranked, by_slug
 
 
-def _signal_candidates(conn, query, *, by_slug, embedder, dim):
+def _signal_candidates(conn, query, *, by_slug, embedder, dim, query_vec=None):
     """Recall-Reflex BOOST backend: rank the optional `## Signal` embedding channel
     (`target_kind='knowledge_signal'`) for the in-scope slugs. Returns [slug, …]
     best-first; EMPTY when there is no embedder or no slug carries a signal vector.
@@ -407,7 +407,7 @@ def _signal_candidates(conn, query, *, by_slug, embedder, dim):
     cached = {slug: fetched[slug] for slug in slugs if slug in fetched}
     if not cached:
         return []
-    q_vec = embedder([query])[0]
+    q_vec = query_vec if query_vec is not None else embedder([query])[0]
     if len(q_vec) != dim:
         return []
     scored = retrieval_core.cosine_search(q_vec, list(cached.items()))
@@ -497,6 +497,14 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
     if agent_topics is not None:
         agent_topics = {t for t in agent_topics if t}
 
+    # D2-4: embed the query ONCE and thread the vector into every backend (memory,
+    # knowledge, signal). Each backend used to embed the same query string itself —
+    # up to three identical forward passes per recall, tripling query-embed latency on
+    # the per-prompt recall hook. The threaded vector IS the same deterministic vector
+    # each computed, so ranking is byte-identical; None when there is no embedder (the
+    # BM25-only / knowledge-only path), where each backend keeps its own None-handling.
+    query_vec = embedder([query])[0] if embedder is not None else None
+
     # --- Memory backend (engine-native; the byte-identity store) ----------------
     # A topic-scoped caller filters to `topic ∈ agent_topics OR topic IS NULL`;
     # query_memories' `topic=` param already keeps NULL rows. It takes ONE topic, so
@@ -511,14 +519,14 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
     elif agent_topics is None:
         mem_results = memory_query.query_memories(
             conn, query, embedder=embedder, top_k=max(top_k * 4, top_k), dim=dim,
-            include_types=allowed_types, now_ts=now_ts)
+            include_types=allowed_types, now_ts=now_ts, query_vec=query_vec)
     elif not agent_topics:
         # Fail-closed: only NULL-topic operational rows of allowed types. We pass a
         # sentinel topic that no row carries; query_memories still returns the
         # `topic IS NULL` rows (its filter is `topic = ? OR topic IS NULL`).
         mem_results = memory_query.query_memories(
             conn, query, embedder=embedder, top_k=max(top_k * 4, top_k), dim=dim,
-            include_types=allowed_types, now_ts=now_ts,
+            include_types=allowed_types, now_ts=now_ts, query_vec=query_vec,
             topic="\x00__no_topic_binding__")
     else:
         seen = {}
@@ -526,7 +534,8 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
             for r in memory_query.query_memories(
                     conn, query, embedder=embedder,
                     top_k=max(top_k * 4, top_k), dim=dim,
-                    include_types=allowed_types, now_ts=now_ts, topic=tp):
+                    include_types=allowed_types, now_ts=now_ts, topic=tp,
+                    query_vec=query_vec):
                 # Keep the highest-scoring copy of a row that matched under >1 topic
                 # (a NULL-topic row appears in every per-topic query).
                 prev = seen.get(r["id"])
@@ -548,11 +557,13 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
 
     # --- Knowledge backends (generic BM25 + cosine over unified_index) ----------
     bm25_ranked, embed_ranked, kn_by_slug = _knowledge_candidates(
-        conn, query, agent_topics=agent_topics, embedder=embedder, dim=dim)
+        conn, query, agent_topics=agent_topics, embedder=embedder, dim=dim,
+        query_vec=query_vec)
     # Recall-Reflex BOOST: the optional ## Signal channel as a separate RRF backend,
     # scoped to the same in-scope slugs (inherits the privilege wall, never widens).
     signal_ranked = _signal_candidates(
-        conn, query, by_slug=kn_by_slug, embedder=embedder, dim=dim)
+        conn, query, by_slug=kn_by_slug, embedder=embedder, dim=dim,
+        query_vec=query_vec)
 
     # MEMORY-ONLY BYTE-IDENTITY (§5.6 invariant, Test #1): when NO knowledge row is
     # in scope (empty unified_index, or a fail-closed empty topic set), the only
