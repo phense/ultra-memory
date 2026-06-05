@@ -10,6 +10,10 @@ The chapters are arranged as a progression — **Understand → Use → Configur
 → Develop** — followed by an appendix of design rationale. Each entry below says, in
 one line, what you will learn there.
 
+**Just want the feature list?** [FEATURES.md](FEATURES.md) is the at-a-glance catalog of
+everything ultra-memory does — every capability grouped by theme, one paragraph each,
+foundation-first. The chapters below are the *why*; that page is the *what*.
+
 ---
 
 ## Part I — Understand
