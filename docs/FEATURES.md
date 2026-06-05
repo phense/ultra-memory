@@ -22,7 +22,7 @@ A topic is one top-level directory under the wiki root (`trading`, `programming`
 
 ### The typed-link graph that ties the stores together
 
-A small links table records typed relationships — memory↔memory and memory↔wiki-page — without copying one store into the other. The most important type is the **graduation** link (`validated_as`), which points from a session lesson to the durable wiki page that lesson eventually became, so a page can always be traced back to the session where it was first learned. These edges do real ranking work (a page several proven lessons point to ranks more confidently) and are filtered by the same privilege wall as the rows they connect, so an edge to a private memory never leaks that endpoint to an untrusted caller. (Handbook ch. 2, 10.7; schema `links` table.)
+A small links table records typed relationships — memory↔memory and memory↔wiki-page — without copying one store into the other. The most important type is the **graduation** link (`validated_as`), which points from a session lesson to the durable memory it graduated into, so a graduated fact can always be traced back to the session where it was first learned. These edges do real ranking work (a page several proven lessons point to ranks more confidently) and are filtered by the same privilege wall as the rows they connect, so an edge to a private memory never leaks that endpoint to an untrusted caller. (Handbook ch. 2, 10.7; schema `links` table.)
 
 ---
 
@@ -84,11 +84,11 @@ The capture-findably backstop, and the boldest write the loop makes. It drains e
 
 ### Consolidate — promoting proven lessons, merging duplicates
 
-Weekly, one batched OAuth call reads the unresolved learning candidates, dedups them via `unified_recall` (no LLM pre-filter), and for each one either *graduates* it into a durable memory or wiki page, *merges* it into an existing page via the validation-log verb, or *skips* it as transient. It is ADD-only — it never rewrites and refuses any human-authored or pinned target — and every graduation records a `validated_as` edge so the lesson stays connected to its new durable home. This is the beat that makes the store *better organized*, not just bigger. (Handbook ch. 5; `maintenance/consolidate.py`.)
+Weekly, one batched OAuth call reads the unresolved learning candidates, dedups them via `unified_recall` (no LLM pre-filter), and for each one either *graduates* it into a durable memory or wiki page, *merges* it into an existing page via the validation-log verb, or *skips* it as transient. It is ADD-only — it never rewrites and refuses any human-authored or pinned target — and a graduation into a memory records a `validated_as` edge so the lesson stays connected to its new durable home. This is the beat that makes the store *better organized*, not just bigger. (Handbook ch. 5; `maintenance/consolidate.py`.)
 
 ### Outcome attribution — crediting the facts that actually helped
 
-A no-LLM step woven through the loop that joins the memories a session recalled to that session's outcome signal via `informed_by` edges, then folds them into a weight that multiplies into every future ranking. Good memories rise and dead ones fade, all from deterministic bookkeeping with no model call. (Handbook ch. 5; module `ultra_memory/attribution.py`; toggle `SP8_ATTRIBUTION_ENABLE`.)
+A no-LLM step woven through the loop that joins the memories a session recalled to that session's outcome signal via `informed_by` edges, then folds them into an `outcome_weight` that multiplies into every future ranking — so as outcome signals arrive, the facts that actually helped rise and the dead ones fade, all from deterministic bookkeeping with no model call. The edge-and-weight machinery ships built and armed; it feeds on the session outcomes a consumer marks, and the weight sits at a neutral 1.0 until those signals flow. (Handbook ch. 5; module `ultra_memory/attribution.py`; toggle `SP8_ATTRIBUTION_ENABLE`.)
 
 ### Self-correct — the loop fixing its *own* earlier notes
 
@@ -114,7 +114,7 @@ Beyond the self-learning loop, a deterministic maintenance pipeline keeps the *w
 
 ### The wiki-maintenance pipeline (detect → adjudicate)
 
-The Tier-2 curation beat runs deterministic detectors over the active wiki roots to build a worklist — `detect_scope` (new atomics), `detect_dedup` (embedding-cosine near-duplicates), `detect_lint` (broken links, missing frontmatter, oversize pages), `detect_graph` (orphans and clusters), `detect_stale` (superseded pages) — then hands the whole worklist to **one batched OAuth call** that decides each item (merge this near-dup, recategorize that page, add this cross-link). The decisions are applied *through the gateway verbs*, so they too are routed, redacted, and audited. One LLM call per run, not one per page. Two safety rails: it **never deletes** an atomic (a duplicate becomes a redirect stub with sources concatenated — a hard rule learned the hard way), and dedup uses a calibrated grey-zone band (cosine 0.78–0.86) where an optional consumer-supplied judge decides "same idea?" rather than guessing. (Handbook ch. 9; package `ultra_memory/wiki_maintenance/`.)
+The Tier-2 curation beat runs deterministic detectors over the active wiki roots to build a worklist — `detect_scope` (new atomics), `detect_dedup` (embedding-cosine near-duplicates), `detect_lint` (broken links, missing frontmatter, oversize pages), `detect_graph` (orphans and clusters), `detect_stale` (superseded pages) — then hands the whole worklist to **a small number of batched OAuth calls** (the worklist is chunked, a handful of items per call) that decide each item (merge this near-dup, recategorize that page, add this cross-link). The decisions are applied *through the gateway verbs*, so they too are routed, redacted, and audited. A few batched calls per run, never one per page. Two safety rails: it **never deletes** an atomic (a duplicate becomes a redirect stub with sources concatenated — a hard rule learned the hard way), and dedup uses a calibrated grey-zone band (cosine 0.78–0.86) where an optional consumer-supplied judge decides "same idea?" rather than guessing. (Handbook ch. 9; package `ultra_memory/wiki_maintenance/`.)
 
 ### Tier-1 light maintenance (no LLM)
 
@@ -160,7 +160,7 @@ A subagent, a cron, or any unknown caller is limited to `project`/`reference` fa
 
 ### Per-beat kill switches and dry-run
 
-You are never locked in. Every step has an individual off switch — from the `/plugin` config UI or a matching environment variable — and they are *kill-switches, not enable-flags* (everything ships on; a toggle only ever disengages a beat). Session capture, outcome attribution, self-correction, skill synthesis, atomic graduation, the recall hook, and any single beat can each be disabled independently; a memory-only install simply leaves the wiki root unset and the wiki steps no-op. The two bold beats also have a dry-run presence switch (`SP7_AGGRESSIVE_DRYRUN`, `SP10_SYNTHESIS_DRYRUN`) so they plan, run the eval-gate, and write the digest while applying nothing — letting you watch the loop's judgment for a few weeks before letting it act. (Handbook ch. 5, 7.)
+You are never locked in. Every step has an individual off switch — from the `/plugin` config UI or a matching environment variable — and they are *kill-switches, not enable-flags* (everything ships on; a toggle only ever disengages a beat). Session capture, outcome attribution, self-correction, skill synthesis, atomic graduation, the recall hook, and any single beat can each be disabled independently; a memory-only install simply leaves the wiki root unset and the wiki steps no-op. The two bold beats also have a dry-run presence switch (`SP7_AGGRESSIVE_DRYRUN`, `SP10_SYNTHESIS_DRYRUN`) so they plan, run the eval-gate, and write the digest while applying nothing — a way to watch the loop's judgment before handing it the pen. By default every bold beat ships **armed**, acting autonomously behind the full safety wall. (Handbook ch. 5, 7.)
 
 ---
 

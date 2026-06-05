@@ -76,7 +76,7 @@ if setup.should_offer_backfill(db, cmd):
    (the async SessionStart `beats` hook, throttled per-beat). It reads only your local
    session transcripts and runs on **your Claude login (no API key)**. To turn any beat
    off, use the `/plugin` config toggles (Session capture / Outcome attribution /
-   Self-correction / Skill synthesis). For deterministic cadence on a headless box, print
+   Self-correction / Skill synthesis / Atomic graduation). For deterministic cadence on a headless box, print
    the optional OS-scheduler snippet and let the user install it themselves:
    ```bash
    "$PY" -c "
