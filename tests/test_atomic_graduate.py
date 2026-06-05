@@ -107,3 +107,44 @@ def test_per_candidate_fail_open(tmp_path):
     assert res["created"] == 0
     assert len(si.pending_atomic_candidates(conn)) == 1   # unresolved → retry
     conn.close()
+
+
+_SLUG = ag._slugify("fastembed cache purge", "onnxruntime NoSuchFile model.onnx")
+
+
+def test_eval_gate_keeps_findable(tmp_path):
+    conn = _db(tmp_path); _seed(conn)
+    gw = _gw(); q = []
+    res = ag.run_atomic_graduate_pass(
+        conn, ts=TS, env={}, gateway_run=gw, signal_match=lambda *a, **k: None,
+        wiki_root=tmp_path / "wiki", cap=3,
+        recall_fn=lambda signal, **k: [{"slug": _SLUG}],   # the new slug IS findable
+        index_fn=lambda **k: None, quarantine_fn=lambda path: q.append(path))
+    assert res["created"] == 1 and res["quarantined"] == 0 and q == []
+    assert si.pending_atomic_candidates(conn) == []
+    conn.close()
+
+
+def test_eval_gate_quarantines_unfindable(tmp_path):
+    conn = _db(tmp_path); _seed(conn)
+    gw = _gw(); q = []
+    res = ag.run_atomic_graduate_pass(
+        conn, ts=TS, env={}, gateway_run=gw, signal_match=lambda *a, **k: None,
+        wiki_root=tmp_path / "wiki", cap=3,
+        recall_fn=lambda signal, **k: [{"slug": "some-other-page"}],   # new slug NOT present
+        index_fn=lambda **k: None, quarantine_fn=lambda path: q.append(path))
+    assert res["created"] == 1 and res["quarantined"] == 1 and len(q) == 1
+    assert si.pending_atomic_candidates(conn) == []   # resolved (page exists, quarantined)
+    conn.close()
+
+
+def test_beat_disabled_by_killswitch():
+    # Kill-switch short-circuits before touching conn/config.
+    assert ag.beat(None, None, TS, {"ATOMIC_GRADUATE_DISABLE": "1"})["mode"] == "disabled"
+
+
+def test_beat_no_candidates_is_noop(tmp_path):
+    conn = _db(tmp_path)   # empty store → beat returns before resolving config/gateway
+    res = ag.beat(conn, None, TS, {})
+    assert res["mode"] == "ran" and res["created"] == 0
+    conn.close()

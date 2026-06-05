@@ -45,8 +45,9 @@ _DEFAULT_CADENCE = {"session_ingest": 24, "consolidate": 168, "aggressive": 720,
 # `session_ingest` beat is additionally gated by SESSION_INGEST_ENABLE in its own
 # code — opt-OUT (default ON since the autonomy flip): set it to '0'/'false'/'no'/'off'
 # to disable.
-_DEFAULT_BEATS = {"session_ingest": True, "consolidate": True, "aggressive": True,
-                  "synthesize": True, "learnings": True, "wiki_maintenance": True}
+_DEFAULT_BEATS = {"session_ingest": True, "atomic_graduate": True, "consolidate": True,
+                  "aggressive": True, "synthesize": True, "learnings": True,
+                  "wiki_maintenance": True}
 _DEFAULT_MODEL = "claude-sonnet-4-6"
 
 _WIKI_ROOTS_ENV = "ULTRA_MEMORY_WIKI_ROOTS"

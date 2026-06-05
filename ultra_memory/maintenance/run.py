@@ -26,8 +26,8 @@ from ultra_memory._time import hours_between, now_utc_zulu
 # the downstream beats. `learnings` runs LAST — the Tier-1 no-LLM projection-regen
 # that projects the lessons consolidate graduated + refreshes the blocks of any skill
 # synthesize created/superseded this run.
-BEAT_ORDER = ("session_ingest", "consolidate", "aggressive", "synthesize", "learnings",
-              "wiki_maintenance")
+BEAT_ORDER = ("session_ingest", "atomic_graduate", "consolidate", "aggressive",
+              "synthesize", "learnings", "wiki_maintenance")
 
 
 def default_registry() -> dict:
@@ -38,6 +38,11 @@ def default_registry() -> dict:
     try:
         from ultra_memory.maintenance import session_ingest
         registry["session_ingest"] = session_ingest.beat
+    except Exception:  # a beat module that fails to import must not wedge the rest
+        pass
+    try:
+        from ultra_memory.maintenance import atomic_graduate
+        registry["atomic_graduate"] = atomic_graduate.beat
     except Exception:  # a beat module that fails to import must not wedge the rest
         pass
     try:
