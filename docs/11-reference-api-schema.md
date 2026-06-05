@@ -151,7 +151,7 @@ Every function here goes through `_write_txn` (retry + spool + `audit_log`).
 
 ### `wiki_sync`
 
-- `wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts) -> {upserted, skipped, pruned, embedded, errors}`
+- `wiki_sync(conn, wiki_roots, *, embedder=None, rebuild=False, ts) -> {upserted, skipped, pruned, embedded, embedded_signal, errors}`
   — walk each `<root>/<topic>/**/*.md`, upsert each page into `unified_index`,
   reconcile orphans (scoped to the topics synced this call), embed changed pages into
   the shared cache. **Project-agnostic** (roots are consumer-fed; no topic-model
@@ -160,6 +160,13 @@ Every function here goes through `_write_txn` (retry + spool + `audit_log`).
   chokepoint** (`title`/`snippet`/`bm25_text`/`frontmatter` pass through `strip_secrets`
   before insert). `rebuild=True` forces a full re-populate (the one-pass `bm25_text`
   backfill).
+- `extract_signal_text(body) -> str | None` — the optional `## Signal` H2 body (the
+  Recall-Reflex observable); embedded as a distinct `knowledge_signal` channel
+  (`embedded_signal` count; pruned on orphan AND on signal-removed-on-edit). See the
+  `recall` section + `wiki/SCHEMA.md`.
+- **CLI:** `python -m ultra_memory.wiki_sync [--roots R] [--db DB] [--rebuild] [--no-embed]`
+  — populate/refresh the mirror from a consumer cron (no roots → rc 0 no-op; fail-soft to
+  BM25-only if no embedder).
 
 ### `unified_query`
 
@@ -167,10 +174,14 @@ The cross-store **warm** retrieval surface — one ranked list spanning `memorie
 `unified_index` knowledge mirror, scoped by `(type × topic × caller_class)`, fused with
 best-rank-per-backend RRF (k=60), weighted by `outcome_weight`. **No LLM.**
 
-- `unified_recall(conn, query, *, caller_class, agent_topics, embedder=None, top_k=5, dim=EMBED_DIM, now_ts=None, ts=None, audit=True) -> [dict]`
+- `unified_recall(conn, query, *, caller_class, agent_topics, embedder=None, top_k=5, dim=EMBED_DIM, now_ts=None, ts=None, audit=True, include_memory=True) -> [dict]`
   — resolve the type wall + topic scope, rank the memory backend (`query_memories`) +
-  the two knowledge backends (generic BM25 + cached-vector cosine), fuse, × `outcome_weight`,
-  audit each hit via `record_access`. `agent_topics`: a set ⇒ topic-scoped; `None` ⇒
+  the knowledge backends (generic BM25 + cached-vector cosine + the optional **`## Signal`**
+  cosine backend, `target_kind='knowledge_signal'` — the Recall-Reflex boost), fuse,
+  × `outcome_weight`, audit each hit via `record_access`. `include_memory=False` skips the
+  memory backend entirely (no `query_memories` call → no embedder requirement, and **no**
+  `user`/`feedback`/memory can surface — the knowledge-only path the engineering hook uses).
+  `agent_topics`: a set ⇒ topic-scoped; `None` ⇒
   all topics (orchestrator); the **empty set** ⇒ fail-closed (only `topic IS NULL`
   operational memories of allowed types, **zero topiced knowledge**). Knowledge hits
   carry `source_kind='knowledge'` + `slug, topic, title, page_type, snippet, path,
@@ -179,6 +190,33 @@ best-rank-per-backend RRF (k=60), weighted by `outcome_weight`. **No LLM.**
 - `topic_scope_from_env(env, conn=None, *, agent_name=None) -> set` — the **fail-closed**
   topic-scope resolver: union of `ULTRA_MEMORY_CALLER_TOPIC` + `agent_topic_bindings`
   rows; no binding ⇒ the empty set.
+
+### `recall` — the Recall-Reflex primitive
+
+> Recognise a situation → recall what you know about it → act informed.
+
+The single public entry point that turns the warm retrieval surface into a reflex used by
+every consumer (the engineering hook + the trading observation surfaces).
+
+- `recall(signal_text, *, top_k=5, caller_class="subagent", agent_topics=None, db_path=None, embedder=None, build_embedder=True, knowledge_only=False, exclude_page_types=("index","redirect"), conn=None, now_ts=None) -> [dict]`
+  — a thin, **fail-open** (`[]` on any error) wrapper over `unified_recall`. Defaults to
+  `caller_class="subagent"` (SAFE_TYPES) so a main-session caller cannot leak `user`/`feedback`.
+  `knowledge_only=True` → `include_memory=False` (wiki-only; privacy-safe + no embedder needed).
+  `build_embedder` lazily builds a fastembed embedder unless one is passed (fail-soft to BM25-only).
+  Navigational page-types are filtered out (over-fetch then trim). Hits are the uniform
+  `{source_kind, slug|id, title, snippet, path?, page_type?, topic?, score}`.
+- **CLI:** `python -m ultra_memory.recall "<signal>" [--top N] [--topic t,u] [--caller-class C] [--no-embed] [--json]` — always rc 0.
+
+**The `## Signal` channel.** `wiki_sync.extract_signal_text(body)` extracts an atomic's optional
+`## Signal` H2 (the observable for recall, see `wiki/SCHEMA.md`). `wiki_sync` embeds it as a distinct
+`knowledge_signal` cache row; `unified_recall` fuses it as a separate RRF backend (the boost); and
+`detect_dedup` compares it as a second dedup axis (`signal_vecs`, max(mechanism, signal) cosine — the
+"same observable, different prose" merge the mechanism axis misses).
+
+**The `UserPromptSubmit` hook** (`ultra_memory.hooks.recall_prompt`, verb `recall` in `um-hook.cmd`):
+on a concrete error signature (`detect_signature`), it calls `recall(knowledge_only=True,
+build_embedder=False)` and injects the hits as `additionalContext`. Tier-2 only, conservative matcher,
+fail-open, `<=3` hits, kill-switch `RECALL_HOOK_DISABLE`. The generic method is the `recall-reflex` skill.
 
 ### `attribution`
 
