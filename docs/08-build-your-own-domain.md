@@ -224,7 +224,7 @@ def create_page(self, path, content, *, topic=None, wiki_root=None) -> str:
     return super().create_page(path, content, topic=t, wiki_root=wiki_root)
 ```
 
-That is the *whole* extension. The page write, the path-escape guard, the redaction, the lock, the audit row — all inherited. Trading's `config.toml` wires it in with one line (`wiki_gateway = "scripts/wiki_lib.py"`), declares its topics (`["trading", "programming"]`), and supplies the optional seams it actually diverges on (a project-specific linter, a calibrated grey-zone merge judge, a graph extractor). Read `scripts/wiki_lib.py` end to end as the reference for a real, production extension — it is small precisely because the engine does the heavy lifting.
+That is the *whole* extension. The page write, the path-escape guard, the redaction, the lock, the audit row — all inherited. Trading's `config.toml` wires it in with one line (`wiki_gateway = "scripts/wiki_lib.py"`), declares its topics (`["trading", "programming"]`), and supplies the optional seams it actually diverges on (a project-specific linter, a calibrated grey-zone merge judge, a graph extractor, and an `atomic_graduate_themes` map that routes auto-graduated lessons into its own themes). Read `scripts/wiki_lib.py` end to end as the reference for a real, production extension — it is small precisely because the engine does the heavy lifting.
 
 ---
 

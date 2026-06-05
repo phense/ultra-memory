@@ -114,6 +114,7 @@ wiki_gateway  = "scripts/wiki_lib.py"                # the audited wiki write ga
 topics        = ["trading"]                          # wiki topics this project owns
 model         = "claude-sonnet-4-6"                  # the OAuth CLI model for LLM beats
 notifier      = "mymod:notify"                       # module:function, called fail-open on beat errors
+atomic_graduate_themes = { gotcha = "tooling", lesson = "strategy-methodology" }  # kind -> wiki theme
 
 [maintenance.beats]                                   # the autonomous posture: default ON, wall-governed
 session_ingest   = true
@@ -152,6 +153,7 @@ wiki_maintenance = 24                                 # ~daily
 | `wiki_merge_decider` | `""` → auto-merge only | `(cosine, claim, cand_text) -> bool` for grey-zone dedup. (Env: `ULTRA_MEMORY_WIKI_MERGE_DECIDER`.) |
 | `wiki_graph_extractor` | `[]` → no graph rebuild | A command template that builds the graph DB the graph detector queries; `{wiki_root}` / `{graph_dir}` are substituted. |
 | `self_learning_files` | `[]` | `[path, tag]` pairs naming each `Learnings.md` the projection-regen beat rebuilds. Generated `gen-*` skills are added on top automatically. |
+| `atomic_graduate_themes` | `{}` → theme = the candidate's `kind` | Maps each Atomic-Graduation candidate **kind** (`gotcha` / `lesson` / …) to the wiki **theme** whose theme-index its `## Signal` atomic registers under. Empty keeps the engine domain-agnostic (it uses the kind itself as the theme, auto-creating that theme-index). This is the consumer seam that routes auto-graduated lessons into *your* existing themes. |
 | `[maintenance.beats]` | all `true` | Per-beat on/off. A beat set `false` here never runs, regardless of the env toggles. |
 | `[maintenance.cadence_hours]` | see below | Per-beat throttle in hours. |
 | `[maintenance.wiki]` | `{}` → reference schema | Override any `WikiSchemaConfig` field. Omit entirely if your wiki follows the reference conventions. |
