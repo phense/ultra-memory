@@ -155,10 +155,18 @@ class WikiGateway:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def _get_embed_model(self):
-        """Lazy-load the fastembed model (optional dep — absent → callers degrade gracefully)."""
+        """Lazy-load the fastembed model (optional dep — absent → callers degrade gracefully).
+
+        Pins the model cache to a PERSISTENT dir (persistent_cache_dir), never fastembed's
+        $TMPDIR default which macOS purges → onnxruntime NoSuchFile (the bug that killed the
+        knowledge MCP at startup + the Trading wiki-flush). Mirrors retrieval_core.default_embedder.
+        """
         if self._embed_model is None:
             from fastembed import TextEmbedding
-            self._embed_model = TextEmbedding(model_name=self.EMBED_MODEL_NAME)
+            from ultra_memory.retrieval_core import persistent_cache_dir
+            self._embed_model = TextEmbedding(
+                model_name=self.EMBED_MODEL_NAME, cache_dir=persistent_cache_dir()
+            )
         return self._embed_model
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:

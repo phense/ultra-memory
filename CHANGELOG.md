@@ -13,6 +13,15 @@ change between `0.0.x` releases.
   → extend → develop + a design-notes appendix); the old `docs/{user,developer,reference}`
   split-by-audience pages were folded into it.
 
+### Fixed
+- **`WikiGateway` embed loader pinned to the persistent model cache.** `_get_embed_model`
+  loaded fastembed with its default `$TMPDIR/fastembed_cache` rather than
+  `persistent_cache_dir()` (which `retrieval_core.default_embedder` already used). On
+  macOS the OS purges that temp dir, dangling the ONNX blob so every gateway embed
+  (dedup / overlap) died with onnxruntime `NoSuchFile` — the same failure that had
+  already bitten the knowledge MCP. The gateway now uses the persistent cache, so the
+  model survives temp-dir reaping for all `WikiGateway` consumers.
+
 ## [0.0.4] — 2026-06-04
 
 ### Changed

@@ -1,7 +1,38 @@
 # tests/test_wiki_gateway_base.py
+import sys
+import tempfile
+import types
+
 import pytest
 from pathlib import Path
 from ultra_memory.wiki_gateway import WikiGateway
+
+
+def test_get_embed_model_uses_persistent_cache_dir(tmp_path, monkeypatch):
+    """WikiGateway must load fastembed with the PERSISTENT model cache_dir, not the OS
+    temp default ($TMPDIR/fastembed_cache) which macOS purges → onnxruntime NoSuchFile
+    (the bug that killed the knowledge MCP + the Trading wiki-flush). Mirrors
+    retrieval_core.default_embedder, which already passes persistent_cache_dir()."""
+    from ultra_memory.retrieval_core import persistent_cache_dir
+
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path / "fe-cache"))
+
+    captured = {}
+    fake_mod = types.ModuleType("fastembed")
+
+    class _FakeTextEmbedding:
+        def __init__(self, *, model_name, cache_dir=None, **_kw):
+            captured["model_name"] = model_name
+            captured["cache_dir"] = cache_dir
+
+    fake_mod.TextEmbedding = _FakeTextEmbedding
+    monkeypatch.setitem(sys.modules, "fastembed", fake_mod)
+
+    gw = WikiGateway(wiki_root=tmp_path, topic="t")
+    gw._get_embed_model()
+
+    assert captured["cache_dir"] == persistent_cache_dir()
+    assert not captured["cache_dir"].startswith(tempfile.gettempdir())
 
 def test_default_route_is_topic_concepts_slug(tmp_path):
     gw = WikiGateway(wiki_root=tmp_path, topic="research")
