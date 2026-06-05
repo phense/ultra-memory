@@ -414,6 +414,42 @@ def _signal_candidates(conn, query, *, by_slug, embedder, dim):
     return [slug for slug, score in scored if score > 0.0]
 
 
+def best_signal_match(conn, query, *, embedder, dim=retrieval_core.EMBED_DIM, topic=None):
+    """The TOP `(slug, cosine)` over the `## Signal` channel (`target_kind=
+    'knowledge_signal'`) for `query`, or None if no positive match / no signal vector /
+    no embedder. Optionally scoped to `topic` via the `unified_index` join. This is the
+    Atomic-Graduation DEDUP-GATE: compare a new candidate's observable to existing
+    recorded observables so a near-duplicate is merged, not re-created. Reuses
+    `retrieval_core.cosine_search`; vectors are read from cache (no embed on the read
+    path for stored signals)."""
+    if embedder is None:
+        return None
+    if topic is None:
+        rows = conn.execute(
+            "SELECT target_id, dim, vector FROM embeddings "
+            "WHERE target_kind='knowledge_signal' AND model_name=?",
+            (retrieval_core.EMBED_MODEL,)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT e.target_id, e.dim, e.vector FROM embeddings e "
+            "JOIN unified_index u ON u.slug = e.target_id "
+            "WHERE e.target_kind='knowledge_signal' AND e.model_name=? AND u.topic=?",
+            (retrieval_core.EMBED_MODEL, topic)).fetchall()
+    cached = {}
+    for r in rows:
+        if r["dim"] == dim:
+            cached[r["target_id"]] = retrieval_core.unpack_vector(r["vector"], dim)
+    if not cached:
+        return None
+    q_vec = embedder([query])[0]
+    if len(q_vec) != dim:
+        return None
+    scored = retrieval_core.cosine_search(q_vec, list(cached.items()))
+    if not scored or scored[0][1] <= 0.0:
+        return None
+    return (scored[0][0], scored[0][1])
+
+
 # ---------------------------------------------------------------------------
 # The warm cross-store recall surface.
 # ---------------------------------------------------------------------------

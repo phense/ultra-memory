@@ -80,6 +80,38 @@ def _embed_knowledge(conn, slug, vec, dim=3):
     conn.execute("COMMIT")
 
 
+def _embed_signal(conn, slug, vec, dim=3):
+    """Seed a ## Signal vector (target_kind='knowledge_signal') — the channel
+    best_signal_match (Atomic Graduation dedup-gate) ranks over."""
+    from ultra_memory import retrieval_core as rc
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute(
+        "INSERT INTO embeddings (target_kind, target_id, model_name, dim, vector, "
+        "content_sha256) VALUES ('knowledge_signal', ?, ?, ?, ?, ?)",
+        (slug, rc.EMBED_MODEL, dim, rc.pack_vector(vec), "sig-" + slug))
+    conn.execute("COMMIT")
+
+
+def test_best_signal_match_returns_top_signal_cosine(tmp_path):
+    conn = _db(tmp_path)
+    _add_knowledge(conn, slug="a", topic="trading", title="A", snippet="body a")
+    _add_knowledge(conn, slug="b", topic="trading", title="B", snippet="body b")
+    _embed_signal(conn, "a", [1.0, 0.0, 0.0])
+    _embed_signal(conn, "b", [0.0, 1.0, 0.0])
+    emb = _fake_embedder({"alpha": [1.0, 0.0, 0.0]}, dim=3)
+    m = unified_query.best_signal_match(conn, "alpha observable", embedder=emb, dim=3)
+    assert m is not None and m[0] == "a" and m[1] > 0.99
+    conn.close()
+
+
+def test_best_signal_match_none_without_signal_vectors(tmp_path):
+    conn = _db(tmp_path)
+    _add_knowledge(conn, slug="a", topic="trading", title="A", snippet="body")
+    emb = _fake_embedder({"alpha": [1.0, 0.0, 0.0]}, dim=3)
+    assert unified_query.best_signal_match(conn, "alpha", embedder=emb, dim=3) is None
+    conn.close()
+
+
 # ---------------------------------------------------------------------------
 # FENCE 1 — memory-only byte-identity (HARD gate).
 # ---------------------------------------------------------------------------
