@@ -43,11 +43,19 @@ _PATTERNS = [
 
 # keyword=value / keyword: value — value must be credential-shaped (see _looks_credential).
 # keyword vocabulary includes `username` (the Webshare rotating-proxy USERNAME is a
-# named secret); the value floor is 6 (not 12) so short credentials like
-# `password=p4ssvalue` no longer slip through. `_looks_credential` still guards
-# against mangling hyphen-joined prose.
+# named secret) and the AWS access-key family (`aws_secret_access_key=…`,
+# `aws_access_key_id=…`, bare `access_key=…`). The access-key keyword sits in a
+# COMPOUND/interior position, so the alternation lists the compound forms explicitly —
+# an unanchored search still locates the interior keyword (e.g. `secret_access_key`
+# inside `aws_secret_access_key`) and redacts its value. The value floor is 6 (not 12)
+# so short credentials like `password=p4ssvalue` no longer slip through; the value
+# charclass admits `/` so a base64 AWS secret is covered. `_looks_credential` still
+# guards against mangling hyphen-joined prose. Compound forms precede their bare stems
+# so the longer match wins at a given position.
 _KEYVALUE = re.compile(
-    r"(?i)(?P<pre>(?:api[_-]?key|secret|token|password|passwd|pwd|username)\s*[=:]\s*)"
+    r"(?i)(?P<pre>(?:secret[_-]?access[_-]?key|access[_-]?key(?:[_-]?id)?|api[_-]?key"
+    r"|private[_-]?key|secret|token|password|passwd|pwd|username|cred(?:ential)?s?)"
+    r"\s*[=:]\s*)"
     r"(?P<q>['\"]?)(?P<val>[A-Za-z0-9._\-/+]{6,})(?P=q)"
 )
 _HYPHEN_WORDS = re.compile(r"[A-Za-z]+(?:-[A-Za-z]+)+")

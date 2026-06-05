@@ -93,6 +93,36 @@ def test_keyvalue_still_redacts_real_values():
     assert R in strip_secrets("password: hunter2hunter2")     # has entropy/digits
 
 
+# --- D4-1: the AWS access-key family (compound / interior keyword) ---
+
+def test_redacts_aws_access_key_family():
+    """The audit's confirmed leak: the AWS secret/access keys carry the credential
+    keyword in a COMPOUND/interior position, which the bare `secret`/`api_key`
+    vocabulary missed — so the value persisted in cleartext into the DB AND the
+    git-committed export. All three forms must now redact."""
+    sk = "aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    out = strip_secrets(sk)
+    assert R in out and "wJalrXUtnFEMI" not in out, "AWS secret access key survived"
+    assert R in strip_secrets("aws_access_key_id=AKIAIOSFODNN7EXAMPLE")
+    assert R in strip_secrets("access_key = abc123def456ghi789")
+    assert R in strip_secrets("ACCESS_KEY_ID: AKIAEXAMPLE1234567X")  # case-insensitive
+
+
+def test_redacts_private_key_and_credentials_assignments():
+    assert R in strip_secrets("private_key=abc123def456ghi789")
+    assert R in strip_secrets("credentials: s3cr3tvalue99")
+    assert R in strip_secrets("creds=topsecret123")
+
+
+def test_access_key_family_does_not_over_redact_prose():
+    """The new vocabulary must not eat hyphenated prose or word-only values."""
+    assert strip_secrets("access-key-rotation is a good policy") == \
+        "access-key-rotation is a good policy"
+    assert strip_secrets("credit spread; credits earned") == "credit spread; credits earned"
+    # 'private key management' (spaces) is prose, not a `private_key=` assignment
+    assert strip_secrets("private key management matters") == "private key management matters"
+
+
 # ---------------------------------------------------------------------------
 # LOCKING SUITE A — every major token format, at its REAL vendor-spec length,
 # MUST be redacted. Each token below is sized to its documented real-world
