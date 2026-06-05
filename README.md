@@ -97,7 +97,7 @@ bge-small), cached afterward. **No API key, no cloud account, ever.**
 
 ## What makes it different
 
-Three things that, together, no other Claude-memory tool ships:
+Four things that, together, no other Claude-memory tool ships:
 
 ### 1. A real knowledge base — not just session memory
 Session memory is volatile: preferences, state, corrections. But real expertise — concepts, studies,
@@ -135,6 +135,32 @@ delete (only archive), is capped per run (at most a few edits, a few reversions,
 checkpoints to git before it acts, and writes you a summary afterward. Because every step is small and
 reversible, mistakes are rare *and* cheap to undo. You stay in the review loop, not the work loop. (See
 [Status](#status) for exactly what's on by default.)
+
+The same loop also runs a backstop that **captures lessons as findable wiki pages on its own** — so a
+fix you discover today is there to be recalled tomorrow (see below).
+
+### 4. Recall-Reflex — recognise → recall → act
+The whole point of a memory is to *reuse* it, yet most tools only fire when you've already decided to
+look something up. ultra-memory closes that gap from both ends — it recalls what you know **the moment
+the situation appears**, and it files away what you learn **so it can be found by that same situation
+next time**.
+
+- **Recall on the observable.** Pages can carry a `## Signal` — the condition in the words it actually
+  shows up in (an error like `onnxruntime NoSuchFile … model_optimized.onnx`, a market state like
+  `VIX spike + breadth collapse`). When a concrete error signature lands in your prompt, a hook recalls
+  the matching prior art and drops it straight into Claude's context — no "remember to search" required.
+  The same one-line `recall()` primitive is there for any consumer to call on its own observations.
+- **Capture so it's findable.** When a session ends, the background loop quietly turns the durable
+  lessons it solved — the engineering gotcha, the strategy lesson — into `## Signal`-keyed wiki pages,
+  each keyed to the observable you'd hit it by. No human in the loop, but fenced like everything else:
+  it merges instead of duplicating, archives instead of deleting, is capped per run, and quarantines any
+  page it can't recall back by its own signal.
+
+This is the difference between a memory you *consult* and one that **reaches you when it matters** — it
+is, concretely, what stops Claude from re-deriving a fix you already solved (we built the very same
+one twice before this existed). On by default, with a kill-switch; the full mechanics — the `recall()`
+API, the `## Signal` channel, the hook, and the graduation beat — live in the
+[handbook](docs/11-reference-api-schema.md#recall--the-recall-reflex-primitive).
 
 ---
 

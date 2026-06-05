@@ -28,11 +28,14 @@ These are the values the `/plugin` config UI offers. Every one is optional; leav
 | `attribution_enable` | `on` | Outcome attribution — credit which recalled facts helped. `off` disables. | `SP8_ATTRIBUTION_ENABLE` |
 | `aggressive_enable` | `on` | Self-correction (rewrite / revert / quarantine of the loop's *own* notes). `off` disables. | `SP7_AGGRESSIVE_DISABLE` (inverted) |
 | `synthesize_enable` | `on` | Skill synthesis — induce a new skill from a cluster of matured lessons. `off` disables. | `SP10_SYNTHESIS_DISABLE` (inverted) |
+| `graduate_enable` | `on` | Atomic Graduation — turn each captured durable lesson into a `## Signal`-keyed wiki atomic so it is reflexively recall-findable. `off` disables. | `ATOMIC_GRADUATE_DISABLE` (inverted) |
 
-Two of these toggles **invert** when they cross into the engine, and the distinction matters if you ever set the env var by hand:
+Three of these toggles **invert** when they cross into the engine, and the distinction matters if you ever set the env var by hand:
 
 - `session_ingest_enable` and `attribution_enable` use an **opt-out** convention: the env var is read as ON unless its value is one of `0`, `false`, `no`, `off` (case-insensitive). Unset = ON.
-- `aggressive_enable` and `synthesize_enable` map to a **kill switch** (`SP7_AGGRESSIVE_DISABLE` / `SP10_SYNTHESIS_DISABLE`) that uses a **presence** convention: the switch is active whenever the variable *exists at all* — even set to an empty string. So choosing `off` in the UI makes the wrapper *set* `SP7_AGGRESSIVE_DISABLE=1`; choosing anything else leaves it *unset*. Do not set the disable variable to `0` expecting it to mean "enabled" — presence alone disables.
+- `aggressive_enable`, `synthesize_enable`, and `graduate_enable` map to a **kill switch** (`SP7_AGGRESSIVE_DISABLE` / `SP10_SYNTHESIS_DISABLE` / `ATOMIC_GRADUATE_DISABLE`). Choosing `off` in the UI makes the wrapper *set* the disable variable to `1`; choosing anything else leaves it *unset*. Two reader conventions exist: `SP7_AGGRESSIVE_DISABLE` / `SP10_SYNTHESIS_DISABLE` disable on mere **presence** (even an empty string), while `ATOMIC_GRADUATE_DISABLE` and `RECALL_HOOK_DISABLE` disable on any **non-empty** value (they `.strip()` the value) — so set them to `1`, never `0` (`0` is non-empty and *also* disables). Across all of them, the documented `=1` usage is correct; never set a disable variable to `0` expecting "enabled".
+
+The recall arm has no `userConfig` prompt — the `UserPromptSubmit` recall hook ships on with no UI toggle; turn it off with the `RECALL_HOOK_DISABLE` env var below.
 
 ---
 
@@ -74,6 +77,9 @@ The self-learning beats also read these enable/disable variables directly (see t
 | `SP7_AGGRESSIVE_DRYRUN` | presence (set = plan-only) | unset | Self-correction plans + writes a digest but applies nothing. |
 | `SP10_SYNTHESIS_DISABLE` | presence (set = disabled) | unset = ON | Skill-synthesis beat. |
 | `SP10_SYNTHESIS_DRYRUN` | presence (set = plan-only) | unset | Skill synthesis plans + digests but creates no skill. |
+| `RECALL_HOOK_DISABLE` | presence (set = disabled) | unset = ON | The `UserPromptSubmit` recall hook — recognise a concrete error signature → recall prior art → inject it as `additionalContext` (knowledge-only, BM25, fail-open, ≤3 hits). |
+| `ATOMIC_GRADUATE_DISABLE` | presence (set = disabled) | unset = ON | The `atomic_graduate` beat — graduate each captured durable lesson into a `## Signal`-keyed wiki atomic (deterministic apply, no LLM). |
+| `ATOMIC_GRADUATE_CAP` | integer | `3` | Blast-radius cap: max atomics *created* per `atomic_graduate` run (merges/skips don't count against it; the overflow is left for the next run). A non-integer value falls back to `3`. |
 
 LLM-call authentication is **not** a knob you turn here. There is no `ULTRA_MEMORY_API_KEY`. Every LLM beat runs through your local `claude` CLI on your own subscription; an `ANTHROPIC_API_KEY` on the process is a hard error that refuses to run. See [Privacy, cost & control](07-privacy-cost-control.md) for the full chokepoint.
 
@@ -111,6 +117,7 @@ notifier      = "mymod:notify"                       # module:function, called f
 
 [maintenance.beats]                                   # the autonomous posture: default ON, wall-governed
 session_ingest   = true
+atomic_graduate  = true
 consolidate      = true
 aggressive       = true
 synthesize       = true
@@ -118,11 +125,12 @@ learnings        = true
 wiki_maintenance = true
 
 [maintenance.cadence_hours]                           # per-beat throttle (the session-driven clock)
-session_ingest = 24                                   # ~daily
-consolidate    = 168                                  # weekly
-aggressive     = 720                                  # monthly
-synthesize     = 720                                  # monthly
-learnings      = 168                                  # weekly
+session_ingest  = 24                                  # ~daily
+atomic_graduate = 24                                  # ~daily (same clock as its producer, session_ingest)
+consolidate     = 168                                 # weekly
+aggressive      = 720                                 # monthly
+synthesize      = 720                                 # monthly
+learnings       = 168                                 # weekly
 wiki_maintenance = 24                                 # ~daily
 
 # Optional — only for a consumer wiki that does NOT follow the reference conventions:
@@ -155,6 +163,7 @@ The heavy steps run on a **session-lifecycle clock**: an async `SessionStart` ho
 | Beat | Default cadence (hours) | What it is | Needs a git checkpoint? |
 |---|---|---|---|
 | `session_ingest` | 24 (~daily) | Mines finished sessions into the store. | No |
+| `atomic_graduate` | 24 (~daily) | Deterministic capture-findably backstop: drains `atomic_candidate`s into `## Signal`-keyed wiki atomics (runs right after `session_ingest`). | No |
 | `consolidate` | 168 (weekly) | Promotes proven lessons into the store / wiki (additive only). | No |
 | `aggressive` | 720 (monthly) | Self-correction: rewrite / revert / quarantine the loop's own notes. | **Yes** — self-skips on a dirty/no-git tree |
 | `synthesize` | 720 (monthly) | Induces a new skill from a cluster of matured lessons. | **Yes** — self-skips on a dirty/no-git tree |
@@ -209,6 +218,21 @@ Use the opt-out value (it is *not* a presence switch — set it to a disable wor
 
 ```bash
 export SESSION_INGEST_ENABLE=off   # 0 / false / no also work
+```
+
+### Turn off the Recall-Reflex pair (recall hook + atomic graduation)
+
+The reflex has two arms, each its own presence kill switch. The `UserPromptSubmit` hook that recalls prior art on a concrete error signature, and the `atomic_graduate` beat that graduates captured lessons into recall-findable `## Signal` atomics — both ship ON:
+
+```bash
+export RECALL_HOOK_DISABLE=1        # stop the prompt-time recall injection
+export ATOMIC_GRADUATE_DISABLE=1    # stop graduating lessons into atomics (also: graduate_enable=off in the UI)
+```
+
+To keep graduation on but bound it tighter (or looser), set the per-run create cap instead of disabling it:
+
+```bash
+export ATOMIC_GRADUATE_CAP=1        # at most one new atomic per run (default 3)
 ```
 
 ### Use a deterministic schedule instead of the session clock
@@ -277,6 +301,8 @@ When you want a step to stop *now*, regardless of the install prompts:
 | Outcome attribution | `SP8_ATTRIBUTION_ENABLE=off` | opt-out value |
 | Self-correction | `SP7_AGGRESSIVE_DISABLE=1` | presence (any value, incl. empty) |
 | Skill synthesis | `SP10_SYNTHESIS_DISABLE=1` | presence |
+| The `UserPromptSubmit` recall hook | `RECALL_HOOK_DISABLE=1` | presence |
+| Atomic Graduation | `ATOMIC_GRADUATE_DISABLE=1` | presence |
 | A specific beat entirely | `[maintenance.beats]` `<beat> = false` | per-beat config flag |
 | The interactive session hooks (headless run) | `ULTRA_MEMORY_AGENT_ROLE=cron` | presence of a role marker |
 

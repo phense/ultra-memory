@@ -1,6 +1,6 @@
 # 5. The self-learning loop in practice
 
-Most memory tools are filing cabinets: they store what you tell them and hand it back unchanged. ultra-memory is closer to an organism. Left running, it notices which of its memories actually helped, promotes the lessons that keep proving their worth, quietly fixes the notes it got wrong, and — when it sees the same lesson land again and again — turns that cluster into a brand-new reusable skill. It does all of this on its own, on your machine, on your Claude login.
+Most memory tools are filing cabinets: they store what you tell them and hand it back unchanged. ultra-memory is closer to an organism. Left running, it notices which of its memories actually helped, promotes the lessons that keep proving their worth, quietly fixes the notes it got wrong, and — when it sees the same lesson land again and again — turns that cluster into a brand-new reusable skill. It also *recalls* what it knows the moment a situation calls for it, and captures hard-won lessons in a form it can find again. It does all of this on its own, on your machine, on your Claude login.
 
 That sounds alarming until you see how it's fenced. The whole loop is **safe by construction, not by good intentions**: the rules are enforced in code, not merely asked for in a prompt. This chapter explains what runs, when, the guarantees that make it safe to leave on, how to read the summary it writes you, and how to trust it — or switch any of it off.
 
@@ -10,11 +10,12 @@ It is **on by default** in v0.0.4. Nothing below requires you to turn anything *
 
 The loop advances automatically whenever you open Claude Code — an async session-start hook checks which steps are *due* and runs only those. Each step (a "beat") is throttled on its own clock, so opening ten sessions in a day doesn't re-run a weekly job. There's also a daily, AI-free cleanup that prunes old session events and refreshes your exports.
 
-There are **four AI beats** — capture, consolidate, self-correct, synthesize — each throttled on its own clock and run in a fixed order: capture first (it's the input the others feed on), the heavier reasoning beats in the middle, the projection rebuild last. **Outcome attribution** is the one no-AI step woven through them — it isn't scheduled on its own clock; it credits recalled facts as part of the loop and is toggled with the same `_enable` switch as the rest:
+There are **four AI beats** — capture, consolidate, self-correct, synthesize — each throttled on its own clock and run in a fixed order: capture first (it's the input the others feed on), the heavier reasoning beats in the middle, the projection rebuild last. **Outcome attribution** is the one no-AI step woven through them — it isn't scheduled on its own clock; it credits recalled facts as part of the loop and is toggled with the same `_enable` switch as the rest. **Atomic graduation** rides on capture's coat-tails: it needs no AI call of its own — capture already extracted the lesson — so it sits right after capture and *deterministically* turns those lessons into findable pages:
 
 | Step | What it does | Uses AI? | Default cadence |
 |---|---|---|---|
 | **Session capture** | Mines each finished session's transcript into durable memory candidates. | yes (your login) | ~daily |
+| **Atomic graduation** | Turns the durable lessons capture extracted (engineering gotchas + trading/strategy lessons) into `## Signal`-keyed wiki pages, so each is reflexively recall-findable by the observable that should trigger it. *(No AI of its own — capture's one call already did the reasoning; the apply is deterministic.)* | no | with capture |
 | **Outcome attribution** | Credits which recalled facts actually helped, so good memories rise and dead ones fade. *(No-AI; runs as part of the loop, not on its own clock — toggled via `SP8_ATTRIBUTION_ENABLE`.)* | no | with the loop |
 | **Consolidate** | Promotes lessons that have proven their worth into the store / wiki; merges near-duplicates conservatively. | yes (your login) | ~weekly |
 | **Self-correct** | Sharpens, retires, or sets aside the loop's *own* earlier agent-authored notes — never yours. | yes (your login) | ~monthly |
@@ -23,6 +24,16 @@ There are **four AI beats** — capture, consolidate, self-correct, synthesize �
 The cadences are defaults you can change (see [Configuration](06-configuration-reference.md)). The two boldest beats — self-correct and synthesize — are deliberately the rarest.
 
 If you run a headless or always-on box where sessions don't open often, `/ultra-memory:memory-setup` offers an OS-scheduler snippet you can install yourself for a deterministic cadence. It prints it; it never installs it for you.
+
+## Recognise a situation → recall what you know → act informed
+
+A store that only *learns* is half a loop. The other half is using what you learned at the moment it matters — and the failure that motivated this arm was painfully concrete: the same bug got fixed twice, days apart, because nobody searched for the lesson the first fix already contained. The fix wasn't a smarter search; it was making the lesson *fire on its own* when the situation recurs. So the organism now closes the loop with two cooperating arms, both on by default.
+
+**The recall arm — knowledge that recalls itself.** Accumulated lessons are pulled back by the *observable* that should trigger them, not by you remembering to look. The hook is a single primitive — `recall(signal_text)` — a thin, fail-open wrapper over the same warm retrieval used everywhere else, defaulting to the subagent privilege scope so a recall can never surface `user`/`feedback` memory. The engineering surface is a `UserPromptSubmit` hook: when a prompt carries a concrete error signature — a stacktrace, an exception name, a `file:line` — the hook quietly calls `recall` (knowledge-only, so only the wiki can answer) and injects the top few prior-art snippets as context *before* you start reading code. It's deliberately conservative: it fires only on a strong signal, returns at most three hits, and on any error becomes one log line and a no-op. The trading surface is the same primitive called from an observation loop on an abnormal market condition. Both are taught by the generic `recall-reflex` skill — *recognise → recall → act*. (On a real-money path, recall output is **advisory context only**: a miss is never evidence of safety, and a hit never relaxes the risk gate.)
+
+**The capture-findably arm — atomic graduation.** Recall can only return what was filed in a findable form, so the other arm makes findability automatic. The keystone is the optional **`## Signal`** section on an atomic: the observable condition *in the words it appears in* (`onnxruntime NoSuchFile … model_optimized.onnx`, or `VIX spike + breadth collapse`), indexed as its own retrieval channel and given a boost at query time. Session capture already mines each finished session with one AI call; atomic graduation simply adds a **fourth output** to that same call — `atomic_candidates`: durable engineering gotchas (wanted here, even though they're the environment-specific class that capture-to-memory deliberately *excludes*) and durable trading/strategy lessons, each carrying its literal observable. Those land as `atomic_candidate` markers, and the graduation beat drains them deterministically into `## Signal`-keyed wiki pages through the same audited gateway every other write uses. **One OAuth call does double duty**: the reasoning that mines a session also produces the graduation candidates, so no second AI call is spent.
+
+Together they are the answer to "we fixed the same bug twice": the second arm files the lesson keyed by the thing you'd search for, and the first arm searches for it without being told to.
 
 ## The safety guarantees, in plain language
 
@@ -35,6 +46,10 @@ Five properties, all enforced in the apply path (the code that makes the change)
 5. **A new skill must pass a check before it exists.** Synthesize won't create a skill that would hijack one you already have — there's a trigger-probe eval-gate that proves the generated skill doesn't steal an existing skill's job. If it can't prove that, the skill isn't created.
 
 On top of all that, the loop is **fail-open everywhere**: any error in any beat becomes one log line and a no-op — it never wedges your session, and it never half-applies a change.
+
+**Atomic graduation inherits every one of those and adds two of its own.** Auto-creating wiki pages is the boldest write the loop makes, so it's fenced the hardest. It's marked as the loop's own work (`created_by='background_review'`), which means the self-correct beat can later revert it just like any other agent-authored note — *yours* are still untouchable. It's create-only: it never edits or deletes an existing page, and it's capped to a handful of new atomics per run (default three) — a run that would exceed the cap logs the drop and stops rather than blasting through. The two new fences are the interesting ones. First, a **three-way dedup-gate**: before creating anything, it recalls the candidate's `## Signal` against the existing signal channel — a clear match *merges* into the existing page instead of duplicating it, a grey-zone match is *skipped* and left for a future run (never a maybe-duplicate, never a forced merge), and only a genuinely novel signal becomes a new page. This is literally the anti-pattern that started it all: signal-keyed dedup is what would have caught the second fastembed atomic as a copy of the first. Second, an **eval-gate**: a freshly-created atomic must be recall-findable *by its own observable* — if a `recall` on its signal can't surface it, the page is useless, so it's **quarantined** (archived, never deleted) rather than left to clutter the store. A page that can't be found is no better than one that was never written.
+
+One more piece of care is trading-specific: an auto-graduated trading or strategy lesson is born carrying an **unvalidated `[Recent-Regime]` confidence label**, so a real-money path never mistakes a freshly-captured lesson for established doctrine. It earns its keep through the normal recalibration the rest of the loop applies — and, as above, recall only ever offers it as advice, never as a gate.
 
 And the privacy floor from [chapter 4](04-working-with-memory.md) still holds throughout: every AI call runs on **your Claude login (no API key, no metered bill)**, the loop reads only your **local** session transcripts, and the single audited write path strips secrets on the way in *and* on the way out.
 
@@ -61,11 +76,16 @@ Prefer to start narrow, or pause a step entirely? Every beat has an individual o
 | Toggle (in `/plugin` config) | Turns off |
 |---|---|
 | **Session capture** | Mining finished sessions into memory. |
+| **Atomic graduation** | Turning captured lessons into `## Signal`-keyed wiki pages. |
 | **Outcome attribution** | Crediting which facts helped. |
 | **Self-correction** | The rewrite / retire / set-aside beat. |
 | **Skill synthesis** | Creating new skills from clustered lessons. |
 
 Setting a toggle to `off` disables exactly that beat and nothing else. There's no all-or-nothing switch you're forced into: you can keep the gentle capture-and-credit beats on while pausing the bold ones, or run memory-only with no wiki at all (the wiki-touching steps then simply do nothing). And because the self-correcting beats self-gate on a git checkpoint, even with everything on, every autonomous change remains something you can undo.
+
+A deliberate design note on all of these: they are **kill-switches, not enable-flags**. Everything ships on; a toggle (or its env-var twin — `ATOMIC_GRADUATE_DISABLE` for graduation, with a `ATOMIC_GRADUATE_CAP` to retune the per-run cap) only ever *disengages* a beat. A default-off enable-flag is a feature nobody ever flips on, so the loop has none.
+
+The recall arm is the one piece without a `/plugin` toggle — the `UserPromptSubmit` recall hook ships on with no UI switch. If you want to silence it, set the `RECALL_HOOK_DISABLE` env var (see [Configuration](06-configuration-reference.md)); like everything else, it's a kill-switch, and the hook is fail-open whether or not you ever touch it.
 
 ---
 

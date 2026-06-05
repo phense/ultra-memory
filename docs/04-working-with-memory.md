@@ -53,6 +53,55 @@ Two mechanisms read your memory without you asking:
 
 Both hooks are **fail-open**: if anything goes wrong they log one line and step aside. They can never wedge or block your session.
 
+## Recall on the *observable* — the Recall-Reflex
+
+There's a third way reading happens for you, and it fires on a different cue than the gist. The gist recalls what's relevant to *the moment*; the Recall-Reflex recalls what you know about *a situation you just walked into* — an error you hit, a market condition you observed. The reflex is one line:
+
+> Recognise a situation → recall what you know about it → act informed.
+
+The point is to stop re-deriving things you already solved. (The motivating bug: we once fixed the same fastembed `$TMPDIR`-cache failure twice, because the lesson lived in a code comment and wasn't findable by the error text.) Recall keys on the **observable** — the words the situation actually shows up in — not on a lesson title you'd have to already know to search for.
+
+It reaches both stores: durable wiki knowledge *and* memory, ranked together, with `## Signal` matches up-weighted (next section). And it honours the privilege boundary — it defaults to the **subagent** scope (`project`/`reference` only), so an automatic recall can never surface your private `user`/`feedback` tier.
+
+**The automatic engineering hook.** When your prompt contains a concrete error signature — a stacktrace, an `Error:`, an exception name, a `file:line` — a `UserPromptSubmit` hook runs a recall for you and injects the top hits as a short "Recall-Reflex — prior art" block before Claude reads any code. It's deliberately conservative: it fires only on a real signature (not on every prompt), pulls at most three hits, queries **knowledge-only** (no memory, so nothing private can leak), and is fail-open. If it ever gets noisy in a session, turn it off with an environment variable:
+
+```text
+RECALL_HOOK_DISABLE=1
+```
+
+(That's a *kill-switch*, not an enable-flag — the hook ships on by default. The configuration knobs are documented in [Configuration](06-configuration-reference.md).)
+
+**Recalling yourself.** When the situation isn't in a prompt — you're starting a debug task, or you've observed an abnormal condition — run the recall directly with the observable in the words it appears:
+
+```text
+python -m ultra_memory.recall "onnxruntime NoSuchFile model_optimized.onnx temp purge" --top 5
+```
+
+You get back a frugal list of hits, each a `{source_kind, slug|id, title, snippet, score}` — atomic snippets from the wiki and matching memories, with the navigational index/redirect pages filtered out. Useful flags: `--topic <t,u>` to scope to one or more wiki topics, `--no-embed` to skip the embedder and run BM25-only (faster, no model load), `--caller-class orchestrator` to widen the scope to your private tier on a trusted human path, and `--json` for machine output. The same primitive is available in Python as `ultra_memory.recall.recall(signal_text, ...)`.
+
+When you want Claude to *form the query for you* from a signal it observed — and to treat the hits correctly as prior art — invoke the `recall-reflex` skill. It auto-triggers at the start of a debug/build task or when an abnormal condition shows up, formulates the query from the observable, reads the injected hits, and runs a deeper recall if needed. One thing it is firm about: a recall **hit is advisory context, never a gate**, and a recall **miss is never evidence of safety** — on a real-money path, recall composes *before* the `risk-manager` / hard-rules check, it never replaces it.
+
+## Making knowledge findable — the `## Signal` section
+
+Recall is only as good as what it can find, and the highest-leverage thing you can do is **author the observable into the page**. Any wiki atomic may carry an optional `## Signal` H2 section: the condition under which this page's knowledge should be recalled, *in the words it appears in*. A page that has one becomes "recall-keyed" — findable by the symptom, not just by its title.
+
+```markdown
+## Signal
+
+onnxruntime NoSuchFile … model_optimized.onnx — fastembed model cache wiped from $TMPDIR
+```
+
+The body is the literal observable, nothing more: for an engineering gotcha, the error text or symptom (`wiki-flush fails in 2–3s`); for a strategy or macro page, the market condition (`sector-wide drawdown > X%`, `VIX spike + breadth collapse`). The mechanism and the fix stay in the rest of the body as usual. Put it as a single `## Signal` H2 near the top; its text runs to the next `## ` heading. Keep it to the search terms a future occurrence would actually contain — drop boilerplate, keep the identifying tokens (the exception name, the artifact name, the symptom).
+
+Authoring this pays off twice over:
+
+- **The retrieval boost.** The gateway embeds `## Signal` text as a *distinct channel* and `recall()` fuses it as a separate ranked backend, so a page whose recorded observable matches earns extra rank credit — it surfaces ahead of a page that merely mentions the same words in passing. (The text is also in the page's full-body search, so a literal match still ranks even without an embedder.)
+- **The dedup-gate.** That same signal channel is a second axis the write gateway checks before creating a page: a new atomic whose observable closely matches an existing one is *merged* into it rather than duplicated. This is literally the fix for "we built the same solution twice."
+
+Two conventions to respect. First, on a **strategy** page the word "signal" is overloaded — `## Signal` is the *recall* trigger (when to surface this page), **not** the strategy's *entry* trigger (when to open a position, which stays in the strategy's rules). Where both could be read, state the distinction explicitly so they don't blur. Second, backfill is **forward-only**: add a `## Signal` to *new* observable-bearing atomics at authoring time (you have the best words then); existing pages aren't batch-rewritten — they gain one on their next edit.
+
+As always, you don't hand-create the page — you write it through the gateway (`create-page`, with the `## Signal` section in the body). The bridge from the `recall-reflex` skill closes the loop: when you've just solved something non-obvious, capture it as a `## Signal`-keyed atomic so the next occurrence is a two-second recall hit instead of a re-derivation. And if you don't get to it by hand, an autonomous backstop will: the self-learning loop's **atomic-graduation** beat mines durable lessons out of session transcripts and graduates them into `## Signal`-keyed atomics through the same gateway and the same dedup-gate — also on by default, also disable-only (see [The self-learning loop in practice](05-self-learning-in-practice.md)). The full conventions live in `wiki/SCHEMA.md`.
+
 ## Pinning your hard rules — `memory-pin`
 
 Pinning is the one knob *you* control over what's always in context. A pinned memory is injected into the rehydration gist of every session, so this is where your non-negotiable rules belong — a tax constraint, a "never do X" directive, an architecture decision you don't want re-litigated.

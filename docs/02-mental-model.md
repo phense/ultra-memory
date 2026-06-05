@@ -138,6 +138,97 @@ trail back to where it was learned is never lost.
 
 ---
 
+## The store recalls itself: recognise → recall → act
+
+A store you have to *remember to consult* is a store you will forget to consult. The most
+expensive failure ultra-memory can have isn't a missing fact — it's a fact that's *there*,
+findable, and never looked at, so the same problem gets solved a second time from scratch.
+(That has happened: the same bug, fixed twice, because the lesson sat in the store unread.)
+
+So the mental model adds one more move: knowledge isn't only *searched* on demand, it's
+**reflexively recalled by the situation itself**. The shape is a three-beat loop:
+
+> **Recognise a situation → recall what you know about it → act informed.**
+
+The trigger is the **observable** — the thing you can *see* before you've decided to look
+anything up. For an engineer that's an error signature in the prompt: a stacktrace, an
+exception name, a `No such file`, a `path:line`. For a real-money trading agent it's an
+abnormal condition *in the data*: a sector-wide drawdown, a volatility spike, a regime that
+doesn't fit. The point is that the recall fires at the *start* — when the situation is first
+recognised — not after you've already thought "I should search the wiki." By then the
+re-derivation has often already begun.
+
+Two pieces make this work, and both are just refinements of the fabric you already have:
+
+- **Lessons become findable by the words a future occurrence will use.** An atomic can
+  carry an optional **`## Signal`** section: the observable condition *in its own words* —
+  the literal error text, or the market condition — separate from the lesson's prose. A
+  page titled by its *insight* ("persistent model cache") is invisible to a search for its
+  *symptom* ("`NoSuchFile … model_optimized.onnx`"); the `## Signal` section closes that gap
+  by indexing the symptom you'd actually type. The unified search treats it as its own
+  ranking signal, so a match on the observable counts for extra.
+- **The recall is reflexive, not requested.** The same one ranked search you already met
+  becomes a primitive any consumer can fire on a signal. On the engineering side a
+  lightweight hook watches each prompt and, only when it spots a concrete error signature,
+  runs that recall *for* you and hands back a short block of prior art — so the relevant
+  lesson is already in front of you with zero reliance on remembering to ask. On the trading
+  side the same primitive is fired from the agent's own observation loop when it sees an
+  abnormal condition.
+
+Hold one boundary firmly: recalled hits are **advisory context, never a verdict.** A recall
+*miss* is never evidence that something is safe, and a recall *hit* never relaxes a gate —
+on a real-money path the reflex runs *before* the risk check, never in place of it. It tells
+you what you already know; it doesn't decide.
+
+This is the read-side mirror of graduation. Graduation makes a proven lesson *durable*; the
+recall reflex makes it *reach back out* to the next occurrence of the situation that taught
+it. The whole point of storing knowledge — getting more competent the more you've learned,
+instead of re-deriving — only pays off if the store recalls itself.
+
+---
+
+## Capture so it can be found, not just stored
+
+The reflex above has an obvious dependency: it can only recall what was captured *with* its
+observable. A lesson written down as pure insight, with no record of the symptom that
+provoked it, is durable but unreachable — exactly the trap that let the same bug get fixed
+twice. So capture gains a matching discipline: **write the lesson down keyed to the words a
+future occurrence will use.** When you solve something non-obvious you (or the autonomous
+loop) record not just *what you learned* but *what you'd see when it recurs* — that's the
+`## Signal` again, set at capture time, where the observable words are freshest and most
+accurate.
+
+There's also an **autonomous backstop**, so this doesn't depend on anyone remembering. The
+same once-per-session pass that already harvests lessons into memory now also notices the
+durable, reusable ones — an engineering gotcha with its literal error text, a strategy
+lesson with its market condition — and, on the next maintenance cycle, **graduates each into
+a `## Signal`-keyed wiki page on its own**, so it becomes recall-findable without a human in
+the loop. It is the same graduation move you already know, aimed at *findability*: a captured
+lesson earns a durable, searchable home keyed to its observable.
+
+Because this beat creates wiki pages unattended, its safety is built **into the mechanism**,
+not asked for in a prompt — the same posture as the rest of the loop:
+
+- before it writes, it **checks the new observable against the ones already stored**: a clear
+  duplicate is *merged* into the existing page instead of creating a second one (this is
+  literally the fix for "we built the same solution twice"), an uncertain near-match is left
+  alone rather than guessed, and only a genuinely new observable becomes a new page;
+- after it writes, it **proves the page recalls itself** — it runs the very recall the page
+  is meant to answer, and a page that can't be found by its own observable is *set aside*
+  (never deleted), because an unfindable recall page is useless;
+- it's **bounded per run** and **never deletes** — every page it makes is reversible and
+  carries the loop's own provenance, so the self-correcting beat can later revise it;
+- and an auto-captured *trading* lesson always ships with an **unvalidated, [Recent-Regime]
+  confidence label**, so a real-money path never mistakes a freshly auto-graduated lesson for
+  an established one.
+
+So the recall reflex and findable capture are two arms of one idea: **recognise the
+situation, recall what you know, act informed — and capture each new lesson by the very
+words that will summon it next time.** The first half makes the store reach out; the second
+makes sure there's always something keyed to reach with.
+
+---
+
 ## The loop, in one view
 
 Graduation is one beat of a larger rhythm. The **self-learning loop** runs in four
