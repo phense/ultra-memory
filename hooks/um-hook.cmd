@@ -44,6 +44,7 @@ fi
 case "$HOOK" in
   rehydrate)  MOD="ultra_memory.hooks.rehydrate" ;;
   checkpoint) MOD="ultra_memory.hooks.checkpoint" ;;
+  recall)     MOD="ultra_memory.hooks.recall_prompt" ;;
   maintain)   MOD="ultra_memory.maintain" ;;
   beats)      MOD="ultra_memory.maintenance" ;;
   *) exit 0 ;;

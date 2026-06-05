@@ -50,6 +50,23 @@ def test_recall_returns_topk_knowledge_snippets(tmp_path):
     conn.close()
 
 
+def test_recall_knowledge_only_skips_memory_and_works_without_embedder(tmp_path):
+    """The Tier-2 engineering-hook path: knowledge_only=True + no embedder must NOT
+    raise (memory backend skipped, so no embedder requirement) and must return ONLY
+    knowledge hits — privacy-safe by construction (no user/feedback/project memory)."""
+    conn = _seed_wiki(tmp_path, "kpage", "alpha widget error trace",
+                      "a body mentioning the widget failure")
+    memory_lib.save_memory(conn, id="m-widget", type="project",
+                           title="widget memory note",
+                           body="a project memory mentioning widget", ts=1)
+    hits = recall.recall("widget", conn=conn, build_embedder=False,
+                         knowledge_only=True, top_k=5)
+    assert hits, "expected the knowledge page via BM25"
+    assert all(h["source_kind"] == "knowledge" for h in hits)
+    assert any(h.get("slug") == "kpage" for h in hits)
+    conn.close()
+
+
 def test_recall_fail_open_returns_empty_on_bad_db(tmp_path):
     """A db_path that cannot be opened/queried -> [] (fail-open), never raises."""
     out = recall.recall("anything", db_path=str(tmp_path / "nonexistent" / "x.db"),

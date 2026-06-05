@@ -51,8 +51,8 @@ def _to_hit(row):
 
 
 def recall(signal_text, *, top_k=5, caller_class="subagent", agent_topics=None,
-           db_path=None, embedder=None, build_embedder=True, conn=None,
-           now_ts=None):
+           db_path=None, embedder=None, build_embedder=True, knowledge_only=False,
+           conn=None, now_ts=None):
     """Return up to ``top_k`` frugal hits for an observed signal. Fail-open -> [].
 
     Args:
@@ -82,7 +82,7 @@ def recall(signal_text, *, top_k=5, caller_class="subagent", agent_topics=None,
             hits = unified_query.unified_recall(
                 conn, signal_text, caller_class=caller_class,
                 agent_topics=agent_topics, embedder=embedder, top_k=top_k,
-                now_ts=now_ts, ts=now_ts)
+                now_ts=now_ts, ts=now_ts, include_memory=not knowledge_only)
             return [_to_hit(h) for h in hits]
         finally:
             if own_conn:

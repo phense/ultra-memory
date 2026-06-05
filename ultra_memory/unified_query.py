@@ -420,7 +420,7 @@ def _signal_candidates(conn, query, *, by_slug, embedder, dim):
 
 def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
                    top_k=5, dim=retrieval_core.EMBED_DIM, now_ts=None, ts=None,
-                   audit=True):
+                   audit=True, include_memory=True):
     """One ranked list spanning the memory store + the Expert-Knowledge mirror,
     scoped by (type × topic), fused with FU-4 best-rank-per-backend RRF, weighted by
     `outcome_weight` (inert 1.0 until §7a). No LLM. See module docstring (D-S6).
@@ -466,7 +466,13 @@ def unified_recall(conn, query, *, caller_class, agent_topics, embedder=None,
     # query_memories' `topic=` param already keeps NULL rows. It takes ONE topic, so
     # for a multi-topic caller we union per-topic candidate sets (NULL rows dedupe
     # by id). `agent_topics is None` (orchestrator) ⇒ no topic filter at all.
-    if agent_topics is None:
+    if not include_memory:
+        # Knowledge-only recall (e.g. the Tier-2 engineering hook): skip the memory
+        # backend entirely — no query_memories call, so no embedder requirement and
+        # NO memory (incl. user/feedback) can surface. Privacy-safe by construction.
+        # mem_ranked/by_id/weight below all degrade to empty from this.
+        mem_results = []
+    elif agent_topics is None:
         mem_results = memory_query.query_memories(
             conn, query, embedder=embedder, top_k=max(top_k * 4, top_k), dim=dim,
             include_types=allowed_types, now_ts=now_ts)

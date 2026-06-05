@@ -41,6 +41,18 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/um-hook.cmd recall",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
