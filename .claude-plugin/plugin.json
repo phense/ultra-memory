@@ -70,6 +70,12 @@
       "title": "Skill synthesis",
       "default": "on",
       "description": "On by default, behind the safety wall + eval-gate; acts only where a git checkpoint exists. 'off' to disable."
+    },
+    "graduate_enable": {
+      "type": "string",
+      "title": "Atomic graduation (auto-capture lessons as wiki pages)",
+      "default": "on",
+      "description": "On by default, behind the Signal dedup-gate + a self-recall eval-gate (quarantine-not-delete). Auto-captures durable gotchas/lessons as findable wiki pages on YOUR Claude login (no API key). Set to 'off' to disable."
     }
   }
 }
