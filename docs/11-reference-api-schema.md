@@ -218,6 +218,17 @@ on a concrete error signature (`detect_signature`), it calls `recall(knowledge_o
 build_embedder=False)` and injects the hits as `additionalContext`. Tier-2 only, conservative matcher,
 fail-open, `<=3` hits, kill-switch `RECALL_HOOK_DISABLE`. The generic method is the `recall-reflex` skill.
 
+**Atomic Graduation — the autonomous capture-findably backstop.** `session_ingest`'s one-OAuth drain
+extracts `atomic_candidates` (engineering gotchas + durable trading/strategy lessons, each with its
+literal `signal`) → `atomic_candidate` `session_events` markers → the `atomic_graduate` beat
+(`ultra_memory.maintenance.atomic_graduate`, in `BEAT_ORDER` after `session_ingest`; **default ON**,
+kill-switch `ATOMIC_GRADUATE_DISABLE`) turns each into a `## Signal`-keyed atomic via the consumer
+gateway. Apply is DETERMINISTIC (no LLM). Fences: a THREE-way `## Signal` dedup-gate
+(`unified_query.best_signal_match` → merge ≥`dedup_upper` / skip-grey / create), an eval-gate
+(recall-findable-or-**quarantine**; archive-never-delete), a blast-radius cap (`ATOMIC_GRADUATE_CAP`,
+default 3), `created_by='background_review'` (self-correction-revertible), per-candidate fail-open.
+Trading/lesson atomics carry an UNVALIDATED `[Recent-Regime]` confidence label.
+
 ### `attribution`
 
 The deterministic, no-LLM usage→outcome join (imports only stdlib + `memory_lib`).
