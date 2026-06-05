@@ -32,7 +32,12 @@ def test_get_embed_model_uses_persistent_cache_dir(tmp_path, monkeypatch):
     gw._get_embed_model()
 
     assert captured["cache_dir"] == persistent_cache_dir()
-    assert not captured["cache_dir"].startswith(tempfile.gettempdir())
+    # ...and NOT fastembed's purgeable OS-temp default (<tempdir>/fastembed_cache), the
+    # exact path this fix exists to avoid. A "not under gettempdir()" check is wrong:
+    # persistent_cache_dir() honors FASTEMBED_CACHE_PATH, which this test points at a
+    # tmp_path — itself under /tmp on Linux CI (but /private/var on macOS, which is why
+    # the old assertion passed locally yet failed in CI).
+    assert captured["cache_dir"] != str(Path(tempfile.gettempdir()) / "fastembed_cache")
 
 def test_default_route_is_topic_concepts_slug(tmp_path):
     gw = WikiGateway(wiki_root=tmp_path, topic="research")
