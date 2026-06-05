@@ -28,8 +28,6 @@ DEFAULT_CAP = 3
 DEFAULT_DEDUP_UPPER = 0.84
 DEFAULT_DEDUP_LOWER = 0.78
 DEFAULT_EVAL_TOP_N = 5
-_GOTCHA_THEME = "tooling"
-_LESSON_THEME = "strategy-methodology"
 _SOURCE_LABEL = "atomic-graduate"
 
 
@@ -44,18 +42,20 @@ def _slugify(title: str, signal: str) -> str:
     return f"{base}-{h}"
 
 
-def _theme_for(cand) -> str:
-    return _GOTCHA_THEME if cand.get("kind") == "gotcha" else _LESSON_THEME
+def _theme_for(cand, theme_map=None) -> str:
+    """The theme-index a candidate registers under. Consumer-supplied via `theme_map`
+    (kind -> theme, from config); falls back to the candidate's own `kind` so the engine
+    stays domain-agnostic (no consumer theme literals baked in)."""
+    return (theme_map or {}).get(cand.get("kind")) or (cand.get("kind") or "general")
 
 
-def _render_atomic(cand, *, slug, ts) -> str:
-    """The atomic markdown: frontmatter + body + a `## Signal` section. A `lesson` (e.g.
-    trading/strategy) carries an unvalidated confidence label + the entry-trigger
-    disambiguation so a real-money path never treats an auto-created lesson as established."""
-    theme = _theme_for(cand)
+def _render_atomic(cand, *, slug, ts, theme_map=None) -> str:
+    """The atomic markdown: frontmatter + body + a `## Signal` section. A non-gotcha
+    lesson carries an unvalidated confidence label + the entry-trigger disambiguation so a
+    downstream consumer never treats an auto-created lesson as established."""
+    theme = _theme_for(cand, theme_map)
     kind = cand.get("kind")
-    tags = "[engineering, tooling, auto-graduated]" if kind == "gotcha" \
-        else "[strategy, auto-graduated]"
+    tags = f"[auto-graduated, {kind}]"
     conf = ("\n\nConfidence: [Recent-Regime] — auto-graduated + UNVALIDATED; not an "
             "established rule. (The `## Signal` below is the RECALL trigger, NOT a "
             "strategy entry-trigger.)" if kind == "lesson" else "")
@@ -82,7 +82,8 @@ def run_atomic_graduate_pass(conn, *, ts, env, gateway_run, signal_match, wiki_r
                              embedder=None, cap=DEFAULT_CAP,
                              dedup_upper=DEFAULT_DEDUP_UPPER, dedup_lower=DEFAULT_DEDUP_LOWER,
                              eval_top_n=DEFAULT_EVAL_TOP_N, valid_topics=None,
-                             default_topic="trading", log=lambda _m: None) -> dict:
+                             default_topic="default", theme_map=None,
+                             log=lambda _m: None) -> dict:
     """Drain `atomic_candidate` markers → create / merge / skip `## Signal`-keyed atomics,
     capped + fenced + fail-open. `gateway_run(verb, args:list[str], content:str|None)` is
     injected (production: shells the consumer gateway; test: a recorder)."""
@@ -96,8 +97,8 @@ def run_atomic_graduate_pass(conn, *, ts, env, gateway_run, signal_match, wiki_r
                 f"{len(pend) - cap} candidate(s) left for next run")
             break
         # Normalize the candidate topic against the known topics: the extraction may
-        # put a THEME (e.g. "tooling") in the topic field, which would otherwise create
-        # a spurious top-level topic tree. Unknown → the consumer's default topic.
+        # put a THEME (not a topic) in the topic field, which would otherwise create a
+        # spurious top-level topic tree. Unknown → the consumer's default topic.
         raw_topic = c.get("topic") or default_topic
         topic = raw_topic if (valid_topics is None or raw_topic in valid_topics) \
             else default_topic
@@ -126,9 +127,9 @@ def run_atomic_graduate_pass(conn, *, ts, env, gateway_run, signal_match, wiki_r
             path = str(Path(wiki_root) / topic / "concepts" / f"{slug}.md")
             gateway_run("create-page",
                         ["--path", path, "--topic", topic, "--source-label", _SOURCE_LABEL],
-                        _render_atomic(c, slug=slug, ts=ts))
+                        _render_atomic(c, slug=slug, ts=ts, theme_map=theme_map))
             gateway_run("register-index",
-                        ["--slug", slug, "--theme", _theme_for(c),
+                        ["--slug", slug, "--theme", _theme_for(c, theme_map),
                          "--summary", c["title"][:160], "--topic", topic,
                          "--source-label", _SOURCE_LABEL], None)
             created += 1
@@ -261,7 +262,11 @@ def beat(conn, config, ts, env):
         return recall_mod.recall(signal, top_k=top_k, conn=conn, embedder=embedder,
                                  knowledge_only=True, build_embedder=False)
 
-    topics = list(getattr(config, "topics", None) or ["trading"])
+    # Topic + theme are CONSUMER-domain concepts — the engine stays domain-agnostic and
+    # reads them from config (no consumer literals here). topics from config.topics;
+    # kind->theme from config.atomic_graduate_themes (falls back to the candidate kind).
+    topics = list(getattr(config, "topics", None) or [])
+    theme_map = getattr(config, "atomic_graduate_themes", None) or {}
     return run_atomic_graduate_pass(
         conn, ts=ts, env=env, gateway_run=gateway_run,
         signal_match=unified_query.best_signal_match, wiki_root=wiki_root,
@@ -269,5 +274,6 @@ def beat(conn, config, ts, env):
         embedder=embedder, cap=_cap_from_env(env),
         dedup_upper=_float_env(env, "ATOMIC_GRADUATE_DEDUP_UPPER", DEFAULT_DEDUP_UPPER),
         dedup_lower=_float_env(env, "ATOMIC_GRADUATE_DEDUP_LOWER", DEFAULT_DEDUP_LOWER),
-        valid_topics=set(topics), default_topic=topics[0],
+        valid_topics=set(topics) if topics else None,
+        default_topic=topics[0] if topics else "default", theme_map=theme_map,
         log=lambda m: print(f"[atomic_graduate] {m}", file=sys.stderr))

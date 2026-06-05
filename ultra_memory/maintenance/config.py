@@ -69,6 +69,9 @@ class MaintenanceConfig:
     model: str = _DEFAULT_MODEL
     beats: dict = field(default_factory=lambda: dict(_DEFAULT_BEATS))
     cadence_hours: dict = field(default_factory=lambda: dict(_DEFAULT_CADENCE))
+    # Atomic Graduation: consumer-declared kind -> wiki-theme map (project-agnostic
+    # default empty → the engine falls back to the candidate's own `kind` as the theme).
+    atomic_graduate_themes: dict = field(default_factory=dict)
     # The self-learning registry: (relative Learnings.md path, skill_tag) pairs the
     # `learnings` projection-regen beat rebuilds. CONSUMER-declared (project-agnostic
     # default empty); the gen-* glob supplies generated skills on top of this.
@@ -205,6 +208,9 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
                 cadence[k] = int(v)
             except (TypeError, ValueError):
                 pass
+    graduate_themes = {}
+    if isinstance(raw.get("atomic_graduate_themes"), dict):
+        graduate_themes = {str(k): str(v) for k, v in raw["atomic_graduate_themes"].items()}
 
     return MaintenanceConfig(
         project_dir=project_dir,
@@ -218,6 +224,7 @@ def load_config(project_dir=None, env=None) -> MaintenanceConfig:
         model=str(model),
         beats=beats,
         cadence_hours=cadence,
+        atomic_graduate_themes=graduate_themes,
         self_learning_files=_parse_self_learning_files(raw.get("self_learning_files")),
         wiki_schema=wiki_schema,
         wiki_graph_extractor=graph_extractor,

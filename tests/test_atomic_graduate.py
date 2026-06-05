@@ -4,6 +4,8 @@ The drain is DETERMINISTIC (no LLM); gateway_run / signal_match / recall_fn are 
 (production binds the real ones; here, recorders/stubs). Tests cover the three-way dedup-gate
 (merge / skip-grey / create), the blast-radius cap, the kill-switch, and per-candidate fail-open.
 """
+from pathlib import Path
+
 from ultra_memory import memory_lib
 from ultra_memory.maintenance import atomic_graduate as ag
 from ultra_memory.maintenance import session_ingest as si
@@ -181,3 +183,11 @@ def test_beat_no_candidates_is_noop(tmp_path):
     res = ag.beat(conn, None, TS, {})
     assert res["mode"] == "ran" and res["created"] == 0
     conn.close()
+
+
+def test_no_consumer_specific_literals_in_engine():
+    """The engine is domain-agnostic: topic + theme come from config, never baked in.
+    Mirrors detect_dedup's project-agnostic guard."""
+    src = Path(ag.__file__).read_text().lower()
+    for bad in ("trading", "tooling", "strategy-methodology", "/users/"):
+        assert bad not in src, f"consumer-specific literal {bad!r} leaked into the engine"
