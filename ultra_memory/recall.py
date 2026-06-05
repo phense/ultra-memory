@@ -21,8 +21,10 @@ import sys
 
 from . import knowledge_mcp, retrieval_core, unified_query
 
-# Navigational page-types are noise as recalled "prior art" — never a lesson.
-_EXCLUDED_PAGE_TYPES = ("index", "redirect")
+# Navigational / non-lesson page-types are noise as recalled "prior art". These are
+# the real types the wiki schema emits (theme-index / master-index / redirect); "index"
+# is kept as a generic catch-all.
+_EXCLUDED_PAGE_TYPES = ("theme-index", "master-index", "index", "redirect")
 
 
 def _to_hit(row):

@@ -198,7 +198,7 @@ best-rank-per-backend RRF (k=60), weighted by `outcome_weight`. **No LLM.**
 The single public entry point that turns the warm retrieval surface into a reflex used by
 every consumer (the engineering hook + the trading observation surfaces).
 
-- `recall(signal_text, *, top_k=5, caller_class="subagent", agent_topics=None, db_path=None, embedder=None, build_embedder=True, knowledge_only=False, exclude_page_types=("index","redirect"), conn=None, now_ts=None) -> [dict]`
+- `recall(signal_text, *, top_k=5, caller_class="subagent", agent_topics=None, db_path=None, embedder=None, build_embedder=True, knowledge_only=False, exclude_page_types=("theme-index","master-index","index","redirect"), conn=None, now_ts=None) -> [dict]`
   — a thin, **fail-open** (`[]` on any error) wrapper over `unified_recall`. Defaults to
   `caller_class="subagent"` (SAFE_TYPES) so a main-session caller cannot leak `user`/`feedback`.
   `knowledge_only=True` → `include_memory=False` (wiki-only; privacy-safe + no embedder needed).

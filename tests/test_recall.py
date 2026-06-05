@@ -75,14 +75,19 @@ def test_recall_excludes_index_and_redirect_pages(tmp_path):
     d.mkdir(parents=True, exist_ok=True)
     (d / "widget-atomic.md").write_text(
         "---\ntype: mechanism\ntitle: widget gizmo error trace\n---\n\nbody about the widget\n")
-    (d / "widget-index.md").write_text(
-        "---\ntype: index\ntitle: widget things index\n---\n\nlists widget pages\n")
+    # Use the REAL navigational page-types the wiki schema emits (theme-index /
+    # master-index / redirect) — NOT a fictional `index`.
+    (d / "widget-theme-index.md").write_text(
+        "---\ntype: theme-index\ntitle: widget things index\n---\n\nlists widget pages\n")
+    (d / "widget-redirect.md").write_text(
+        "---\ntype: redirect\ntitle: widget redirect\n---\n\nsee the widget atomic\n")
     wiki_sync.wiki_sync(conn, [tmp_path / "wiki"], embedder=None, ts=1)
     hits = recall.recall("widget", conn=conn, build_embedder=False,
                          knowledge_only=True, top_k=10)
     slugs = [h.get("slug") for h in hits]
     assert "widget-atomic" in slugs
-    assert "widget-index" not in slugs
+    assert "widget-theme-index" not in slugs
+    assert "widget-redirect" not in slugs
     conn.close()
 
 
