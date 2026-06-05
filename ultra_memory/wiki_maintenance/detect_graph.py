@@ -88,6 +88,38 @@ def rebuild(wiki_root, *, extractor_cmd: list[str] | None,
 
 
 # ---------------------------------------------------------------------------
+# Topic derivation (for the synthesis-candidate path).
+# ---------------------------------------------------------------------------
+
+def _topic_from_node_path(node_path: str, *, schema: WikiSchemaConfig) -> str | None:
+    """`nodes.path` is wiki-relative — `<topic>/<subdir>/...` in a multi-topic layout,
+    or `<subdir>/...` (no topic) in a single-topic one. Return the topic, or None when
+    the first segment is itself a known subdir (so a single-topic wiki keeps a flat
+    synthesis path instead of inventing a bogus topic)."""
+    parts = Path(node_path).parts
+    if len(parts) >= 3 and parts[0] not in schema.topic_subdirs:
+        return parts[0]
+    return None
+
+
+def _topic_for_cluster(con, source_slug: str, subjects: list[str], *,
+                       schema: WikiSchemaConfig) -> str | None:
+    """Topic of a same-source cluster: the source node's own topic, else the first
+    member atomic that resolves one. None ⇒ topic-less (single-topic) layout."""
+    candidates = [source_slug] + [
+        s.split(":", 1)[-1] if ":" in s else s for s in subjects]
+    for slug in candidates:
+        row = con.execute(
+            "SELECT path FROM nodes WHERE slug = ? AND path IS NOT NULL AND path <> '' "
+            "LIMIT 1", (slug,)).fetchone()
+        if row and row["path"]:
+            topic = _topic_from_node_path(row["path"], schema=schema)
+            if topic:
+                return topic
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Queries → graph_findings + worklist items.
 # ---------------------------------------------------------------------------
 
@@ -166,9 +198,14 @@ def run_queries(db_path, w: dict, *,
         w["graph_findings"]["same_source_clusters"].append(
             {"source": row["source_node"], "slugs": slugs})
         source_slug = row["source_node"].split(":", 1)[-1] if ":" in row["source_node"] else row["source_node"]
+        # Topic-qualify the synthesis path from the cluster's own nodes so create-page's
+        # path→topic derivation can't read the literal "synthesis" subdir as a topic
+        # (D10-2). None ⇒ a single-topic/topic-less layout ⇒ keep the flat path.
+        topic = _topic_for_cluster(con, source_slug, slugs, schema=schema)
+        synth_dir = f"{topic}/{schema.synthesis_subdir}" if topic else schema.synthesis_subdir
         wl.add_item(
             w, kind="synthesis-candidate",
-            atomic_path=f"{wiki_dir}/{schema.synthesis_subdir}/{source_slug}.md",
+            atomic_path=f"{wiki_dir}/{synth_dir}/{source_slug}.md",
             title=f"Cluster: {row['source_node']}",
             claim=f"{row['cnt']} atomics share source {row['source_node']}",
             evidence=f"sourced_from cluster: {', '.join(slugs[:5])}{'...' if len(slugs) > 5 else ''}",

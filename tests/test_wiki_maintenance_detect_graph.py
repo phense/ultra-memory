@@ -89,7 +89,33 @@ def test_same_source_cluster_emits_synthesis_candidate(tmp_path):
     dg.run_queries(db, w)
     assert w["graph_findings"]["same_source_clusters"][0]["source"] == "source:bookX"
     item = [i for i in w["items"] if i["kind"] == "synthesis-candidate"][0]
+    # no member/source nodes carry a path here → topic-less (single-topic) layout
     assert item["atomic_path"] == "wiki/synthesis/bookX.md"
+
+
+def test_same_source_cluster_synthesis_path_carries_topic(tmp_path):
+    """D10-2: in a multi-topic wiki the synthesis-candidate path must include the
+    cluster's topic (derived from the source/member node paths), so create-page's
+    path→topic derivation can't read the literal 'synthesis' subdir as a topic."""
+    edges = [(f"m:atom{i}", "sourced_from", "source:bookX") for i in range(5)]
+    nodes = [("bookX", "trading/sources/bookX.md"),
+             ("atom0", "trading/concepts/atom0.md")]
+    root, db = _graph_db(tmp_path, nodes=nodes, edges=edges)
+    w = _w()
+    dg.run_queries(db, w)
+    item = [i for i in w["items"] if i["kind"] == "synthesis-candidate"][0]
+    assert item["atomic_path"] == "wiki/trading/synthesis/bookX.md"
+
+
+def test_same_source_cluster_topic_from_member_when_source_pathless(tmp_path):
+    """Falls back to a member atomic's topic when the source node carries no path."""
+    edges = [(f"m:atom{i}", "sourced_from", "source:bookX") for i in range(5)]
+    nodes = [("atom3", "programming/concepts/atom3.md")]  # only a member has a path
+    root, db = _graph_db(tmp_path, nodes=nodes, edges=edges)
+    w = _w()
+    dg.run_queries(db, w)
+    item = [i for i in w["items"] if i["kind"] == "synthesis-candidate"][0]
+    assert item["atomic_path"] == "wiki/programming/synthesis/bookX.md"
 
 
 def test_predicate_is_schema_seam(tmp_path):
