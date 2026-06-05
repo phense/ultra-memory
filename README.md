@@ -29,7 +29,7 @@ steps you can review, and never touching a rule you've locked down.
 > database, your notes, your paths, and any secrets live in *your* project and are passed in by config;
 > nothing personal is ever committed here (a test enforces it). One plugin, many projects.
 
-**[Why](#why-ultra-memory)** · **[Quick start](#quick-start)** · **[What's different](#what-makes-it-different)** · **[How it works](#how-it-works)** · **[Comparison](#comparison)** · **[Configuration](#configuration)** · **[📖 Handbook](#-documentation--handbook)** · **[Status](#status--honest-roadmap)** · **[Acknowledgments](#acknowledgments)** · **[License](#license)**
+**[Why](#why-ultra-memory)** · **[Quick start](#quick-start)** · **[What's different](#what-makes-it-different)** · **[How it works](#how-it-works)** · **[Comparison](#comparison)** · **[Configuration](#configuration)** · **[📖 Handbook](#-documentation--handbook)** · **[Status](#status--roadmap)** · **[Acknowledgments](#acknowledgments)** · **[License](#license)**
 
 ---
 
@@ -134,7 +134,7 @@ enforced in code, not just asked for in a prompt: it cannot touch a fact you aut
 delete (only archive), is capped per run (at most a few edits, a few reversions, one new skill),
 checkpoints to git before it acts, and writes you a summary afterward. Because every step is small and
 reversible, mistakes are rare *and* cheap to undo. You stay in the review loop, not the work loop. (See
-[Status](#status) for exactly what's on by default.)
+[Status](#status--roadmap) for exactly what's on by default.)
 
 The same loop also runs a backstop that **captures lessons as findable wiki pages on its own** — so a
 fix you discover today is there to be recalled tomorrow (see below).
@@ -284,10 +284,10 @@ each chapter.
 
 ---
 
-## Status — honest roadmap
+## Status & roadmap
 
-ultra-memory is **early and pre-public** — strong engine, reach not yet earned. In the spirit of "the
-docs match reality":
+ultra-memory is **young but solid** — a strong engine, openly developed. Here's what's live today and
+what's on the way:
 
 - ✅ **Live today:** the two-store memory, one ranked search across both, the graph of links, the single
   audited write path with secret stripping, the "your-login-only" rule, the session-start/-end hooks, the
@@ -306,9 +306,8 @@ docs match reality":
   otherwise self-skip — so they can always be undone.
 - ✅ **Release hygiene — shipped:** continuous integration, contributor files (CONTRIBUTING / CHANGELOG),
   a third-party-license notice, and a content-free / path-free guard over the whole markdown publish surface.
-- ⬜ **At publish time:** a one-time git-history scrub (the working tree is clean, but older commits still
-  carry internal notes). Today everything is per-machine; sharing one store across projects is designed but
-  not yet on.
+- 🔜 **On the way:** broader cross-project use of the shared store (it's built and ships zero-config), and
+  the self-learning loop's outcome signal deepening as the store grows.
 
 ---
 
