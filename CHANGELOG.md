@@ -8,10 +8,31 @@ change between `0.0.x` releases.
 
 ## [Unreleased]
 
+## [0.0.5] — 2026-06-06
+
+A QA + hardening pass: full functional walkthrough of every element, then an
+exhaustive parallel audit (12 dimensions, per-finding adversarial verification). The
+engine and all safety/privilege walls held; the fixes below close two real code
+defects and align the docs with reality.
+
+### Security
+- **Secret stripper now catches the AWS access-key family.** The `keyword=value`
+  redactor required a credential keyword *immediately* before the delimiter, so the
+  compound/interior forms `aws_secret_access_key=…`, `aws_access_key_id=…`, and bare
+  `access_key=…` slipped through — persisting in cleartext into both `memory.db` and
+  the git-committed export. The keyword vocabulary now lists the compound access-key
+  forms (plus `private_key` / `credentials`); the no-over-redaction locking suite is
+  extended to prove prose is untouched. (Audit D4-1.)
+
 ### Added
 - A consolidated user + developer handbook at `docs/` (foundations → use → configure
   → extend → develop + a design-notes appendix); the old `docs/{user,developer,reference}`
   split-by-audience pages were folded into it.
+- **`graduate_enable` userConfig toggle.** The atomic-graduation beat is now
+  disable-able from the `/plugin` UI; the wrapper already honored the option but it was
+  undeclared, so the toggle was dead. A reconciliation test now fails if any
+  `CLAUDE_PLUGIN_OPTION_*` the wrapper reads lacks a userConfig key (or any declared
+  `*_enable` toggle isn't bridged into the wrapper). (Audit D5-1 / D5-3.)
 
 ### Fixed
 - **`WikiGateway` embed loader pinned to the persistent model cache.** `_get_embed_model`
@@ -21,6 +42,28 @@ change between `0.0.x` releases.
   (dedup / overlap) died with onnxruntime `NoSuchFile` — the same failure that had
   already bitten the knowledge MCP. The gateway now uses the persistent cache, so the
   model survives temp-dir reaping for all `WikiGateway` consumers.
+- **Wiki dedup-merge preserves source attribution on the canonical page.** A merged
+  duplicate's `Sources` lived only inside the redirect stub, which `recall()`/wiki_query
+  drop — so the attribution fell off the warm retrieval surface even though the bytes
+  survived on disk. The dedup apply now threads the canonical's path and concatenates
+  the dup's not-already-present source line(s) onto the canonical (deduped, idempotent;
+  an LLM-emitted stub with only a slug keeps the prior stub-only behavior). (Audit D10-1.)
+- **`detect_graph` synthesis-candidate path is topic-qualified.** The same-source
+  cluster detector built a topic-less `<wiki>/synthesis/<slug>.md`, so a verbatim-echo
+  `create-page` could file the page under a non-existent `synthesis` topic. The topic
+  is now derived from the cluster's own source/member node paths. (Audit D10-2.)
+
+### Changed
+- **`unified_recall` embeds the query once.** The memory, knowledge, and `## Signal`
+  backends each re-embedded the same query string (up to three identical forward passes
+  per recall); the vector is now computed once and threaded into all three. Ranking is
+  byte-identical (the parity fences stay green); per-prompt recall-hook latency drops.
+  (Audit D2-4.)
+- **Docs aligned with reality (FEATURES / README / memory-setup).** Honest,
+  showcase-positive framing of outcome-attribution maturity (built + armed, neutral
+  weight until outcome signals flow), the `validated_as`→memory graduation link, the
+  batched maintenance-call count, and the *armed* (not dry-run-first) self-learning
+  posture; the now-real atomic-graduation toggle is surfaced.
 
 ## [0.0.4] — 2026-06-04
 
