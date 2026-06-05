@@ -114,6 +114,8 @@ def test_auto_merge_greyzone_emits_redirect_stub(tmp_path):
                         sys_prompt="SYS")
     assert rc == 0 and len(stubs) == 1
     assert stubs[0]["page"] == "wiki/c/dup.md" and stubs[0]["canonical"] == "orig"
+    # D10-1: the canonical's full path is threaded so apply can preserve sources on it
+    assert stubs[0]["canonical_path"] == "wiki/c/orig.md"
 
 
 def test_greyzone_merge_decider_injectable(tmp_path):
@@ -172,6 +174,55 @@ def test_real_apply_redirect_stub_uses_schema_type(tmp_path):
     out = page.read_text()
     assert "type: merged-into" in out and "redirect_to: [[orig]]" in out
     assert "Merged into [[orig]]." in out
+
+
+def test_real_apply_redirect_stub_concatenates_sources_to_canonical(tmp_path):
+    """D10-1: the dup's Sources survive on the RETRIEVABLE canonical page, not only in
+    the redirect stub (which recall drops). Deterministic dedup threads canonical_path."""
+    base = tmp_path / "wiki" / "c"
+    base.mkdir(parents=True)
+    dup = base / "dup.md"
+    dup.write_text("---\ntype: concept\ntitle: Dup\n---\nbody\n\n"
+                   "**Sources**: [[video-XYZ]] (2026-01-02)\n", encoding="utf-8")
+    canon = base / "orig.md"
+    canon.write_text("---\ntype: concept\ntitle: Orig\n---\norig body\n\n"
+                     "**Sources**: [[video-ABC]] (2026-01-01)\n", encoding="utf-8")
+    fns = adj.real_apply_fns(gateway=tmp_path / "gw.py", cwd=tmp_path, today="2026-06-02")
+    fns["redirect-stub"]({"op": "redirect-stub", "page": "wiki/c/dup.md",
+                          "canonical": "orig", "canonical_path": "wiki/c/orig.md"})
+    assert "redirect_to: [[orig]]" in dup.read_text()      # dup became a stub
+    canon_out = canon.read_text()
+    assert "[[video-XYZ]]" in canon_out and "[[video-ABC]]" in canon_out  # merged + kept
+    assert canon_out.count("[[video-XYZ]]") == 1           # not double-added
+
+
+def test_real_apply_redirect_stub_idempotent_on_canonical(tmp_path):
+    """Re-applying must not duplicate the merged source on the canonical."""
+    base = tmp_path / "wiki" / "c"
+    base.mkdir(parents=True)
+    (base / "dup.md").write_text("---\ntype: concept\ntitle: Dup\n---\n"
+                                 "**Sources**: [[v-XYZ]]\n", encoding="utf-8")
+    canon = base / "orig.md"
+    canon.write_text("---\ntype: concept\ntitle: Orig\n---\norig\n", encoding="utf-8")
+    fns = adj.real_apply_fns(gateway=tmp_path / "gw.py", cwd=tmp_path, today="2026-06-02")
+    act = {"op": "redirect-stub", "page": "wiki/c/dup.md", "canonical": "orig",
+           "canonical_path": "wiki/c/orig.md"}
+    fns["redirect-stub"](act)
+    fns["redirect-stub"](act)  # the dup is now a stub; its source already on canonical
+    assert canon.read_text().count("[[v-XYZ]]") == 1
+
+
+def test_real_apply_redirect_stub_without_canonical_path_is_stub_only(tmp_path):
+    """An LLM-emitted redirect-stub (slug only, no canonical_path) keeps the prior
+    stub-only behavior and never attempts a canonical write — fail-safe."""
+    base = tmp_path / "wiki" / "c"
+    base.mkdir(parents=True)
+    dup = base / "dup.md"
+    dup.write_text("---\ntype: concept\ntitle: Dup\n---\nbody\n\n**Sources**: [[v1]]\n",
+                   encoding="utf-8")
+    fns = adj.real_apply_fns(gateway=tmp_path / "gw.py", cwd=tmp_path, today="2026-06-02")
+    fns["redirect-stub"]({"op": "redirect-stub", "page": "wiki/c/dup.md", "canonical": "orig"})
+    assert "redirect_to: [[orig]]" in dup.read_text()
 
 
 def test_real_apply_create_page_shells_gateway(tmp_path):

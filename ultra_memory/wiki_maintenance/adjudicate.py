@@ -289,6 +289,24 @@ def real_apply_fns(*, gateway=None, gateway_prefix: list[str] | None = None,
             body.append("")
             body.extend(sources)
         page.write_text("\n".join(fm_lines) + "\n\n" + "\n".join(body) + "\n", encoding="utf-8")
+        # D10-1: keep the merged page's source attribution on the RETRIEVABLE surface.
+        # recall()/wiki_query drop redirect stubs, so sources left ONLY in the stub fall
+        # out of the warm surface — the never-delete contract is about retrievability,
+        # not just bytes-on-disk. When the canonical's resolved path is known (the
+        # deterministic dedup path threads `canonical_path`; an LLM-emitted stub carries
+        # only the slug and keeps the prior stub-only behavior), append the dup's
+        # not-already-present Sources line(s) onto the canonical so the attribution
+        # survives in a page that recall can actually return.
+        canonical_path = action.get("canonical_path")
+        if sources and canonical_path:
+            canon = _resolve(action, canonical_path)
+            if canon.is_file() and canon.resolve() != page.resolve():
+                canon_text = canon.read_text(encoding="utf-8")
+                existing = set(_read_sources_lines(canon_text))
+                merged = [s for s in sources if s not in existing]
+                if merged:
+                    base = canon_text if canon_text.endswith("\n") else canon_text + "\n"
+                    canon.write_text(base + "\n".join(merged) + "\n", encoding="utf-8")
 
     return {"edit": apply_edit, "create-page": apply_create_page,
             "log": apply_log, "redirect-stub": apply_redirect_stub}
@@ -319,6 +337,7 @@ def _greyzone_actions(w: dict, *, merge_decider) -> list[dict]:
             actions.append({
                 "op": "redirect-stub", "page": item["atomic_path"],
                 "canonical": Path(cand_path).stem,
+                "canonical_path": cand_path,
                 "reason": f"dedup cosine={cosine}", "root": item.get("root")})
     return actions
 
