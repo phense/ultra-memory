@@ -12,21 +12,21 @@
       },
       {
         "matcher": "startup|resume|clear|compact",
-        "async": true,
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/um-hook.cmd maintain"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/um-hook.cmd maintain",
+            "async": true
           }
         ]
       },
       {
         "matcher": "startup|resume|clear|compact",
-        "async": true,
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/um-hook.cmd beats"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/um-hook.cmd beats",
+            "async": true
           }
         ]
       }
